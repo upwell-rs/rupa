@@ -1733,7 +1733,7 @@ name = "rupa-conformance"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "rupa-core",
+ "rupa",
  "serde",
  "serde_json",
 ]
@@ -1758,6 +1758,7 @@ name = "rupa-driver-memory"
 version = "0.1.0"
 dependencies = [
  "pollster",
+ "rupa",
  "rupa-conformance",
  "rupa-core",
  "serde_json",
@@ -1809,6 +1810,17 @@ version = "0.1.0"
 [[package]]
 name = "rupa-macros"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+ "proc-macro2",
+ "quote",
+ "rupa",
+ "rupa-driver-memory",
+ "serde",
+ "serde_json",
+ "syn 2.0.119",
+ "trybuild",
+]
 
 [[package]]
 name = "rupa-spike-column-kind"

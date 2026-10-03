@@ -1,0 +1,35 @@
+error[E0277]: this field's type `Option<String>` does not match the entity's field
+ --> tests/ui/companion_wrong_type.rs:7:25
+  |
+7 | struct NewUser { email: Option<String> }
+  |                         ^^^^^^ expected the entity field's type
+  |
+  = note: the entity field is described by `rupa::rupa_core::__macro_support::Probe<User, String>`
+help: the trait `FieldIs<Option<String>>` is not implemented for `rupa::rupa_core::__macro_support::Probe<User, String>`
+      but trait `FieldIs<String>` is implemented for it
+ --> $WORKSPACE/crates/rupa-core/src/column.rs
+  |
+  |     impl<E, T> FieldIs<T> for Probe<E, T> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = help: for that trait implementation, expected `String`, found `Option<String>`
+note: required by a bound in `rupa::rupa_core::__macro_support::as_field`
+ --> $WORKSPACE/crates/rupa-core/src/column.rs
+  |
+  |     pub fn as_field<'a, T, P: FieldIs<T>>(_probe: &P, value: &'a T) -> &'a P::Field {
+  |                               ^^^^^^^^^^ required by this bound in `as_field`
+
+error[E0277]: this field's type `Option<String>` does not match the entity's field
+ --> tests/ui/companion_wrong_type.rs:5:10
+  |
+5 | #[derive(Insertable)]
+  |          ^^^^^^^^^^ expected the entity field's type
+  |
+  = note: the entity field is described by `rupa::rupa_core::__macro_support::Probe<User, String>`
+help: the trait `FieldIs<Option<String>>` is not implemented for `rupa::rupa_core::__macro_support::Probe<User, String>`
+      but trait `FieldIs<String>` is implemented for it
+ --> $WORKSPACE/crates/rupa-core/src/column.rs
+  |
+  |     impl<E, T> FieldIs<T> for Probe<E, T> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = help: for that trait implementation, expected `String`, found `Option<String>`
+  = note: this error originates in the derive macro `Insertable` (in Nightly builds, run with -Z macro-backtrace for more info)

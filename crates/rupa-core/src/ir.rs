@@ -85,6 +85,9 @@ pub struct Insert {
     pub table: TableRef,
     pub columns: Vec<&'static str>,
     pub rows: Vec<Vec<ExprNode>>,
+    /// `RETURNING` projection: the inserted rows come back, decoded by position.
+    /// Requires [`Capability::Returning`](crate::Capability::Returning).
+    pub returning: Option<Vec<ColumnRef>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

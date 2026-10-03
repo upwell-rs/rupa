@@ -15,8 +15,8 @@ help: the following other types implement trait `AffectedResult`
 ...
   | impl AffectedResult for bool {}
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `bool`
-note: required by a bound in `InsertBuilder::<E>::build`
+note: required by a bound in `InsertRows::<E, V>::build`
  --> src/builder.rs
   |
   |     pub fn build<R: AffectedResult>(self) -> Query<R> {
-  |                     ^^^^^^^^^^^^^^ required by this bound in `InsertBuilder::<E>::build`
+  |                     ^^^^^^^^^^^^^^ required by this bound in `InsertRows::<E, V>::build`

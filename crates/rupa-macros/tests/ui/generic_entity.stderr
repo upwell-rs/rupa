@@ -1,0 +1,5 @@
+error: Entity cannot be derived for generic types: column kinds are resolved per concrete field type
+ --> tests/ui/generic_entity.rs:4:9
+  |
+4 | struct T<V> { #[id] id: i64, v: V }
+  |         ^^^

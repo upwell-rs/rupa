@@ -1,0 +1,10 @@
+error[E0609]: no field `mail` on type `__RupaFieldsUser`
+ --> tests/ui/companion_unknown_field.rs:7:33
+  |
+7 | struct NewUser { email: String, mail: String }
+  |                                 ^^^^ unknown field
+  |
+help: a field with a similar name exists
+  |
+7 | struct NewUser { email: String, email: String }
+  |                                 +

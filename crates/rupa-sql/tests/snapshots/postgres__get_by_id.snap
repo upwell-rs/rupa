@@ -1,0 +1,6 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: "pg(&get::<User>(&7))"
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "id" = $1
+$1 = I64(7)

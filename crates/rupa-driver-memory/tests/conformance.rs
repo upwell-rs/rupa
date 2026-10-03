@@ -1,17 +1,17 @@
-use rupa_conformance::{Blocking, Harness, Item};
-use rupa_driver_memory::MemoryDb;
+use rupa_conformance::{Blocking, Harness, Item, Note};
+use rupa_driver_memory::{AsyncMemoryDb, MemoryDb};
 
-struct AsyncMemory(MemoryDb);
+struct AsyncMemory(AsyncMemoryDb);
 
 impl Harness for AsyncMemory {
-    type Exec = MemoryDb;
+    type Exec = AsyncMemoryDb;
 
     async fn reset(&mut self) {
-        self.0 = MemoryDb::new();
-        self.0.register::<Item>();
+        self.0 = AsyncMemoryDb::new();
+        self.0.register::<Item>().register::<Note>();
     }
 
-    fn exec(&mut self) -> &mut MemoryDb {
+    fn exec(&mut self) -> &mut AsyncMemoryDb {
         &mut self.0
     }
 }
@@ -23,7 +23,7 @@ impl Harness for SyncMemory {
 
     async fn reset(&mut self) {
         self.0 = Blocking(MemoryDb::new());
-        self.0.0.register::<Item>();
+        self.0.0.register::<Item>().register::<Note>();
     }
 
     fn exec(&mut self) -> &mut Blocking<MemoryDb> {
@@ -33,7 +33,9 @@ impl Harness for SyncMemory {
 
 #[test]
 fn conformance_async() {
-    pollster::block_on(rupa_conformance::run(&mut AsyncMemory(MemoryDb::new())));
+    pollster::block_on(rupa_conformance::run(
+        &mut AsyncMemory(AsyncMemoryDb::new()),
+    ));
 }
 
 #[test]

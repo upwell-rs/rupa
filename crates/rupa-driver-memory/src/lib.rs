@@ -26,7 +26,7 @@ use rupa_core::dialect::Memory;
 use rupa_core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
 use rupa_core::ir::{ColumnRef, Delete, FromClause, Insert, Select, Statement, TableRef, Update};
 use rupa_core::row::ValueRows;
-use rupa_core::{DslError, Entity, Expect, ResultError, Value};
+use rupa_core::{DslError, Entity, Expect, ResultError, SqlType, Value};
 
 use eval::{Scope, eval, keeps, sort_cmp};
 
@@ -86,6 +86,8 @@ struct Table {
     columns: Vec<ColumnMeta>,
     key: Vec<usize>,
     rows: Vec<Vec<Value>>,
+    /// Last value handed out per generated integer column (identity semantics).
+    sequences: HashMap<usize, i64>,
 }
 
 impl Table {
@@ -140,7 +142,8 @@ impl Scope for NoRow {
     }
 }
 
-/// An in-memory database. Implements both [`Executor`] and [`AsyncExecutor`].
+/// An in-memory database: a synchronous [`Executor`]. For an
+/// [`AsyncExecutor`], use [`AsyncMemoryDb`] (`db.into_async()`).
 #[derive(Debug, Clone, Default)]
 pub struct MemoryDb {
     tables: HashMap<TableRef, Table>,
@@ -179,6 +182,7 @@ impl MemoryDb {
                 columns,
                 key,
                 rows: Vec::new(),
+                sequences: HashMap::new(),
             },
         );
         self
@@ -218,7 +222,24 @@ impl MemoryDb {
                     Value::Bool(!rows.is_empty()),
                 ]]))))
             }
-            Statement::Insert(i) => self.insert(i).map(Outcome::Affected),
+            Statement::Insert(i) => {
+                let rows = self.insert(i)?;
+                match &i.returning {
+                    None => Ok(Outcome::Affected(rows.len() as u64)),
+                    Some(cols) => {
+                        let table = self.table(i.table)?;
+                        let idx = cols
+                            .iter()
+                            .map(|c| table.index(c.name))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let projected = rows
+                            .into_iter()
+                            .map(|r| idx.iter().map(|&i| r[i].clone()).collect())
+                            .collect();
+                        Ok(Outcome::Rows(Box::new(ValueRows::new(projected))))
+                    }
+                }
+            }
             Statement::Update(u) => self.update(u).map(Outcome::Affected),
             Statement::Delete(d) => self.delete(d).map(Outcome::Affected),
             Statement::Raw(_) => Err(MemoryError::Unsupported("raw SQL".into())),
@@ -287,7 +308,8 @@ impl MemoryDb {
         Ok((table, rows.into_iter().skip(offset).take(limit).collect()))
     }
 
-    fn insert(&mut self, i: &Insert) -> Result<u64, MemoryError> {
+    /// Inserts rows and returns them, as stored, in insertion order.
+    fn insert(&mut self, i: &Insert) -> Result<Vec<Vec<Value>>, MemoryError> {
         let table = self.table_mut(i.table)?;
         let idx = i
             .columns
@@ -297,6 +319,7 @@ impl MemoryDb {
         // Build on a copy and swap it in at the end: a failed multi-row insert
         // leaves no partial result, as in Postgres.
         let mut next = table.clone();
+        let mut inserted = Vec::with_capacity(i.rows.len());
         for exprs in &i.rows {
             let mut row: Vec<Value> = next
                 .columns
@@ -306,11 +329,33 @@ impl MemoryDb {
             for (&col, e) in idx.iter().zip(exprs) {
                 row[col] = eval(&NoRow, e)?;
             }
+            for (col, meta) in next.columns.iter().enumerate() {
+                if meta.generated && !idx.contains(&col) {
+                    let seq = next.sequences.entry(col).or_insert(0);
+                    *seq += 1;
+                    row[col] = match meta.sql_type {
+                        SqlType::I16 => Value::I16(i16::try_from(*seq).map_err(|_| {
+                            MemoryError::Type(format!("identity overflow in `{}`", meta.name))
+                        })?),
+                        SqlType::I32 => Value::I32(i32::try_from(*seq).map_err(|_| {
+                            MemoryError::Type(format!("identity overflow in `{}`", meta.name))
+                        })?),
+                        SqlType::I64 => Value::I64(*seq),
+                        other => {
+                            return Err(MemoryError::Unsupported(format!(
+                                "generated column `{}` of type {other:?} (only integer identities are generated)",
+                                meta.name
+                            )));
+                        }
+                    };
+                }
+            }
             next.check(i.table, &row, None)?;
-            next.rows.push(row);
+            next.rows.push(row.clone());
+            inserted.push(row);
         }
         *table = next;
-        Ok(i.rows.len() as u64)
+        Ok(inserted)
     }
 
     fn update(&mut self, u: &Update) -> Result<u64, MemoryError> {
@@ -371,12 +416,55 @@ impl Executor for MemoryDb {
     }
 }
 
-impl AsyncExecutor for MemoryDb {
+/// The memory backend as an [`AsyncExecutor`]. A separate type so that each
+/// backend type implements exactly one executor trait, and `.run` is never
+/// ambiguous with both traits in scope.
+#[derive(Debug, Clone, Default)]
+pub struct AsyncMemoryDb(MemoryDb);
+
+impl AsyncMemoryDb {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates (or empties) the table for `E`.
+    pub fn register<E: Entity>(&mut self) -> &mut Self {
+        self.0.register::<E>();
+        self
+    }
+
+    pub fn inner(&self) -> &MemoryDb {
+        &self.0
+    }
+
+    pub fn inner_mut(&mut self) -> &mut MemoryDb {
+        &mut self.0
+    }
+
+    pub fn into_inner(self) -> MemoryDb {
+        self.0
+    }
+}
+
+impl From<MemoryDb> for AsyncMemoryDb {
+    fn from(db: MemoryDb) -> Self {
+        Self(db)
+    }
+}
+
+impl MemoryDb {
+    /// The same database, as an async executor.
+    pub fn into_async(self) -> AsyncMemoryDb {
+        AsyncMemoryDb(self)
+    }
+}
+
+impl AsyncExecutor for AsyncMemoryDb {
     type Dialect = Memory;
     type Error = MemoryError;
 
     fn dialect(&self) -> &Memory {
-        &self.dialect
+        &self.0.dialect
     }
 
     fn execute(
@@ -384,6 +472,6 @@ impl AsyncExecutor for MemoryDb {
         statement: &Statement,
         _expect: Expect,
     ) -> impl Future<Output = Result<Outcome, MemoryError>> + Send {
-        std::future::ready(self.run_statement(statement))
+        std::future::ready(self.0.run_statement(statement))
     }
 }

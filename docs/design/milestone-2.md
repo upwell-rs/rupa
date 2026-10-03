@@ -53,7 +53,7 @@ variant once pools exist).
 
 | crate | trait | notes |
 |---|---|---|
-| `rupa-driver-memory` | both | Evaluates the IR; never renders SQL. Has a new `Memory` dialect (`DialectId::Memory`, capabilities: `JsonPath`). |
+| `rupa-driver-memory` | `MemoryDb`: `Executor`; `AsyncMemoryDb`: `AsyncExecutor` | Evaluates the IR; never renders SQL. Has a new `Memory` dialect (`DialectId::Memory`, capabilities: `JsonPath`). |
 | `rupa-driver-tokio-postgres` | `AsyncExecutor` | Wraps `tokio_postgres::Client`. |
 | `rupa-driver-postgres` | `Executor` | Wraps `postgres::Client`. Reuses the async crate's `shared` module. |
 

@@ -1,0 +1,5 @@
+error: unknown `column` option; expected `name = ".."`, `scalar`, `json` or `generated`
+ --> tests/ui/unknown_column_option.rs:4:36
+  |
+4 | struct T { #[id] id: i64, #[column(nmae = "x")] name: String }
+  |                                    ^^^^

@@ -31,6 +31,8 @@ pub enum RenderError {
     UnsupportedDialect(DialectId),
     /// A DSL function failed to lower (including "unsupported on this dialect").
     Dsl(DslError),
+    /// The statement needs a capability the dialect lacks (e.g. `RETURNING`).
+    UnsupportedCapability(rupa_core::Capability),
     /// An `INSERT` with no rows.
     EmptyInsert,
     /// An `UPDATE` with no assignments.
@@ -54,6 +56,7 @@ impl fmt::Display for RenderError {
         match self {
             RenderError::UnsupportedDialect(id) => write!(f, "no SQL renderer for dialect {id:?}"),
             RenderError::Dsl(e) => e.fmt(f),
+            RenderError::UnsupportedCapability(c) => write!(f, "dialect does not support {c:?}"),
             RenderError::EmptyInsert => f.write_str("INSERT without rows"),
             RenderError::EmptyUpdate => f.write_str("UPDATE without assignments"),
             RenderError::InvalidToken(t) => write!(f, "invalid operator or function name `{t}`"),

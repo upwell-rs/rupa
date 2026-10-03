@@ -10,13 +10,13 @@ pub mod fixture;
 use std::fmt::Debug;
 use std::future::Future;
 
-use rupa_core::dialect::Dialect;
-use rupa_core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
-use rupa_core::ir::{DslFnDef, ExprNode, Statement};
-use rupa_core::prelude::*;
-use rupa_core::{DialectId, DslError, Expect, ResultError, Value};
+use rupa::core::dialect::Dialect;
+use rupa::core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
+use rupa::core::ir::{DslFnDef, ExprNode, Statement};
+use rupa::core::{DialectId, DslError, Expect, ResultError, Value};
+use rupa::prelude::*;
 
-pub use fixture::{Item, POSTGRES_DDL, items};
+pub use fixture::{Item, NewNote, Note, NotePatch, POSTGRES_DDL, SetPinned, items};
 
 /// Gives the suite a fresh, empty schema per case.
 pub trait Harness {
@@ -77,6 +77,10 @@ pub async fn run<H: Harness>(h: &mut H) {
         case_dsl_lowering_and_eval_agree,
         case_duplicate_key_is_an_error,
         case_failed_multi_row_insert_is_atomic,
+        case_generated_ids_and_returning,
+        case_get_by_id,
+        case_update_entity_and_patches,
+        case_delete_one_and_by_id,
     );
 }
 
@@ -98,7 +102,7 @@ fn lower_ci_eq(dialect: &dyn Dialect, mut args: Vec<ExprNode>) -> Result<ExprNod
     let (b, a) = (args.pop().unwrap(), args.pop().unwrap());
     match dialect.id() {
         DialectId::Postgres => Ok(ExprNode::Binary(
-            rupa_core::ir::BinOp::Eq,
+            rupa::core::ir::BinOp::Eq,
             Box::new(ExprNode::Call("upper", vec![a])),
             Box::new(ExprNode::Call("upper", vec![b])),
         )),
@@ -109,7 +113,7 @@ fn lower_ci_eq(dialect: &dyn Dialect, mut args: Vec<ExprNode>) -> Result<ExprNod
 fn eval_ci_eq(args: &[Value]) -> Result<Value, DslError> {
     match args {
         [Value::Text(a), Value::Text(b)] => Ok(Value::Bool(a.to_uppercase() == b.to_uppercase())),
-        [Value::Null(_), _] | [_, Value::Null(_)] => Ok(Value::Null(rupa_core::SqlType::Bool)),
+        [Value::Null(_), _] | [_, Value::Null(_)] => Ok(Value::Null(rupa::core::SqlType::Bool)),
         other => Err(DslError::Other(format!(
             "ci_eq: unexpected arguments {other:?}"
         ))),
@@ -140,7 +144,12 @@ mod cases {
 
     async fn ids<E: AsyncExecutor>(e: &mut E, cond: Expr<bool>) -> Vec<i64> {
         let rows = e
-            .run(select::<Item>().filter(cond).order_by(Item::ID.asc()).all())
+            .run(
+                select::<Item>()
+                    .filter(cond)
+                    .order_by(col!(Item::id).asc())
+                    .all(),
+            )
             .await
             .expect("select");
         rows.into_iter().map(|i| i.id).collect()
@@ -149,7 +158,7 @@ mod cases {
     pub async fn case_insert_and_select<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
         let all = e
-            .run(select::<Item>().order_by(Item::ID.asc()).all())
+            .run(select::<Item>().order_by(col!(Item::id).asc()).all())
             .await
             .unwrap();
         assert_eq!(all, items(), "rows must round-trip exactly");
@@ -158,44 +167,50 @@ mod cases {
     pub async fn case_single_row_shapes<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
         let one = e
-            .run(select::<Item>().filter(Item::ID.eq(2)).one())
+            .run(select::<Item>().filter(col!(Item::id).eq(2)).one())
             .await
             .unwrap();
         assert_eq!(one.name, "banana");
         let none = e
-            .run(select::<Item>().filter(Item::ID.eq(99)).optional())
+            .run(select::<Item>().filter(col!(Item::id).eq(99)).optional())
             .await
             .unwrap();
         assert_eq!(none, None);
         let some = e
-            .run(select::<Item>().filter(Item::ID.eq(3)).optional())
+            .run(select::<Item>().filter(col!(Item::id).eq(3)).optional())
             .await
             .unwrap();
         assert_eq!(some.map(|i| i.id), Some(3));
 
-        let r = e.run(select::<Item>().filter(Item::ID.eq(99)).one()).await;
+        let r = e
+            .run(select::<Item>().filter(col!(Item::id).eq(99)).one())
+            .await;
         assert_eq!(result_error(r), ResultError::NotFound);
         let r = e
-            .run(select::<Item>().filter(Item::ACTIVE.eq(true)).one())
+            .run(select::<Item>().filter(col!(Item::active).eq(true)).one())
             .await;
         assert_eq!(result_error(r), ResultError::TooManyRows);
         let r = e
-            .run(select::<Item>().filter(Item::ACTIVE.eq(true)).optional())
+            .run(
+                select::<Item>()
+                    .filter(col!(Item::active).eq(true))
+                    .optional(),
+            )
             .await;
         assert_eq!(result_error(r), ResultError::TooManyRows);
     }
 
     pub async fn case_comparisons<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
-        assert_eq!(ids(e, Item::QTY.eq(7)).await, [3]);
-        assert_eq!(ids(e, Item::QTY.ne(7)).await, [1, 2, 4]);
-        assert_eq!(ids(e, Item::QTY.lt(7)).await, [1, 4]);
-        assert_eq!(ids(e, Item::QTY.le(7)).await, [1, 3, 4]);
-        assert_eq!(ids(e, Item::QTY.gt(3)).await, [2, 3]);
-        assert_eq!(ids(e, Item::QTY.ge(3)).await, [1, 2, 3]);
-        assert_eq!(ids(e, Item::NAME.gt("banana")).await, [3, 4]);
+        assert_eq!(ids(e, col!(Item::qty).eq(7)).await, [3]);
+        assert_eq!(ids(e, col!(Item::qty).ne(7)).await, [1, 2, 4]);
+        assert_eq!(ids(e, col!(Item::qty).lt(7)).await, [1, 4]);
+        assert_eq!(ids(e, col!(Item::qty).le(7)).await, [1, 3, 4]);
+        assert_eq!(ids(e, col!(Item::qty).gt(3)).await, [2, 3]);
+        assert_eq!(ids(e, col!(Item::qty).ge(3)).await, [1, 2, 3]);
+        assert_eq!(ids(e, col!(Item::name).gt("banana")).await, [3, 4]);
         assert_eq!(
-            ids(e, Item::ACTIVE.eq(false).or(Item::QTY.eq(0))).await,
+            ids(e, col!(Item::active).eq(false).or(col!(Item::qty).eq(0))).await,
             [2, 4]
         );
     }
@@ -203,37 +218,40 @@ mod cases {
     pub async fn case_three_valued_logic<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
         // NULL = 'red' is NULL, and NOT NULL is still NULL: neither keeps rows 2 and 4.
-        assert_eq!(ids(e, Item::LABEL.eq("red")).await, [1]);
-        assert_eq!(ids(e, !Item::LABEL.eq("red")).await, [3]);
-        assert_eq!(ids(e, Item::LABEL.is_null()).await, [2, 4]);
-        assert_eq!(ids(e, Item::LABEL.is_not_null()).await, [1, 3]);
+        assert_eq!(ids(e, col!(Item::label).eq("red")).await, [1]);
+        assert_eq!(ids(e, !col!(Item::label).eq("red")).await, [3]);
+        assert_eq!(ids(e, col!(Item::label).is_null()).await, [2, 4]);
+        assert_eq!(ids(e, col!(Item::label).is_not_null()).await, [1, 3]);
         // NULL OR TRUE is TRUE; NULL AND FALSE is FALSE.
-        assert_eq!(ids(e, Item::LABEL.eq("x").or(Item::QTY.eq(12))).await, [2]);
         assert_eq!(
-            ids(e, !(Item::LABEL.eq("x").and(Item::QTY.eq(-5)))).await,
+            ids(e, col!(Item::label).eq("x").or(col!(Item::qty).eq(12))).await,
+            [2]
+        );
+        assert_eq!(
+            ids(e, !(col!(Item::label).eq("x").and(col!(Item::qty).eq(-5)))).await,
             [1, 2, 3, 4]
         );
     }
 
     pub async fn case_in_lists<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
-        assert_eq!(ids(e, Item::ID.in_([1i64, 3, 99])).await, [1, 3]);
-        assert_eq!(ids(e, Item::ID.not_in([1i64, 3])).await, [2, 4]);
+        assert_eq!(ids(e, col!(Item::id).in_([1i64, 3, 99])).await, [1, 3]);
+        assert_eq!(ids(e, col!(Item::id).not_in([1i64, 3])).await, [2, 4]);
         assert_eq!(
-            ids(e, Item::ID.in_(Vec::<i64>::new())).await,
+            ids(e, col!(Item::id).in_(Vec::<i64>::new())).await,
             Vec::<i64>::new()
         );
         assert_eq!(
-            ids(e, Item::ID.not_in(Vec::<i64>::new())).await,
+            ids(e, col!(Item::id).not_in(Vec::<i64>::new())).await,
             [1, 2, 3, 4]
         );
         // x NOT IN (1, NULL) is never TRUE.
         let null =
-            Expr::<Option<i64>>::from_node(ExprNode::Param(Value::Null(rupa_core::SqlType::I64)));
+            Expr::<Option<i64>>::from_node(ExprNode::Param(Value::Null(rupa::core::SqlType::I64)));
         assert_eq!(
             ids(
                 e,
-                Item::ID.not_in([Expr::from_node(ExprNode::Param(Value::I64(1))), null])
+                col!(Item::id).not_in([Expr::from_node(ExprNode::Param(Value::I64(1))), null])
             )
             .await,
             Vec::<i64>::new()
@@ -242,10 +260,10 @@ mod cases {
 
     pub async fn case_like_patterns<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
-        assert_eq!(ids(e, Item::NAME.like("%an%")).await, [2]);
-        assert_eq!(ids(e, Item::NAME.like("_pple")).await, [1]);
-        assert_eq!(ids(e, Item::LABEL.like("dark\\_%")).await, [3]);
-        assert_eq!(ids(e, Item::LABEL.like("%")).await, [1, 3]);
+        assert_eq!(ids(e, col!(Item::name).like("%an%")).await, [2]);
+        assert_eq!(ids(e, col!(Item::name).like("_pple")).await, [1]);
+        assert_eq!(ids(e, col!(Item::label).like("dark\\_%")).await, [3]);
+        assert_eq!(ids(e, col!(Item::label).like("%")).await, [1, 3]);
     }
 
     pub async fn case_order_with_nulls<E: AsyncExecutor>(e: &mut E) {
@@ -253,8 +271,8 @@ mod cases {
         let asc = e
             .run(
                 select::<Item>()
-                    .order_by(Item::LABEL.asc())
-                    .order_by(Item::ID.asc())
+                    .order_by(col!(Item::label).asc())
+                    .order_by(col!(Item::id).asc())
                     .all(),
             )
             .await
@@ -267,8 +285,8 @@ mod cases {
         let desc = e
             .run(
                 select::<Item>()
-                    .order_by(Item::LABEL.desc())
-                    .order_by(Item::ID.desc())
+                    .order_by(col!(Item::label).desc())
+                    .order_by(col!(Item::id).desc())
                     .all(),
             )
             .await
@@ -285,7 +303,7 @@ mod cases {
         let page = e
             .run(
                 select::<Item>()
-                    .order_by(Item::ID.asc())
+                    .order_by(col!(Item::id).asc())
                     .limit(2)
                     .offset(1)
                     .all(),
@@ -294,7 +312,12 @@ mod cases {
             .unwrap();
         assert_eq!(page.iter().map(|i| i.id).collect::<Vec<_>>(), [2, 3]);
         let past_end = e
-            .run(select::<Item>().order_by(Item::ID.asc()).offset(10).all())
+            .run(
+                select::<Item>()
+                    .order_by(col!(Item::id).asc())
+                    .offset(10)
+                    .all(),
+            )
             .await
             .unwrap();
         assert!(past_end.is_empty());
@@ -309,12 +332,16 @@ mod cases {
         );
         seed(e).await;
         assert!(
-            e.run(select::<Item>().filter(Item::NAME.eq("cherry")).exists())
-                .await
-                .unwrap()
+            e.run(
+                select::<Item>()
+                    .filter(col!(Item::name).eq("cherry"))
+                    .exists()
+            )
+            .await
+            .unwrap()
         );
         assert!(
-            !e.run(select::<Item>().filter(Item::NAME.eq("fig")).exists())
+            !e.run(select::<Item>().filter(col!(Item::name).eq("fig")).exists())
                 .await
                 .unwrap()
         );
@@ -332,16 +359,16 @@ mod cases {
         let n = e
             .run(
                 update::<Item>()
-                    .set(Item::META, &meta)
-                    .set_expr(Item::LABEL, Item::NAME)
-                    .filter(Item::ACTIVE.eq(true))
+                    .set(col!(Item::meta), &meta)
+                    .set_expr(col!(Item::label), col!(Item::name))
+                    .filter(col!(Item::active).eq(true))
                     .affected(),
             )
             .await
             .unwrap();
         assert_eq!(n, 3);
         let rows = e
-            .run(select::<Item>().order_by(Item::ID.asc()).all())
+            .run(select::<Item>().order_by(col!(Item::id).asc()).all())
             .await
             .unwrap();
         for item in &rows {
@@ -359,8 +386,8 @@ mod cases {
         let any = e
             .run(
                 update::<Item>()
-                    .set(Item::QTY, &1)
-                    .filter(Item::ID.eq(99))
+                    .set(col!(Item::qty), &1)
+                    .filter(col!(Item::id).eq(99))
                     .build::<bool>(),
             )
             .await
@@ -371,16 +398,20 @@ mod cases {
     pub async fn case_delete<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
         assert_eq!(
-            e.run(delete::<Item>().filter(Item::QTY.lt(5)).affected())
+            e.run(delete::<Item>().filter(col!(Item::qty).lt(5)).affected())
                 .await
                 .unwrap(),
             2
         );
-        assert_eq!(ids(e, Item::ID.gt(0)).await, [2, 3]);
+        assert_eq!(ids(e, col!(Item::id).gt(0)).await, [2, 3]);
         assert!(
-            !e.run(delete::<Item>().filter(Item::ID.eq(1)).build::<bool>())
-                .await
-                .unwrap()
+            !e.run(
+                delete::<Item>()
+                    .filter(col!(Item::id).eq(1))
+                    .build::<bool>()
+            )
+            .await
+            .unwrap()
         );
         assert_eq!(e.run(delete::<Item>().affected()).await.unwrap(), 2);
     }
@@ -388,38 +419,38 @@ mod cases {
     pub async fn case_json_paths<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
         assert_eq!(
-            ids(e, Item::META.path("nested").key("k").text().eq("w")).await,
+            ids(e, col!(Item::meta).path("nested").key("k").text().eq("w")).await,
             [3]
         );
         assert_eq!(
-            ids(e, Item::META.path("tags").index(0).text().eq("a")).await,
+            ids(e, col!(Item::meta).path("tags").index(0).text().eq("a")).await,
             [1]
         );
         assert_eq!(
-            ids(e, Item::META.path("flag").cast::<bool>().eq(true)).await,
+            ids(e, col!(Item::meta).path("flag").cast::<bool>().eq(true)).await,
             [1, 3]
         );
         assert_eq!(
-            ids(e, Item::META.path("score").cast::<i64>().gt(6)).await,
+            ids(e, col!(Item::meta).path("score").cast::<i64>().gt(6)).await,
             [2, 3]
         );
         // A missing key and a JSON null are both SQL NULL under ->>.
         assert_eq!(
-            ids(e, Item::META.path("missing").text().is_null()).await,
+            ids(e, col!(Item::meta).path("missing").text().is_null()).await,
             [1, 2, 3, 4]
         );
         assert_eq!(
-            ids(e, Item::META.path("note").text().is_null()).await,
+            ids(e, col!(Item::meta).path("note").text().is_null()).await,
             [1, 2, 3, 4]
         );
         assert_eq!(
-            ids(e, Item::META.path("nested").key("k").text().is_null()).await,
+            ids(e, col!(Item::meta).path("nested").key("k").text().is_null()).await,
             [1, 4]
         );
         // ...but under ->, a JSON null is a value, not SQL NULL.
         let note_json = Expr::<bool>::from_node(ExprNode::Unary(
-            rupa_core::ir::UnOp::IsNull,
-            Box::new(Item::META.path("note").json().into_node()),
+            rupa::core::ir::UnOp::IsNull,
+            Box::new(col!(Item::meta).path("note").json().into_node()),
         ));
         assert_eq!(ids(e, note_json).await, Vec::<i64>::new());
     }
@@ -427,33 +458,36 @@ mod cases {
     pub async fn case_nullable_json<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
         assert_eq!(
-            ids(e, Item::EXTRA.is_null()).await,
+            ids(e, col!(Item::extra).is_null()).await,
             [1, 3, 4],
             "None is SQL NULL, not JSON null"
         );
         assert_eq!(
-            ids(e, Item::EXTRA.path("score").cast::<i64>().eq(1)).await,
+            ids(e, col!(Item::extra).path("score").cast::<i64>().eq(1)).await,
             [2]
         );
         e.run(
             update::<Item>()
-                .set(Item::EXTRA, &None)
-                .filter(Item::ID.eq(2))
+                .set(col!(Item::extra), &None)
+                .filter(col!(Item::id).eq(2))
                 .affected(),
         )
         .await
         .unwrap();
-        assert_eq!(ids(e, Item::EXTRA.is_not_null()).await, Vec::<i64>::new());
+        assert_eq!(
+            ids(e, col!(Item::extra).is_not_null()).await,
+            Vec::<i64>::new()
+        );
     }
 
     pub async fn case_timestamps<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
         let cutoff = items()[1].created_at;
-        assert_eq!(ids(e, Item::CREATED_AT.gt(cutoff)).await, [3, 4]);
+        assert_eq!(ids(e, col!(Item::created_at).gt(cutoff)).await, [3, 4]);
         let latest = e
             .run(
                 select::<Item>()
-                    .order_by(Item::CREATED_AT.desc())
+                    .order_by(col!(Item::created_at).desc())
                     .limit(1)
                     .one(),
             )
@@ -468,7 +502,7 @@ mod cases {
             Expr::<bool>::dsl(
                 &CI_EQ,
                 vec![
-                    ExprNode::Column(Item::NAME.column_ref()),
+                    ExprNode::Column(col!(Item::name).column_ref()),
                     ExprNode::Param(Value::Text(s.into())),
                 ],
             )
@@ -495,5 +529,143 @@ mod cases {
             !e.run(select::<Item>().exists()).await.unwrap(),
             "no partial insert"
         );
+    }
+    fn new_note(title: &str) -> NewNote {
+        NewNote {
+            title: title.into(),
+            pinned: false,
+        }
+    }
+
+    pub async fn case_generated_ids_and_returning<E: AsyncExecutor>(e: &mut E) {
+        let first = e
+            .run(insert::<Note>().value(&new_note("first")).returning_one())
+            .await
+            .unwrap();
+        assert_eq!(
+            first,
+            Note {
+                id: 1,
+                title: "first".into(),
+                body: None,
+                pinned: false
+            }
+        );
+
+        let more = e
+            .run(
+                insert::<Note>()
+                    .values(&[new_note("b"), new_note("c")])
+                    .returning_all(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(more.iter().map(|n| n.id).collect::<Vec<_>>(), [2, 3]);
+
+        // One model: the entity inserts itself; its generated id is ignored.
+        let draft = Note {
+            id: 0,
+            title: "draft".into(),
+            body: Some("text".into()),
+            pinned: true,
+        };
+        let saved = e
+            .run(insert::<Note>().value(&draft).returning_one())
+            .await
+            .unwrap();
+        assert_eq!(saved, Note { id: 4, ..draft });
+
+        let n = e
+            .run(insert::<Note>().value(&new_note("plain")).affected())
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    pub async fn case_get_by_id<E: AsyncExecutor>(e: &mut E) {
+        e.run(
+            insert::<Note>()
+                .values(&[new_note("a"), new_note("b")])
+                .affected(),
+        )
+        .await
+        .unwrap();
+        let b = e.run(get::<Note>(&2)).await.unwrap();
+        assert_eq!(b.map(|n| n.title), Some("b".to_string()));
+        assert_eq!(e.run(get::<Note>(&99)).await.unwrap(), None);
+    }
+
+    pub async fn case_update_entity_and_patches<E: AsyncExecutor>(e: &mut E) {
+        let mut a = e
+            .run(insert::<Note>().value(&new_note("a")).returning_one())
+            .await
+            .unwrap();
+        e.run(insert::<Note>().value(&new_note("b")).affected())
+            .await
+            .unwrap();
+
+        // Full entity, by id.
+        a.title = "a2".into();
+        a.body = Some("body".into());
+        assert_eq!(e.run(update::<Note>().one(&a).affected()).await.unwrap(), 1);
+        assert_eq!(e.run(get::<Note>(&1)).await.unwrap(), Some(a.clone()));
+
+        // Keyed patch: `None` fields stay as they are.
+        let patch = NotePatch {
+            id: 1,
+            body: Some(None),
+            pinned: None,
+        };
+        e.run(update::<Note>().one(&patch).affected())
+            .await
+            .unwrap();
+        let got = e.run(get::<Note>(&1)).await.unwrap().unwrap();
+        assert_eq!(got, Note { body: None, ..a });
+
+        // Unkeyed patch over a filter.
+        let n = e
+            .run(
+                update::<Note>()
+                    .apply(&SetPinned { pinned: Some(true) })
+                    .filter(col!(Note::id).gt(0))
+                    .affected(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(n, 2);
+        let pinned = e
+            .run(select::<Note>().filter(col!(Note::pinned).eq(true)).all())
+            .await
+            .unwrap();
+        assert_eq!(pinned.len(), 2);
+    }
+
+    pub async fn case_delete_one_and_by_id<E: AsyncExecutor>(e: &mut E) {
+        let all = e
+            .run(
+                insert::<Note>()
+                    .values(&[new_note("a"), new_note("b"), new_note("c")])
+                    .returning_all(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            e.run(delete::<Note>().one(&all[0]).affected())
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(
+            e.run(delete::<Note>().by_id(&2).build::<bool>())
+                .await
+                .unwrap()
+        );
+        assert!(
+            !e.run(delete::<Note>().by_id(&2).build::<bool>())
+                .await
+                .unwrap()
+        );
+        let left = e.run(select::<Note>().all()).await.unwrap();
+        assert_eq!(left.iter().map(|n| n.id).collect::<Vec<_>>(), [3]);
     }
 }

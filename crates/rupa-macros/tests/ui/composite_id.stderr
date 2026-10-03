@@ -1,0 +1,5 @@
+error: composite ids (several `#[id]` fields) are not supported yet
+ --> tests/ui/composite_id.rs:4:32
+  |
+4 | struct T { #[id] a: i64, #[id] b: i64 }
+  |                                ^

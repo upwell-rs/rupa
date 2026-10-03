@@ -3,9 +3,13 @@
 #![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
+use rupa_core::capability::key_of;
 use rupa_core::column::{JsonCodec, NullableJsonCodec, ScalarCodec, column_meta};
 use rupa_core::ir::TableRef;
-use rupa_core::{Column, ColumnMeta, Entity, FromRow, Json, ResultError, Row, Scalar, Value};
+use rupa_core::{
+    Column, ColumnMeta, Deletable, Entity, FromRow, Gettable, Insertable, Json, Keyed, ResultError,
+    Row, Scalar, Updatable, Value,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -117,5 +121,37 @@ impl User {
             prefs: Probe::new("prefs"),
             old_prefs: Probe::new("old_prefs"),
         }
+    }
+}
+
+// Capabilities, written by hand.
+
+impl Gettable<User> for User {}
+
+impl Insertable<User> for User {
+    fn insert_values(&self) -> Vec<(&'static str, Value)> {
+        User::columns()
+            .iter()
+            .map(|c| c.name)
+            .zip(self.to_values())
+            .collect()
+    }
+}
+
+impl Updatable<User> for User {
+    type Key = Keyed<i64>;
+
+    fn key(&self) -> Keyed<i64> {
+        Keyed(self.id)
+    }
+
+    fn update_values(&self) -> Vec<(&'static str, Value)> {
+        self.insert_values().into_iter().skip(1).collect()
+    }
+}
+
+impl Deletable<User> for User {
+    fn delete_key(&self) -> Vec<Value> {
+        key_of(self)
     }
 }

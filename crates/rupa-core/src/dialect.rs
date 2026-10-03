@@ -103,7 +103,7 @@ dialect!(Postgres => Postgres [Ilike, JsonPath, JsonContainment, Returning, Save
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Memory;
 
-dialect!(Memory => Memory [JsonPath]);
+dialect!(Memory => Memory [JsonPath, Returning]);
 
 /// The capabilities of a known dialect, as declared by its `dialect!` entry.
 pub fn capabilities_of(id: DialectId) -> &'static [Capability] {

@@ -99,6 +99,25 @@ fn insert_many_with_nulls() {
 }
 
 #[test]
+fn insert_returning() {
+    insta::assert_snapshot!(pg(&insert::<User>().value(&User::sample()).returning_one()));
+}
+
+#[test]
+fn get_by_id() {
+    insta::assert_snapshot!(pg(&get::<User>(&7)));
+}
+
+#[test]
+fn update_one_and_delete_by_id() {
+    let sql = pg(&update::<User>().one(&User::sample()).affected())
+        + "
+---
+" + &pg(&delete::<User>().by_id(&7).affected());
+    insta::assert_snapshot!(sql);
+}
+
+#[test]
 fn update_set_and_filter() {
     let q = update::<User>()
         .set(
@@ -417,12 +436,22 @@ fn render_errors() {
         Err(RenderError::InvalidJsonKey("a\0"))
     );
     assert_eq!(
-        render_query(&insert::<User>().affected(), &Postgres),
+        render_query(
+            &insert::<User>().values(&[] as &[User]).affected(),
+            &Postgres
+        ),
         Err(RenderError::EmptyInsert)
     );
     assert_eq!(
         render_query(&update::<User>().affected(), &Postgres),
         Err(RenderError::EmptyUpdate)
+    );
+    assert_eq!(
+        render_query(
+            &insert::<User>().value(&User::sample()).returning_one(),
+            &rupa_core::Memory
+        ),
+        Err(RenderError::UnsupportedDialect(DialectId::Memory))
     );
     assert_eq!(
         render_query(&select::<User>().all(), &DynDialect::new(DialectId::MySql)),

@@ -1,0 +1,22 @@
+error[E0277]: this update value does not identify a row (its key is `NoKey`)
+ --> tests/ui/unkeyed_patch_needs_filter.rs:9:34
+  |
+9 |     let _ = update::<User>().one(&Rename { email: None });
+  |                              --- ^^^^^^^^^^^^^^^^^^^^^^^ the trait `RowKey` is not implemented for `NoKey`
+  |                              |
+  |                              required by a bound introduced by this call
+  |
+  = note: give the patch struct an `#[id]` field, or use `.apply(&value).filter(..)` to update the rows a filter matches
+help: the trait `RowKey` is implemented for `Keyed<I>`
+ --> $WORKSPACE/crates/rupa-core/src/capability.rs
+  |
+  | impl<I: IdValues> RowKey for Keyed<I> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `UpdateBuilder::<E>::one`
+ --> $WORKSPACE/crates/rupa-core/src/builder.rs
+  |
+  |     pub fn one<V: Updatable<E>>(mut self, value: &V) -> Self
+  |            --- required by a bound in this associated function
+  |     where
+  |         V::Key: RowKey,
+  |                 ^^^^^^ required by this bound in `UpdateBuilder::<E>::one`

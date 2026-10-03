@@ -1,0 +1,5 @@
+error: missing `#[entity(table = "...")]`: the table name is never inferred
+ --> tests/ui/missing_table.rs:3:8
+  |
+3 | struct T { #[id] id: i64 }
+  |        ^

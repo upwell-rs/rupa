@@ -1,11 +1,11 @@
 //! Dialect-neutral SQL writer, parameterized by a [`Syntax`] for the parts
 //! that differ between dialects.
 
-use rupa_core::Dialect;
 use rupa_core::ir::{
     BinOp, ColumnRef, Delete, Direction, ExprNode, FromClause, Insert, PathSeg, RawPart, Select,
     Statement, TableRef, UnOp, Update,
 };
+use rupa_core::{Capability, Dialect};
 use rupa_core::{SqlType, Value};
 
 use crate::{RenderError, Rendered};
@@ -226,6 +226,18 @@ impl<'a> Writer<'a> {
                 self.sql.push_str(", ");
             }
             self.list(row)?;
+        }
+        if let Some(cols) = &i.returning {
+            if !self.dialect.supports(Capability::Returning) {
+                return Err(RenderError::UnsupportedCapability(Capability::Returning));
+            }
+            self.sql.push_str(" RETURNING ");
+            for (n, c) in cols.iter().enumerate() {
+                if n > 0 {
+                    self.sql.push_str(", ");
+                }
+                self.column(*c);
+            }
         }
         Ok(())
     }

@@ -5,8 +5,20 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
+description = "Derive and attribute macros for RUPA"
 
 [lib]
 proc-macro = true
 
 [dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true
+
+[dev-dependencies]
+rupa = { path = "../rupa" }
+rupa-driver-memory = { path = "../rupa-driver-memory" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+trybuild.workspace = true

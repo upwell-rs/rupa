@@ -2,6 +2,7 @@
 //! entity, row and dialect traits. Nothing here touches a connection.
 
 pub mod builder;
+pub mod capability;
 pub mod column;
 pub mod dialect;
 pub mod entity;
@@ -16,7 +17,26 @@ pub mod value;
 #[doc(hidden)]
 pub use column::__private;
 
-pub use builder::{delete, insert, raw, select, update};
+/// Paths used by `rupa-macros` output. Not public API.
+#[doc(hidden)]
+pub mod __macro_support {
+    pub use crate::__private::*;
+    pub use crate::capability::{Deletable, Gettable, Insertable, Keyed, NoKey, Updatable, key_of};
+    pub use crate::column::{Column, ColumnMeta, Json, Scalar};
+    pub use crate::entity::{Entity, FromRow, IdValues};
+    pub use crate::error::ResultError;
+    pub use crate::ir::TableRef;
+    pub use crate::row::Row;
+    pub use crate::value::Value;
+    pub use ::std::clone::Clone;
+    pub use ::std::option::Option;
+    pub use ::std::result::Result;
+    pub use ::std::sync::OnceLock;
+    pub use ::std::vec::Vec;
+}
+
+pub use builder::{delete, get, insert, raw, select, update};
+pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
 pub use column::{Column, ColumnKind, ColumnMeta, Json, Scalar};
 pub use dialect::{Capability, Dialect, DialectId, DynDialect, Memory, Postgres, Supports};
 pub use entity::{Entity, FromRow, IdValues};
@@ -32,7 +52,7 @@ pub use value::{ScalarColumn, SqlType, Value};
 pub mod prelude {
     pub use crate::col;
     pub use crate::{
-        Column, Entity, Expr, ExprOps, FromRow, IntoExpr, Json, Query, Scalar, bind, delete,
-        insert, raw, select, update,
+        Column, Deletable, Entity, Expr, ExprOps, FromRow, Gettable, Insertable, IntoExpr, Json,
+        Query, Scalar, Updatable, bind, delete, get, insert, raw, select, update,
     };
 }

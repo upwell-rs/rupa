@@ -1,0 +1,5 @@
+error: an entity needs exactly one `#[id]` field
+ --> tests/ui/missing_id.rs:4:8
+  |
+4 | struct T { name: String }
+  |        ^

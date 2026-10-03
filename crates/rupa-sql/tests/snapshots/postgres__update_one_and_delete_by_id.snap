@@ -1,0 +1,15 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: sql
+---
+UPDATE "app"."users" SET "email" = $1, "nickname" = $2, "active" = $3, "created" = $4, "prefs" = $5, "old_prefs" = $6 WHERE "id" = $7
+$1 = Text("a@b.c")
+$2 = Null(Text)
+$3 = Bool(true)
+$4 = TimestampTz(2023-11-14T22:13:20Z)
+$5 = Json(Object {"beta": Bool(true), "theme": String("dark")})
+$6 = Null(Json)
+$7 = I64(7)
+---
+DELETE FROM "app"."users" WHERE "id" = $1
+$1 = I64(7)

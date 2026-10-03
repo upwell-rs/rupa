@@ -11,5 +11,5 @@ error[E0308]: mismatched types
 note: method defined here
   --> src/builder.rs
    |
-   |     pub fn set<T, K>(mut self, column: Column<E, T, K>, value: &T) -> Self {
+   |     pub fn set<T, K>(mut self, column: Column<E, T, K>, value: &T) -> Self
    |            ^^^

@@ -1,8 +1,8 @@
-//! A tour of what RUPA can do so far (milestones 1–2).
+//! A tour of what RUPA can do so far (milestones 1–3).
 //!
 //! Run with: `cargo run -p rupa --example tour`
 //!
-//! - An entity, written by hand (`#[derive(Entity)]` arrives in milestone 3).
+//! - Entities and capabilities, derived; typed insert and patch structs.
 //! - Queries built with the typed builder: plain values, no IO.
 //! - The same query rendered to Postgres SQL with bound parameters...
 //! - ...and executed by the in-memory backend, which never sees SQL.
@@ -10,16 +10,14 @@
 //! - An executor chosen at run time (`BoxAsyncExecutor`).
 
 use chrono::{DateTime, Utc};
-use rupa::core::column::{JsonCodec, ScalarCodec, column_meta};
-use rupa::core::exec::{AsyncExecutor, BoxAsyncExecutor, ExecError, Executor};
-use rupa::core::ir::{BinOp, DslFnDef, ExprNode, TableRef};
-use rupa::core::prelude::*;
-use rupa::core::{ColumnMeta, Dialect, DialectId, DslError, Postgres, ResultError, Row, Value};
+use rupa::core::ir::{BinOp, DslFnDef, ExprNode};
+use rupa::core::{Dialect, DialectId, DslError, Postgres, Value};
+use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
-// The entity
+// Entities
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -28,84 +26,61 @@ struct Prefs {
     beta: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+/// Each capability is opted into: this entity can be fetched by id,
+/// inserted, updated and deleted.
+#[derive(Debug, Clone, PartialEq, Entity, Gettable, Insertable, Updatable, Deletable)]
+#[entity(table = "users", schema = "app")]
 struct User {
+    #[id(generated)] // the database assigns it; inserts leave it out
     id: i64,
     email: String,
     nickname: Option<String>,
     active: bool,
+    #[column(name = "created")]
     created_at: DateTime<Utc>,
-    prefs: Prefs, // stored as JSON
+    prefs: Prefs, // not a scalar, but Serialize + Deserialize: a JSON column
 }
 
-impl User {
-    // Typed column handles. The kind (scalar or JSON) is part of the type,
-    // so `User::EMAIL.path("x")` would not compile.
-    const ID: Column<User, i64, Scalar> = Column::scalar("id");
-    const EMAIL: Column<User, String, Scalar> = Column::scalar("email");
-    const NICKNAME: Column<User, Option<String>, Scalar> = Column::scalar("nickname");
-    const ACTIVE: Column<User, bool, Scalar> = Column::scalar("active");
-    const CREATED_AT: Column<User, DateTime<Utc>, Scalar> = Column::scalar("created");
-    const PREFS: Column<User, Prefs, Json> = Column::json("prefs");
+/// Typed insert input: everything a new user needs, and no id.
+#[derive(Insertable)]
+#[insertable(entity = User)]
+struct NewUser {
+    email: String,
+    nickname: Option<String>,
+    active: bool,
+    created_at: DateTime<Utc>,
+    prefs: Prefs,
 }
 
-static USER_COLUMNS: [ColumnMeta; 6] = [
-    column_meta::<i64, ScalarCodec<i64>>("id", "id"),
-    column_meta::<String, ScalarCodec<String>>("email", "email"),
-    column_meta::<Option<String>, ScalarCodec<Option<String>>>("nickname", "nickname"),
-    column_meta::<bool, ScalarCodec<bool>>("active", "active"),
-    column_meta::<DateTime<Utc>, ScalarCodec<DateTime<Utc>>>("created_at", "created"),
-    column_meta::<Prefs, JsonCodec<Prefs>>("prefs", "prefs"),
-];
-
-impl FromRow for User {
-    fn from_row(row: &dyn Row) -> Result<Self, ResultError> {
-        Ok(User {
-            id: Self::ID.read(row, 0)?,
-            email: Self::EMAIL.read(row, 1)?,
-            nickname: Self::NICKNAME.read(row, 2)?,
-            active: Self::ACTIVE.read(row, 3)?,
-            created_at: Self::CREATED_AT.read(row, 4)?,
-            prefs: Self::PREFS.read(row, 5)?,
-        })
-    }
+/// Partial update: `None` leaves a column alone.
+#[derive(Updatable)]
+#[updatable(entity = User)]
+struct UserPatch {
+    #[id]
+    id: i64,
+    nickname: Option<Option<String>>,
+    active: Option<bool>,
 }
 
-impl Entity for User {
-    type Id = i64;
-    const TABLE: TableRef = TableRef::with_schema("app", "users");
-    const ID_COLUMNS: &'static [&'static str] = &["id"];
-
-    fn columns() -> &'static [ColumnMeta] {
-        &USER_COLUMNS
-    }
-
-    fn id(&self) -> &i64 {
-        &self.id
-    }
-
-    fn to_values(&self) -> Vec<Value> {
-        vec![
-            Self::ID.encode(&self.id),
-            Self::EMAIL.encode(&self.email),
-            Self::NICKNAME.encode(&self.nickname),
-            Self::ACTIVE.encode(&self.active),
-            Self::CREATED_AT.encode(&self.created_at),
-            Self::PREFS.encode(&self.prefs),
-        ]
-    }
+/// An entity with no capabilities: `insert::<AuditLog>()` would not compile.
+#[derive(Debug, Entity)]
+#[entity(table = "audit_log")]
+#[allow(dead_code)]
+struct AuditLog {
+    #[id]
+    id: i64,
+    message: String,
 }
 
-fn user(id: i64, email: &str, nickname: Option<&str>, active: bool, theme: &str) -> User {
-    User {
-        id,
+fn new_user(email: &str, nickname: Option<&str>, active: bool, theme: &str, hours: i64) -> NewUser {
+    NewUser {
         email: email.into(),
         nickname: nickname.map(Into::into),
         active,
-        created_at: DateTime::from_timestamp(1_700_000_000 + id * 3600, 0).unwrap(),
+        created_at: DateTime::from_timestamp(1_700_000_000 + hours * 3600, 0).unwrap(),
         prefs: Prefs {
             theme: theme.into(),
-            beta: id % 2 == 0,
+            beta: hours % 2 == 0,
         },
     }
 }
@@ -162,78 +137,128 @@ fn show_sql<R>(title: &str, query: &Query<R>) {
 
 fn main() {
     // 1. Build queries. Nothing touches a database here.
+    let signup = insert::<User>()
+        .value(&new_user("ada@example.com", Some("ada"), true, "dark", 1))
+        .returning_one();
     let active_dark = select::<User>()
-        .filter(User::ACTIVE.eq(true))
-        .filter(User::PREFS.path("theme").text().eq("dark"))
-        .order_by(User::CREATED_AT.desc())
+        .filter(col!(User::active).eq(true))
+        .filter(col!(User::prefs).path("theme").text().eq("dark"))
+        .order_by(col!(User::created_at).desc())
         .limit(10)
         .all();
     let by_email = select::<User>()
-        .filter(ci_eq(User::EMAIL, "ADA@EXAMPLE.COM"))
+        .filter(ci_eq(col!(User::email), "ADA@EXAMPLE.COM"))
         .optional();
-    let deactivate = update::<User>()
-        .set(User::ACTIVE, &false)
-        .filter(User::NICKNAME.is_null())
+    let patch = update::<User>()
+        .one(&UserPatch {
+            id: 1,
+            nickname: Some(None),
+            active: None,
+        })
         .affected();
 
     // 2. Render them for Postgres: SQL text plus bound parameters, never interpolated.
     println!("Rendered for Postgres:");
+    show_sql(
+        "insert from a typed input struct, returning the stored row",
+        &signup,
+    );
     show_sql("active users with the dark theme", &active_dark);
     show_sql(
         "case-insensitive email lookup (DSL function, lowered)",
         &by_email,
     );
-    show_sql("deactivate users without a nickname", &deactivate);
+    show_sql("partial update: only the patch's `Some` fields", &patch);
 
-    // 3. Run the very same queries on the in-memory backend.
+    let db = run_in_memory(signup, active_dark, by_email, patch);
+    run_boxed(db);
+}
+
+/// 3. Run the very same queries on the in-memory backend (sync executor).
+fn run_in_memory(
+    signup: Query<User>,
+    active_dark: Query<Vec<User>>,
+    by_email: Query<Option<User>>,
+    patch: Query<u64>,
+) -> MemoryDb {
+    use rupa::core::exec::Executor;
+
     println!("\nExecuted on the memory backend:");
     let mut db = MemoryDb::new();
     db.register::<User>();
-    let users = [
-        user(1, "ada@example.com", Some("ada"), true, "dark"),
-        user(2, "grace@example.com", None, true, "dark"),
-        user(3, "linus@example.com", Some("torvalds"), false, "dark"),
-        user(4, "barbara@example.com", Some("barb"), true, "light"),
-    ];
-    let inserted = Executor::run(&mut db, insert::<User>().values(&users).affected()).unwrap();
-    println!("   inserted {inserted} users");
 
-    let found = Executor::run(&mut db, active_dark).unwrap();
+    let ada = db.run(signup).unwrap();
+    println!("   inserted {} with generated id {}", ada.email, ada.id);
+    let others = [
+        new_user("grace@example.com", None, true, "dark", 2),
+        new_user("linus@example.com", Some("torvalds"), false, "dark", 3),
+        new_user("barbara@example.com", Some("barb"), true, "light", 4),
+    ];
+    let rest = db
+        .run(insert::<User>().values(&others).returning_all())
+        .unwrap();
+    println!(
+        "   inserted {} more, ids {:?}",
+        rest.len(),
+        rest.iter().map(|u| u.id).collect::<Vec<_>>()
+    );
+
+    let found = db.run(active_dark).unwrap();
     println!(
         "   active + dark, newest first: {:?}",
         found.iter().map(|u| &u.email).collect::<Vec<_>>()
     );
 
-    let ada = Executor::run(&mut db, by_email).unwrap();
+    let by_ci = db.run(by_email).unwrap();
     println!(
         "   ci_eq lookup (evaluated, not lowered): {:?}",
-        ada.map(|u| u.email)
+        by_ci.map(|u| u.email)
     );
 
-    let changed = Executor::run(&mut db, deactivate).unwrap();
-    println!("   deactivated {changed} user(s) without a nickname");
+    db.run(patch).unwrap();
+    let mut ada = db.run(get::<User>(&1)).unwrap().expect("ada exists");
+    println!("   after the patch, ada's nickname is {:?}", ada.nickname);
+
+    // One model: update the whole entity by its id.
+    ada.prefs.theme = "light".into();
+    db.run(update::<User>().one(&ada).affected()).unwrap();
+    println!(
+        "   full update -> theme is now {:?}",
+        db.run(get::<User>(&1)).unwrap().unwrap().prefs.theme
+    );
+
+    let removed = db
+        .run(
+            delete::<User>()
+                .filter(col!(User::active).eq(false))
+                .affected(),
+        )
+        .unwrap();
+    println!("   deleted {removed} inactive user(s)");
 
     // Result shapes are checked: `.one()` on several rows is an error, not a silent pick.
-    let err = Executor::run(
-        &mut db,
-        select::<User>().filter(User::ACTIVE.eq(true)).one(),
-    )
-    .unwrap_err();
+    let err = db.run(select::<User>().one()).unwrap_err();
     println!("   .one() over several rows -> {err}");
 
-    // 4. An executor chosen at run time: boxed, dialect known only dynamically.
-    let mut dynamic = BoxAsyncExecutor::new(db);
+    db
+}
+
+/// 4. An executor chosen at run time: boxed, dialect known only dynamically.
+fn run_boxed(db: MemoryDb) {
+    use rupa::core::exec::{AsyncExecutor, BoxAsyncExecutor, ExecError};
+
+    let mut dynamic = BoxAsyncExecutor::new(db.into_async());
     println!(
         "\nBoxed async executor, dialect {:?}:",
         dynamic.dialect().id()
     );
-    let count =
-        pollster::block_on(dynamic.run(select::<User>().filter(User::ACTIVE.eq(true)).all()))
-            .unwrap()
-            .len();
-    println!("   {count} active user(s) remain");
-    let missing = pollster::block_on(dynamic.run(select::<User>().filter(User::ID.eq(99)).one()))
-        .unwrap_err();
+    let count = pollster::block_on(dynamic.run(select::<User>().all()))
+        .unwrap()
+        .len();
+    println!("   {count} user(s) remain");
+    let missing =
+        pollster::block_on(dynamic.run(select::<User>().filter(col!(User::id).eq(99)).one()))
+            .unwrap_err();
     println!(
         "   missing row -> {:?} (inspectable through any driver)",
         missing.result_error()
