@@ -1,0 +1,5 @@
+error: unknown `repository` option; expected `static_dispatch`
+ --> tests/ui/repo_unknown_option.rs:8:14
+  |
+8 | #[repository(dyn_compatible)]
+  |              ^^^^^^^^^^^^^^

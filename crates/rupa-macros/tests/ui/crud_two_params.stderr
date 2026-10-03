@@ -1,0 +1,5 @@
+error: this method takes exactly one parameter: the id
+  --> tests/ui/crud_two_params.rs:11:13
+   |
+11 |     #[query(get)]
+   |             ^^^

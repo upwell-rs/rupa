@@ -11,7 +11,7 @@ use std::ops::Not;
 
 use crate::column::{Column, IsJson, Json, Scalar};
 use crate::ir::{BinOp, ColumnRef, DslCall, DslFnDef, ExprNode, OrderBy, PathSeg, UnOp};
-use crate::value::ScalarColumn;
+use crate::value::{ScalarColumn, SqlType};
 
 pub struct Expr<T> {
     node: ExprNode,
@@ -123,6 +123,10 @@ fn binary(op: BinOp, lhs: ExprNode, rhs: ExprNode) -> Expr<bool> {
 #[allow(
     clippy::wrong_self_convention,
     reason = "builder methods consume their operand, like every other operator here"
+)]
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be compared or ordered directly",
+    note = "only scalar columns and expressions support comparisons; reach into a JSON column with a path (`prefs.theme` / `.path(\"theme\")`)"
 )]
 pub trait ExprOps: Sized {
     type Ty: ScalarColumn;
@@ -316,5 +320,63 @@ impl JsonPath {
             path: self.path,
             as_text,
         }
+    }
+
+    /// The value at this path as type `B`: text for text, a cast otherwise.
+    fn scalar_node<B: ScalarColumn>(self) -> ExprNode {
+        let text = self.node(true);
+        if B::SQL_TYPE == SqlType::Text {
+            text
+        } else {
+            ExprNode::Cast(Box::new(text), B::SQL_TYPE)
+        }
+    }
+
+    /// `path <op> value`, reading the path as the value's type. The value's
+    /// type decides (via `IntoExpr<B>`), not a guess: `&str` compares as text,
+    /// `bool` as a boolean cast, and so on.
+    pub fn compare<B: ScalarColumn>(self, op: BinOp, value: impl IntoExpr<B>) -> Expr<bool> {
+        binary(op, self.scalar_node::<B>(), value.into_node())
+    }
+
+    /// `path IN (..)`, reading the path as the items' type.
+    pub fn is_in<B: ScalarColumn, I>(self, items: I) -> Expr<bool>
+    where
+        I: IntoIterator,
+        I::Item: IntoExpr<B>,
+    {
+        in_list(self.scalar_node::<B>(), items, false)
+    }
+
+    /// `path ->> .. LIKE pattern`.
+    pub fn like(self, pattern: impl IntoExpr<String>) -> Expr<bool> {
+        binary(BinOp::Like, self.node(true), pattern.into_node())
+    }
+
+    /// Whether the path is missing or JSON `null` (SQL `NULL` under `->>`).
+    pub fn is_null(self) -> Expr<bool> {
+        Expr::from_node(ExprNode::Unary(UnOp::IsNull, Box::new(self.node(true))))
+    }
+}
+
+/// Things usable as a boolean condition: boolean expressions and boolean
+/// scalar columns (`filter = active`).
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not a boolean condition",
+    note = "conditions are comparisons, `&&`/`||`/`!` of conditions, or boolean columns"
+)]
+pub trait IntoCondition {
+    fn into_condition(self) -> Expr<bool>;
+}
+
+impl<T: ScalarColumn<Base = bool>> IntoCondition for Expr<T> {
+    fn into_condition(self) -> Expr<bool> {
+        Expr::from_node(self.node)
+    }
+}
+
+impl<E, T: ScalarColumn<Base = bool>> IntoCondition for Column<E, T, Scalar> {
+    fn into_condition(self) -> Expr<bool> {
+        Expr::from_node(ExprNode::Column(self.column_ref()))
     }
 }

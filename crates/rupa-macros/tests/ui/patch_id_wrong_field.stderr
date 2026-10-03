@@ -4,7 +4,7 @@ error[E0080]: evaluation panicked: the `#[id]` field `other` of `Patch` must hav
 5 | #[derive(Updatable)]
   |          ^^^^^^^^^ evaluation of `_` failed inside this call
   |
-note: inside `rupa::rupa_core::__macro_support::assert_id_field`
+note: inside `rupa::__macro_support::assert_id_field`
  --> $RUST/core/src/panic.rs
   |
   |         $crate::panicking::panic_display(&$arg);

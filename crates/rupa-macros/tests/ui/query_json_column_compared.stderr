@@ -1,0 +1,15 @@
+error[E0277]: `rupa::Column<User, Prefs, rupa::Json>` cannot be compared or ordered directly
+ --> tests/ui/query_json_column_compared.rs:8:18
+  |
+8 | #[query(filter = prefs == $p)]
+  | -----------------^^^^^--------
+  | |                |
+  | |                the trait `ExprOps` is not implemented for `rupa::Column<User, Prefs, rupa::Json>`
+  | required by a bound introduced by this call
+  |
+  = note: only scalar columns and expressions support comparisons; reach into a JSON column with a path (`prefs.theme` / `.path("theme")`)
+help: the trait `ExprOps` is implemented for `rupa::Column<E, T, rupa::Scalar>`
+ --> $WORKSPACE/crates/rupa-core/src/expr.rs
+  |
+  | impl<E, T: ScalarColumn> ExprOps for Column<E, T, Scalar> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,20 @@
+error[E0277]: `i64` cannot be used as an expression of type `String`
+ --> tests/ui/query_wrong_param_type.rs:8:28
+  |
+8 | #[query(filter = email == $n)]
+  | ---------------------------^--
+  | |                          |
+  | |                          expected a `String` value, column or expression
+  | required by a bound introduced by this call
+  |
+  = help: the trait `IntoExpr<String>` is not implemented for `i64`
+help: the trait `IntoExpr<String>` is implemented for `&str`
+ --> $WORKSPACE/crates/rupa-core/src/expr.rs
+  |
+  | impl IntoExpr<String> for &str {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `rupa::ExprOps::eq`
+ --> $WORKSPACE/crates/rupa-core/src/expr.rs
+  |
+  |     fn eq(self, rhs: impl IntoExpr<Base<Self::Ty>>) -> Expr<bool> {
+  |                           ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `ExprOps::eq`

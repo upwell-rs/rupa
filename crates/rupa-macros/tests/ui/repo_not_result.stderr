@@ -1,0 +1,5 @@
+error: a repository method returns `Result<R, E>`, with `E: From<executor error>` (e.g. `rupa::core::exec::DynError`)
+  --> tests/ui/repo_not_result.rs:11:29
+   |
+11 |     fn a(&self, id: i64) -> Option<User>;
+   |                             ^^^^^^^^^^^^

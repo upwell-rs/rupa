@@ -1,0 +1,36 @@
+---
+source: crates/rupa-macros/tests/query.rs
+expression: "all.join(\"\\n---\\n\")"
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs" FROM "app"."users" WHERE "email" = $1
+$1 = Text("a@x")
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs" FROM "app"."users" WHERE "active" = $1 AND "prefs" ->> 'theme' = $2 ORDER BY "created" DESC LIMIT $3
+$1 = Bool(true)
+$2 = Text("dark")
+$3 = I64(50)
+---
+SELECT id, email, nickname, active, created, prefs FROM app.users WHERE email = $1
+$1 = Text("a@x")
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs" FROM "app"."users" WHERE NOT ("nickname" IS NULL) OR "id" IN ($1, $2) ORDER BY "id" ASC
+$1 = I64(1)
+$2 = I64(2)
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs" FROM "app"."users" WHERE "active" AND "email" LIKE $1 ORDER BY "email" ASC LIMIT $2 OFFSET $3
+$1 = Text("%@x")
+$2 = I64(10)
+$3 = I64(20)
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs" FROM "app"."users" WHERE CAST("prefs" ->> 'beta' AS boolean) = $1 AND "id" > $2
+$1 = Bool(true)
+$2 = I64(3)
+---
+SELECT EXISTS (SELECT 1 FROM "app"."users" WHERE "email" = $1)
+$1 = Text("a@x")
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs" FROM "app"."users" WHERE "id" = $1
+$1 = I64(1)
+---
+UPDATE app.users SET active = false WHERE id = $1
+$1 = I64(1)

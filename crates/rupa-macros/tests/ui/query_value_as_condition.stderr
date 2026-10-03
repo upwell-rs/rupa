@@ -1,0 +1,5 @@
+error: a value is not a condition; compare a field with it
+ --> tests/ui/query_value_as_condition.rs:8:19
+  |
+8 | #[query(filter = $flag)]
+  |                   ^^^^

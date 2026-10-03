@@ -8,20 +8,43 @@ pub use rupa_dsl_std as dsl_std;
 pub use rupa_macros as macros;
 pub use rupa_sql as sql;
 
+pub use rupa_core::exec::DynError;
 pub use rupa_core::{
-    AsyncExecutor, Column, Deletable, Entity, Executor, Expr, ExprOps, FromRow, Gettable,
-    Insertable, Json, NoKey, Query, Scalar, Updatable, bind, col, delete, get, insert, raw, select,
-    update,
+    Acquire, AcquireAsync, AsyncExecutor, Column, Deletable, Entity, Executor, Expr, ExprOps,
+    FromRow, Gettable, Insertable, Json, NoKey, Query, Repo, Scalar, Shared, SharedAsync,
+    Updatable, bind, col, delete, get, insert, raw, select, update,
 };
-pub use rupa_macros::{Deletable, Entity, Gettable, Insertable, Updatable};
+pub use rupa_macros::{Deletable, Entity, Gettable, Insertable, Updatable, query, repository};
 
 #[cfg(feature = "upwell")]
 pub use rupa_upwell as upwell;
 
+/// Paths used by `rupa-macros` output. Not public API.
 #[doc(hidden)]
-pub use rupa_core::__macro_support;
+pub mod __macro_support {
+    pub use ::std::boxed::Box;
+    pub use ::std::future::Future;
+    pub use ::std::marker::Send;
+    pub use ::std::pin::Pin;
+    pub use rupa_core::__macro_support::*;
+    pub use rupa_core::exec::{AsyncExecutor, Executor};
+    pub use rupa_core::repo::{Acquire, AcquireAsync, Repo};
+
+    /// Runs `future` to completion from a sync repository method of an async
+    /// repository.
+    pub fn block_in_place<F: Future>(future: F) -> F::Output {
+        #[cfg(feature = "tokio")]
+        if let Ok(handle) = tokio::runtime::Handle::try_current()
+            && handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread
+        {
+            return tokio::task::block_in_place(|| handle.block_on(future));
+        }
+        pollster::block_on(future)
+    }
+}
 
 pub mod prelude {
+    pub use rupa_core::Repo;
     pub use rupa_core::prelude::*;
-    pub use rupa_macros::{Deletable, Entity, Gettable, Insertable, Updatable};
+    pub use rupa_macros::{Deletable, Entity, Gettable, Insertable, Updatable, query, repository};
 }

@@ -665,3 +665,9 @@ impl AsyncTransactional for AsyncMemoryDb {
         ))))
     }
 }
+
+impl From<MemoryError> for rupa_core::exec::DynError {
+    fn from(e: MemoryError) -> Self {
+        rupa_core::exec::DynError::new(e)
+    }
+}

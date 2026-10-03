@@ -11,6 +11,7 @@ pub mod exec;
 pub mod expr;
 pub mod ir;
 pub mod query;
+pub mod repo;
 pub mod row;
 pub mod tx;
 pub mod value;
@@ -22,11 +23,14 @@ pub use column::__private;
 #[doc(hidden)]
 pub mod __macro_support {
     pub use crate::__private::*;
+    pub use crate::builder::{delete, get, insert, raw, select, update};
     pub use crate::capability::{Deletable, Gettable, Insertable, Keyed, NoKey, Updatable, key_of};
     pub use crate::column::{Column, ColumnMeta, Json, Scalar};
     pub use crate::entity::{Entity, FromRow, IdValues};
     pub use crate::error::ResultError;
-    pub use crate::ir::TableRef;
+    pub use crate::expr::{ExprOps, IntoCondition};
+    pub use crate::ir::{BinOp, TableRef};
+    pub use crate::query::Query;
     pub use crate::row::Row;
     pub use crate::value::Value;
     pub use ::std::clone::Clone;
@@ -43,10 +47,11 @@ pub use dialect::{Capability, Dialect, DialectId, DynDialect, Memory, Postgres, 
 pub use entity::{Entity, FromRow, IdValues};
 pub use error::{DecodeError, DslError, ResultError, RowError, TxError};
 pub use exec::{
-    AsyncExecutor, BoxAsyncExecutor, BoxExecutor, DynError, ExecError, Executor, Outcome,
+    AsyncExecutor, Blocking, BoxAsyncExecutor, BoxExecutor, DynError, ExecError, Executor, Outcome,
 };
-pub use expr::{Expr, ExprOps, IntoExpr, bind};
+pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
+pub use repo::{Acquire, AcquireAsync, Repo, Shared, SharedAsync};
 pub use row::{Row, RowCursor};
 pub use tx::{
     AsyncTransaction, AsyncTransactional, IsolationLevel, Transaction, Transactional, TxOptions,

@@ -1,0 +1,5 @@
+error: `returning` applies to `insert`
+  --> tests/ui/crud_returning_on_update.rs:11:13
+   |
+11 |     #[query(update, returning)]
+   |             ^^^^^^

@@ -1,0 +1,5 @@
+error: all query methods of a repository take the same receiver: `&self` (through a connection source) or `&mut self` (through one executor)
+  --> tests/ui/repo_mixed_receivers.rs:13:5
+   |
+13 |     fn b(&mut self, id: i64) -> Result<Option<User>, DynError>;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

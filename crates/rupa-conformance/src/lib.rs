@@ -11,12 +11,10 @@ use std::fmt::Debug;
 use std::future::Future;
 
 use rupa::core::dialect::Dialect;
-use rupa::core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
-use rupa::core::ir::{DslFnDef, ExprNode, Statement};
-use rupa::core::tx::{
-    AsyncTransaction, AsyncTransactional, IsolationLevel, Transaction, Transactional, TxOptions,
-};
-use rupa::core::{DialectId, DslError, Expect, ResultError, Value};
+use rupa::core::exec::{AsyncExecutor, ExecError};
+use rupa::core::ir::{DslFnDef, ExprNode};
+use rupa::core::tx::{AsyncTransaction, AsyncTransactional, IsolationLevel, TxOptions};
+use rupa::core::{DialectId, DslError, ResultError, Value};
 use rupa::prelude::*;
 
 pub use fixture::{Item, NewNote, Note, NotePatch, POSTGRES_DDL, SetPinned, items};
@@ -31,50 +29,7 @@ pub trait Harness {
     fn exec(&mut self) -> &mut Self::Exec;
 }
 
-/// Runs a sync [`Executor`] as an [`AsyncExecutor`] by completing immediately.
-#[derive(Debug)]
-pub struct Blocking<E>(pub E);
-
-impl<E: Executor + Send> AsyncExecutor for Blocking<E> {
-    type Dialect = E::Dialect;
-    type Error = E::Error;
-
-    fn dialect(&self) -> &E::Dialect {
-        self.0.dialect()
-    }
-
-    fn execute(
-        &mut self,
-        statement: &Statement,
-        expect: Expect,
-    ) -> impl Future<Output = Result<Outcome, E::Error>> + Send {
-        std::future::ready(self.0.execute(statement, expect))
-    }
-}
-
-impl<T: Transaction + Send> AsyncTransaction for Blocking<T> {
-    fn commit(self) -> impl Future<Output = Result<(), T::Error>> + Send {
-        std::future::ready(self.0.commit())
-    }
-
-    fn rollback(self) -> impl Future<Output = Result<(), T::Error>> + Send {
-        std::future::ready(self.0.rollback())
-    }
-}
-
-impl<E: Transactional + Send> AsyncTransactional for Blocking<E> {
-    type Tx<'t>
-        = Blocking<E::Tx<'t>>
-    where
-        Self: 't;
-
-    fn begin_with(
-        &mut self,
-        options: TxOptions,
-    ) -> impl Future<Output = Result<Blocking<E::Tx<'_>>, E::Error>> + Send {
-        std::future::ready(self.0.begin_with(options).map(Blocking))
-    }
-}
+pub use rupa::core::exec::Blocking;
 
 /// Runs every case, each on a freshly reset schema. The case name is printed
 /// before it runs, so a failure's captured output says which case it was.

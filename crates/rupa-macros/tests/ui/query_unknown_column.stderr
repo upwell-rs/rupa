@@ -1,0 +1,11 @@
+error[E0609]: no field `emial` on type `__RupaFieldsUser`
+ --> tests/ui/query_unknown_column.rs:8:18
+  |
+8 | #[query(filter = emial == $email)]
+  |                  ^^^^^ unknown field
+  |
+help: a field with a similar name exists
+  |
+8 - #[query(filter = emial == $email)]
+8 + #[query(filter = email == $email)]
+  |

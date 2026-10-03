@@ -1,0 +1,13 @@
+error: a `#[query]` method must not have a body
+  --> tests/ui/repo_query_with_body.rs:11:5
+   |
+11 |     fn a(&self, id: i64) -> Result<Option<User>, DynError> { todo!() }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `id`
+  --> tests/ui/repo_query_with_body.rs:11:17
+   |
+11 |     fn a(&self, id: i64) -> Result<Option<User>, DynError> { todo!() }
+   |                 ^^ help: if this is intentional, prefix it with an underscore: `_id`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default

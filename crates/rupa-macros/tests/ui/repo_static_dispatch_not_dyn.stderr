@@ -1,0 +1,15 @@
+error[E0038]: the trait `R` is not dyn compatible
+  --> tests/ui/repo_static_dispatch_not_dyn.rs:13:27
+   |
+13 | fn take(_: std::sync::Arc<dyn R>) {}
+   |                           ^^^^^ `R` is not dyn compatible
+   |
+note: for a trait to be dyn compatible it needs to allow building a vtable
+      for more information, visit <https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility>
+  --> tests/ui/repo_static_dispatch_not_dyn.rs:8:1
+   |
+ 8 | #[repository(static_dispatch)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ...because method `a` references an `impl Trait` type in its return type
+ 9 | pub trait R {
+   |           - this trait is not dyn compatible...
+   = help: consider moving `a` to another trait

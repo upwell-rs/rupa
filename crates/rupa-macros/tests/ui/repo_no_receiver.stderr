@@ -1,0 +1,5 @@
+error: a repository method takes `&self` (shared, e.g. `Arc<dyn Trait>`) or `&mut self` (one executor)
+  --> tests/ui/repo_no_receiver.rs:11:5
+   |
+11 |     fn a(id: i64) -> Result<Option<User>, DynError>;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

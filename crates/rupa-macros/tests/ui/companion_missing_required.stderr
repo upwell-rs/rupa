@@ -4,7 +4,7 @@ error[E0080]: evaluation panicked: this Insertable struct is missing field `emai
 5 | #[derive(Insertable)]
   |          ^^^^^^^^^^ evaluation of `_` failed inside this call
   |
-note: inside `rupa::rupa_core::__macro_support::assert_insert_covers`
+note: inside `rupa::__macro_support::assert_insert_covers`
  --> $RUST/core/src/panic.rs
   |
   |         $crate::panicking::panic_display(&$arg);

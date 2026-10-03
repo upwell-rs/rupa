@@ -1,4 +1,4 @@
-//! A tour of what RUPA can do so far (milestones 1–4).
+//! A tour of what RUPA can do so far (milestones 1–5).
 //!
 //! Run with: `cargo run -p rupa --example tour`
 //!
@@ -9,6 +9,7 @@
 //! - A DSL function: lowered to SQL for Postgres, evaluated in memory.
 //! - Transactions: closure and guard APIs, nested savepoints.
 //! - An executor chosen at run time (`BoxAsyncExecutor`).
+//! - A repository trait shared as `Arc<dyn Trait>`, the way DI holds it.
 
 use chrono::{DateTime, Utc};
 use rupa::core::ir::{BinOp, DslFnDef, ExprNode};
@@ -61,6 +62,19 @@ struct UserPatch {
     id: i64,
     nickname: Option<Option<String>>,
     active: Option<bool>,
+}
+
+/// A repository: declared queries, implemented for `Repo<S>`. `async` and
+/// receivers are the author's choice; this one is dyn-compatible (the
+/// default), so it can be shared as `Arc<dyn UserRepository>`.
+#[repository]
+trait UserRepository: Send + Sync {
+    #[query(filter = email == $email)]
+    async fn by_email(&self, email: &str) -> Result<Option<User>, rupa::DynError>;
+
+    /// A plain `fn` in an async repository blocks in place.
+    #[query(filter = active == $active && prefs.theme == $theme, order_by = created_at desc)]
+    fn active_by_theme(&self, active: bool, theme: &str) -> Result<Vec<User>, rupa::DynError>;
 }
 
 /// An entity with no capabilities: `insert::<AuditLog>()` would not compile.
@@ -172,7 +186,26 @@ fn main() {
     show_sql("partial update: only the patch's `Some` fields", &patch);
 
     let db = run_in_memory(signup, active_dark, by_email, patch);
-    run_boxed(db);
+    let db = run_boxed(db);
+    run_repository(db);
+}
+
+/// 5. A repository, held the way a DI container holds components.
+fn run_repository(db: MemoryDb) {
+    use std::sync::Arc;
+
+    let users: Arc<dyn UserRepository> = Arc::new(Repo::shared_async(db.into_async()));
+    println!(
+        "
+Repository behind Arc<dyn UserRepository>:"
+    );
+    let grace = pollster::block_on(users.by_email("grace@example.com")).unwrap();
+    println!("   by_email (async) -> {:?}", grace.map(|u| u.id));
+    let dark = users.active_by_theme(true, "dark").unwrap();
+    println!(
+        "   active_by_theme (sync, blocks in place) -> {:?}",
+        dark.iter().map(|u| &u.email).collect::<Vec<_>>()
+    );
 }
 
 /// 3. Run the very same queries on the in-memory backend (sync executor).
@@ -284,10 +317,10 @@ fn run_in_memory(
 }
 
 /// 4. An executor chosen at run time: boxed, dialect known only dynamically.
-fn run_boxed(db: MemoryDb) {
+fn run_boxed(db: MemoryDb) -> MemoryDb {
     use rupa::core::exec::{AsyncExecutor, BoxAsyncExecutor, ExecError};
 
-    let mut dynamic = BoxAsyncExecutor::new(db.into_async());
+    let mut dynamic = BoxAsyncExecutor::new(db.clone().into_async());
     println!(
         "\nBoxed async executor, dialect {:?}:",
         dynamic.dialect().id()
@@ -303,4 +336,5 @@ fn run_boxed(db: MemoryDb) {
         "   missing row -> {:?} (inspectable through any driver)",
         missing.result_error()
     );
+    db
 }

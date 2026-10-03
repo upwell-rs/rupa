@@ -1,0 +1,42 @@
+error[E0277]: `NotInsertable` cannot be inserted into `_`
+  --> tests/ui/crud_value_not_insertable.rs:12:22
+   |
+11 |     #[query(insert)]
+   |             ------ required by a bound introduced by this call
+12 |     fn create(&self, n: &NotInsertable) -> Result<u64, DynError>;
+   |                      ^ unsatisfied trait bound
+   |
+help: the trait `rupa::Insertable<_>` is not implemented for `NotInsertable`
+  --> tests/ui/crud_value_not_insertable.rs:7:1
+   |
+ 7 | pub struct NotInsertable { pub title: String }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   = note: derive `Insertable` on `_`, or on an input struct with `#[insertable(entity = _)]`
+help: the trait `rupa::Insertable<Note>` is implemented for `Note`
+  --> tests/ui/crud_value_not_insertable.rs:4:35
+   |
+ 4 | #[derive(Debug, Entity, Gettable, Insertable)]
+   |                                   ^^^^^^^^^^
+note: required by a bound in `InsertBuilder::<E>::value`
+  --> $WORKSPACE/crates/rupa-core/src/builder.rs
+   |
+   |     pub fn value<V: Insertable<E>>(self, value: &V) -> InsertRows<E, V> {
+   |                     ^^^^^^^^^^^^^ required by this bound in `InsertBuilder::<E>::value`
+   = note: this error originates in the derive macro `Insertable` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: the method `build` exists for struct `InsertRows<_, NotInsertable>`, but its trait bounds were not satisfied
+  --> tests/ui/crud_value_not_insertable.rs:12:44
+   |
+ 7 | pub struct NotInsertable { pub title: String }
+   | ------------------------ doesn't satisfy `NotInsertable: rupa::Insertable<_>`
+...
+12 |     fn create(&self, n: &NotInsertable) -> Result<u64, DynError>;
+   |                                            ^^^^^^ method cannot be called on `InsertRows<_, NotInsertable>` due to unsatisfied trait bounds
+   |
+   = note: the following trait bounds were not satisfied:
+           `NotInsertable: rupa::Insertable<_>`
+note: the trait `rupa::Insertable` must be implemented
+  --> $WORKSPACE/crates/rupa-core/src/capability.rs
+   |
+   | pub trait Insertable<E: Entity> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

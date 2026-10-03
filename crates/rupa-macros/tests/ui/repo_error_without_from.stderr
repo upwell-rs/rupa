@@ -1,0 +1,26 @@
+error[E0277]: the trait bound `MyError: From<MemoryError>` is not satisfied
+  --> tests/ui/repo_error_without_from.rs:17:18
+   |
+17 |     let _ = R::a(&repo, 1);
+   |             ---- ^^^^^ unsatisfied trait bound
+   |             |
+   |             required by a bound introduced by this call
+   |
+help: the trait `From<MemoryError>` is not implemented for `MyError`
+  --> tests/ui/repo_error_without_from.rs:9:1
+   |
+ 9 | pub struct MyError;
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `R` is conditionally implemented for `rupa::Repo<__S>`
+  --> tests/ui/repo_error_without_from.rs:10:1
+   |
+10 | #[repository]
+   | ^^^^^^^^^^^^^ unsatisfied requirement introduced here: `MyError: From<<Shared<MemoryDb> as rupa::Acquire>::Error>`
+note: required for `rupa::Repo<Shared<MemoryDb>>` to implement `R`
+  --> tests/ui/repo_error_without_from.rs:10:1
+   |
+10 | #[repository]
+   | ^^^^^^^^^^^^^
+11 | pub trait R {
+   |           ^
+   = note: this error originates in the attribute macro `repository` (in Nightly builds, run with -Z macro-backtrace for more info)

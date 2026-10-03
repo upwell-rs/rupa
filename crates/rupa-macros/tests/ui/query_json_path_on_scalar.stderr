@@ -1,0 +1,20 @@
+error[E0277]: JSON path access requires a JSON column, but this column's kind is `rupa::Scalar`
+ --> tests/ui/query_json_path_on_scalar.rs:8:18
+  |
+8 | #[query(filter = email.domain == $d)]
+  |                  ^^^^^ not a JSON column
+  |
+  = help: the trait `IsJson` is not implemented for `rupa::Scalar`
+help: the trait `IsJson` is implemented for `rupa::Json`
+ --> $WORKSPACE/crates/rupa-core/src/column.rs
+  |
+  | impl IsJson for Json {}
+  | ^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `expr::<impl rupa::Column<E, T, K>>::path`
+ --> $WORKSPACE/crates/rupa-core/src/expr.rs
+  |
+  |     pub fn path(self, key: &'static str) -> JsonPath
+  |            ---- required by a bound in this associated function
+  |     where
+  |         K: IsJson,
+  |            ^^^^^^ required by this bound in `expr::<impl Column<E, T, K>>::path`

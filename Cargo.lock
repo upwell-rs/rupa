@@ -1726,6 +1726,7 @@ dependencies = [
  "rupa-upwell",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
@@ -1743,6 +1744,7 @@ name = "rupa-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "futures-util",
  "serde",
  "serde_json",
  "trybuild",
@@ -1813,10 +1815,13 @@ name = "rupa-macros"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "insta",
+ "pollster",
  "proc-macro2",
  "quote",
  "rupa",
  "rupa-driver-memory",
+ "rupa-sql",
  "serde",
  "serde_json",
  "syn 2.0.119",

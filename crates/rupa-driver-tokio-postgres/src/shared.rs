@@ -210,3 +210,9 @@ impl RowCursor for PgRows {
         self.current.as_ref().map(|r| Ok(r as &dyn rupa_core::Row))
     }
 }
+
+impl From<PgError> for rupa_core::exec::DynError {
+    fn from(e: PgError) -> Self {
+        rupa_core::exec::DynError::new(e)
+    }
+}

@@ -1,0 +1,5 @@
+error: an `insert` returns `u64` or `bool`; add `returning` to get the stored row(s)
+  --> tests/ui/crud_insert_returns_row_without_returning.rs:12:35
+   |
+12 |     fn create(&self, n: &Note) -> Result<Note, DynError>;
+   |                                   ^^^^^^

@@ -1,0 +1,5 @@
+error: a `bool` query checks whether rows exist; name the entity with `entity = Type`
+ --> tests/ui/query_bool_needs_entity.rs:9:22
+  |
+9 | fn f(email: &str) -> bool;
+  |                      ^^^^

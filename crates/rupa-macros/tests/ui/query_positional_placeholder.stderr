@@ -1,0 +1,5 @@
+error: positional placeholder `$1`: use named parameters (`$email`), which are rendered per dialect
+ --> tests/ui/query_positional_placeholder.rs:8:15
+  |
+8 | #[query(sql = "SELECT * FROM t WHERE id = $1")]
+  |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

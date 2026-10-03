@@ -1,0 +1,5 @@
+error: a filtered `delete` names its entity: `#[query(delete, entity = T, filter = ..)]`
+  --> tests/ui/crud_filtered_delete_needs_entity.rs:11:13
+   |
+11 |     #[query(delete, filter = id == $id)]
+   |             ^^^^^^

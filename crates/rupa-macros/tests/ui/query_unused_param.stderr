@@ -1,0 +1,5 @@
+error: parameter `extra` is not used by the query; reference it as `$extra`
+ --> tests/ui/query_unused_param.rs:9:19
+  |
+9 | fn f(email: &str, extra: i64) -> Vec<User>;
+  |                   ^^^^^

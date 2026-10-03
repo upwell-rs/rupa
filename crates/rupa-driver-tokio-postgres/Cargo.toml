@@ -20,6 +20,6 @@ uuid.workspace = true
 
 [dev-dependencies]
 rupa-conformance = { path = "../rupa-conformance" }
-rupa = { path = "../rupa" }
-tokio.workspace = true
+rupa = { path = "../rupa", features = ["tokio"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 testcontainers-modules.workspace = true

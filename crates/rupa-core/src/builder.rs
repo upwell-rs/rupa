@@ -414,6 +414,18 @@ impl RawBuilder {
         self
     }
 
+    /// Binds a parameter-like value (`&str`, `&T`, `T`), typed as `B`.
+    ///
+    /// # Panics
+    /// If `value` is an expression rather than a value (a column, say): raw
+    /// SQL fragments are opaque, so only values can be bound into them.
+    pub fn bind_param<B, V: IntoExpr<B>>(self, value: V) -> Self {
+        match value.into_node() {
+            ExprNode::Param(v) => self.bind_value(v),
+            other => panic!("raw SQL can only bind values, not expressions ({other:?})"),
+        }
+    }
+
     pub fn rows<R: RowsResult>(self) -> Query<R> {
         Query::new(Statement::Raw(self.raw), R::EXPECT)
     }

@@ -1,0 +1,5 @@
+error: `sql` is a complete query; it cannot be combined with `filter`, `order_by`, `limit` or `offset`
+ --> tests/ui/query_sql_with_filter.rs:8:9
+  |
+8 | #[query(sql = "SELECT 1", filter = id == $id)]
+  |         ^^^

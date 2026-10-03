@@ -1,0 +1,5 @@
+error: a repository method needs `#[query(..)]`, or a default body
+  --> tests/ui/repo_missing_query.rs:10:5
+   |
+10 |     fn a(&self, id: i64) -> Result<Option<User>, DynError>;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

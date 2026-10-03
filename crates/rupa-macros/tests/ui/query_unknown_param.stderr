@@ -1,0 +1,5 @@
+error: unknown parameter `$mail`: it must be an argument of this function
+ --> tests/ui/query_unknown_param.rs:8:28
+  |
+8 | #[query(filter = email == $mail)]
+  |                            ^^^^

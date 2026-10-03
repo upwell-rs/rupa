@@ -1,0 +1,5 @@
+error: comparisons do not chain; add parentheses or `&&`
+ --> tests/ui/query_chained_comparison.rs:8:26
+  |
+8 | #[query(filter = id < $a < $b)]
+  |                          ^

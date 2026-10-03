@@ -1,0 +1,10 @@
+error[E0609]: no field `mail` on type `__RupaFieldsUser`
+  --> tests/ui/repo_bad_column_in_method.rs:10:22
+   |
+10 |     #[query(filter = mail == $m)]
+   |                      ^^^^ unknown field
+   |
+help: a field with a similar name exists
+   |
+10 |     #[query(filter = email == $m)]
+   |                      +

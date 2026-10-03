@@ -253,3 +253,58 @@ impl AsyncExecutor for BoxAsyncExecutor {
         self.inner.execute_dyn(statement, expect).await
     }
 }
+
+// ---------------------------------------------------------------------------
+// Sync executors used from async code
+// ---------------------------------------------------------------------------
+
+/// A sync [`Executor`] used as an [`AsyncExecutor`]: each call runs the
+/// statement synchronously and returns a future that is already complete.
+///
+/// For sync-only applications (e.g. SQLite) that still declare `async`
+/// repository methods: no async runtime is needed to drive those futures.
+/// It blocks the calling thread for the duration of the statement, so inside
+/// an async runtime prefer an async driver.
+#[derive(Debug)]
+pub struct Blocking<E>(pub E);
+
+impl<E: Executor + Send> AsyncExecutor for Blocking<E> {
+    type Dialect = E::Dialect;
+    type Error = E::Error;
+
+    fn dialect(&self) -> &E::Dialect {
+        self.0.dialect()
+    }
+
+    fn execute(
+        &mut self,
+        statement: &Statement,
+        expect: Expect,
+    ) -> impl Future<Output = Result<Outcome, E::Error>> + Send {
+        std::future::ready(self.0.execute(statement, expect))
+    }
+}
+
+impl<T: crate::tx::Transaction + Send> crate::tx::AsyncTransaction for Blocking<T> {
+    fn commit(self) -> impl Future<Output = Result<(), T::Error>> + Send {
+        std::future::ready(self.0.commit())
+    }
+
+    fn rollback(self) -> impl Future<Output = Result<(), T::Error>> + Send {
+        std::future::ready(self.0.rollback())
+    }
+}
+
+impl<E: crate::tx::Transactional + Send> crate::tx::AsyncTransactional for Blocking<E> {
+    type Tx<'t>
+        = Blocking<E::Tx<'t>>
+    where
+        Self: 't;
+
+    fn begin_with(
+        &mut self,
+        options: crate::tx::TxOptions,
+    ) -> impl Future<Output = Result<Blocking<E::Tx<'_>>, E::Error>> + Send {
+        std::future::ready(self.0.begin_with(options).map(Blocking))
+    }
+}

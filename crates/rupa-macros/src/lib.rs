@@ -10,8 +10,11 @@ use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
 mod capability;
+mod dsl;
 mod entity;
 mod model;
+mod query;
+mod repository;
 
 fn run(
     input: TokenStream,
@@ -75,4 +78,62 @@ pub fn derive_updatable(input: TokenStream) -> TokenStream {
 #[proc_macro_derive(Deletable, attributes(deletable, id, column, rupa))]
 pub fn derive_deletable(input: TokenStream) -> TokenStream {
     run(input, capability::deletable)
+}
+
+/// A sans-IO query from a declared signature: `fn f(args) -> R;` becomes
+/// `fn f(args) -> Query<R>`.
+///
+/// ```ignore
+/// #[query(filter = email == $email)]
+/// fn by_email(email: &str) -> Option<User>;
+///
+/// #[query(filter = active == $active && prefs.theme == $theme,
+///         order_by = created_at desc, limit = 50)]
+/// fn active_by_theme(active: bool, theme: &str) -> Vec<User>;
+///
+/// #[query(sql = "SELECT .. FROM users WHERE email = $email")]
+/// fn raw_by_email(email: &str) -> Vec<User>;
+/// ```
+///
+/// Generated code refers to `::rupa` (the facade crate).
+#[proc_macro_attribute]
+pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
+    query::query_fn(
+        attr.into(),
+        item.into(),
+        quote::quote!(::rupa::__macro_support),
+    )
+    .unwrap_or_else(syn::Error::into_compile_error)
+    .into()
+}
+
+/// A repository trait plus its implementation for `Repo<S>`.
+///
+/// ```ignore
+/// #[repository]
+/// pub trait UserRepository: Send + Sync {
+///     #[query(filter = email == $email)]
+///     async fn by_email(&self, email: &str) -> Result<Option<User>, DynError>;
+///
+///     #[query(filter = active == $active, order_by = id)]
+///     fn active(&self, active: bool) -> Result<Vec<User>, DynError>;  // blocks in place
+/// }
+///
+/// let users: Arc<dyn UserRepository> = Arc::new(Repo::shared_async(executor));
+/// ```
+///
+/// See the `rupa_macros::repository` module docs for the rules on receivers,
+/// sync/async methods, errors and `static_dispatch`.
+#[proc_macro_attribute]
+pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let item: proc_macro2::TokenStream = item.into();
+    repository::repository(attr.into(), item.clone())
+        .unwrap_or_else(|e| {
+            // Keep the trait so code using it still resolves; only the
+            // macro's own error is reported.
+            let mut out = e.into_compile_error();
+            out.extend(repository::strip_query_attrs(item));
+            out
+        })
+        .into()
 }

@@ -1,0 +1,33 @@
+error[E0277]: `Note` cannot be used to update `_`
+  --> tests/ui/crud_update_without_capability.rs:12:20
+   |
+11 |     #[query(update)]
+   |             ------ required by a bound introduced by this call
+12 |     fn save(&self, n: &Note) -> Result<u64, DynError>;
+   |                    ^ unsatisfied trait bound
+   |
+help: the trait `Updatable<_>` is not implemented for `Note`
+  --> tests/ui/crud_update_without_capability.rs:6:1
+   |
+ 6 | pub struct Note { #[id(generated)] id: i64, title: String }
+   | ^^^^^^^^^^^^^^^
+   = note: derive `Updatable` on `_`, or on a patch struct with `#[updatable(entity = _)]`
+note: required by a bound in `UpdateBuilder::<E>::one`
+  --> $WORKSPACE/crates/rupa-core/src/builder.rs
+   |
+   |     pub fn one<V: Updatable<E>>(mut self, value: &V) -> Self
+   |                   ^^^^^^^^^^^^ required by this bound in `UpdateBuilder::<E>::one`
+
+error[E0277]: `Note` cannot be used to update `_`
+ --> tests/ui/crud_update_without_capability.rs:9:1
+  |
+9 | #[repository]
+  | ^^^^^^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `Updatable<_>` is not implemented for `Note`
+ --> tests/ui/crud_update_without_capability.rs:6:1
+  |
+6 | pub struct Note { #[id(generated)] id: i64, title: String }
+  | ^^^^^^^^^^^^^^^
+  = note: derive `Updatable` on `_`, or on a patch struct with `#[updatable(entity = _)]`
+  = note: this error originates in the attribute macro `repository` (in Nightly builds, run with -Z macro-backtrace for more info)
