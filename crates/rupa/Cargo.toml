@@ -18,3 +18,10 @@ rupa-macros.workspace = true
 rupa-sql.workspace = true
 rupa-dsl-std.workspace = true
 rupa-upwell = { workspace = true, optional = true }
+
+[dev-dependencies]
+rupa-driver-memory = { path = "../rupa-driver-memory" }
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+pollster.workspace = true

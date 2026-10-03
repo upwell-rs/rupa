@@ -6,6 +6,7 @@ pub mod column;
 pub mod dialect;
 pub mod entity;
 pub mod error;
+pub mod exec;
 pub mod expr;
 pub mod ir;
 pub mod query;
@@ -17,9 +18,12 @@ pub use column::__private;
 
 pub use builder::{delete, insert, raw, select, update};
 pub use column::{Column, ColumnKind, ColumnMeta, Json, Scalar};
-pub use dialect::{Capability, Dialect, DialectId, DynDialect, Postgres, Supports};
+pub use dialect::{Capability, Dialect, DialectId, DynDialect, Memory, Postgres, Supports};
 pub use entity::{Entity, FromRow, IdValues};
 pub use error::{DecodeError, DslError, ResultError, RowError};
+pub use exec::{
+    AsyncExecutor, BoxAsyncExecutor, BoxExecutor, DynError, ExecError, Executor, Outcome,
+};
 pub use expr::{Expr, ExprOps, IntoExpr, bind};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 pub use row::{Row, RowCursor};

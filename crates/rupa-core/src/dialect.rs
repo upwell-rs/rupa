@@ -17,6 +17,8 @@ pub enum DialectId {
     Postgres,
     MySql,
     Sqlite,
+    /// The in-memory backend, which evaluates the IR instead of rendering SQL.
+    Memory,
 }
 
 #[non_exhaustive]
@@ -96,10 +98,18 @@ pub struct Postgres;
 
 dialect!(Postgres => Postgres [Ilike, JsonPath, JsonContainment, Returning, Savepoints, NativeRls]);
 
+/// The in-memory backend. Supports what it can evaluate directly; DSL
+/// functions additionally need an `eval` implementation to run on it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Memory;
+
+dialect!(Memory => Memory [JsonPath]);
+
 /// The capabilities of a known dialect, as declared by its `dialect!` entry.
 pub fn capabilities_of(id: DialectId) -> &'static [Capability] {
     match id {
         DialectId::Postgres => Postgres::CAPABILITIES,
+        DialectId::Memory => Memory::CAPABILITIES,
         // Declared with their dialect types in milestone 7.
         DialectId::MySql | DialectId::Sqlite => &[],
     }

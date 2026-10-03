@@ -1,0 +1,499 @@
+//! Behavioural test suite shared by every driver. Each driver's tests supply a
+//! [`Harness`] and call [`run`]. Because the same assertions run against the
+//! memory backend and real databases, passing everywhere means the backends agree.
+//!
+//! Cases are written once, against [`AsyncExecutor`]. Sync drivers run them
+//! through [`Blocking`], which still calls the driver's own `Executor::execute`.
+
+pub mod fixture;
+
+use std::fmt::Debug;
+use std::future::Future;
+
+use rupa_core::dialect::Dialect;
+use rupa_core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
+use rupa_core::ir::{DslFnDef, ExprNode, Statement};
+use rupa_core::prelude::*;
+use rupa_core::{DialectId, DslError, Expect, ResultError, Value};
+
+pub use fixture::{Item, POSTGRES_DDL, items};
+
+/// Gives the suite a fresh, empty schema per case.
+pub trait Harness {
+    type Exec: AsyncExecutor;
+
+    /// Drops and recreates the conformance tables, empty.
+    fn reset(&mut self) -> impl Future<Output = ()>;
+
+    fn exec(&mut self) -> &mut Self::Exec;
+}
+
+/// Runs a sync [`Executor`] as an [`AsyncExecutor`] by completing immediately.
+#[derive(Debug)]
+pub struct Blocking<E>(pub E);
+
+impl<E: Executor + Send> AsyncExecutor for Blocking<E> {
+    type Dialect = E::Dialect;
+    type Error = E::Error;
+
+    fn dialect(&self) -> &E::Dialect {
+        self.0.dialect()
+    }
+
+    fn execute(
+        &mut self,
+        statement: &Statement,
+        expect: Expect,
+    ) -> impl Future<Output = Result<Outcome, E::Error>> + Send {
+        std::future::ready(self.0.execute(statement, expect))
+    }
+}
+
+/// Runs every case, each on a freshly reset schema. The case name is printed
+/// before it runs, so a failure's captured output says which case it was.
+pub async fn run<H: Harness>(h: &mut H) {
+    macro_rules! cases {
+        ($($case:ident),* $(,)?) => {$(
+            h.reset().await;
+            eprintln!("conformance {}", stringify!($case));
+            cases::$case(h.exec()).await;
+        )*};
+    }
+    cases!(
+        case_insert_and_select,
+        case_single_row_shapes,
+        case_comparisons,
+        case_three_valued_logic,
+        case_in_lists,
+        case_like_patterns,
+        case_order_with_nulls,
+        case_limit_offset,
+        case_exists,
+        case_update,
+        case_delete,
+        case_json_paths,
+        case_nullable_json,
+        case_timestamps,
+        case_dsl_lowering_and_eval_agree,
+        case_duplicate_key_is_an_error,
+        case_failed_multi_row_insert_is_atomic,
+    );
+}
+
+/// `upper(a) = upper(b)`: lowered for SQL dialects, evaluated by the memory backend.
+pub static CI_EQ: DslFnDef = DslFnDef {
+    name: "ci_eq",
+    lower: lower_ci_eq,
+    eval: Some(eval_ci_eq),
+};
+
+fn lower_ci_eq(dialect: &dyn Dialect, mut args: Vec<ExprNode>) -> Result<ExprNode, DslError> {
+    if args.len() != 2 {
+        return Err(DslError::Arity {
+            function: "ci_eq",
+            expected: 2,
+            got: args.len(),
+        });
+    }
+    let (b, a) = (args.pop().unwrap(), args.pop().unwrap());
+    match dialect.id() {
+        DialectId::Postgres => Ok(ExprNode::Binary(
+            rupa_core::ir::BinOp::Eq,
+            Box::new(ExprNode::Call("upper", vec![a])),
+            Box::new(ExprNode::Call("upper", vec![b])),
+        )),
+        other => Err(DslError::unsupported("ci_eq", other)),
+    }
+}
+
+fn eval_ci_eq(args: &[Value]) -> Result<Value, DslError> {
+    match args {
+        [Value::Text(a), Value::Text(b)] => Ok(Value::Bool(a.to_uppercase() == b.to_uppercase())),
+        [Value::Null(_), _] | [_, Value::Null(_)] => Ok(Value::Null(rupa_core::SqlType::Bool)),
+        other => Err(DslError::Other(format!(
+            "ci_eq: unexpected arguments {other:?}"
+        ))),
+    }
+}
+
+fn result_error<T: Debug, E: ExecError>(r: Result<T, E>) -> ResultError {
+    match r {
+        Ok(v) => panic!("expected a result error, got Ok({v:?})"),
+        Err(e) => e
+            .result_error()
+            .cloned()
+            .unwrap_or_else(|| panic!("expected a result error, got {e}")),
+    }
+}
+
+mod cases {
+    use super::*;
+
+    async fn seed<E: AsyncExecutor>(e: &mut E) {
+        let all = items();
+        let n = e
+            .run(insert::<Item>().values(&all).affected())
+            .await
+            .expect("seed");
+        assert_eq!(n, all.len() as u64);
+    }
+
+    async fn ids<E: AsyncExecutor>(e: &mut E, cond: Expr<bool>) -> Vec<i64> {
+        let rows = e
+            .run(select::<Item>().filter(cond).order_by(Item::ID.asc()).all())
+            .await
+            .expect("select");
+        rows.into_iter().map(|i| i.id).collect()
+    }
+
+    pub async fn case_insert_and_select<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        let all = e
+            .run(select::<Item>().order_by(Item::ID.asc()).all())
+            .await
+            .unwrap();
+        assert_eq!(all, items(), "rows must round-trip exactly");
+    }
+
+    pub async fn case_single_row_shapes<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        let one = e
+            .run(select::<Item>().filter(Item::ID.eq(2)).one())
+            .await
+            .unwrap();
+        assert_eq!(one.name, "banana");
+        let none = e
+            .run(select::<Item>().filter(Item::ID.eq(99)).optional())
+            .await
+            .unwrap();
+        assert_eq!(none, None);
+        let some = e
+            .run(select::<Item>().filter(Item::ID.eq(3)).optional())
+            .await
+            .unwrap();
+        assert_eq!(some.map(|i| i.id), Some(3));
+
+        let r = e.run(select::<Item>().filter(Item::ID.eq(99)).one()).await;
+        assert_eq!(result_error(r), ResultError::NotFound);
+        let r = e
+            .run(select::<Item>().filter(Item::ACTIVE.eq(true)).one())
+            .await;
+        assert_eq!(result_error(r), ResultError::TooManyRows);
+        let r = e
+            .run(select::<Item>().filter(Item::ACTIVE.eq(true)).optional())
+            .await;
+        assert_eq!(result_error(r), ResultError::TooManyRows);
+    }
+
+    pub async fn case_comparisons<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        assert_eq!(ids(e, Item::QTY.eq(7)).await, [3]);
+        assert_eq!(ids(e, Item::QTY.ne(7)).await, [1, 2, 4]);
+        assert_eq!(ids(e, Item::QTY.lt(7)).await, [1, 4]);
+        assert_eq!(ids(e, Item::QTY.le(7)).await, [1, 3, 4]);
+        assert_eq!(ids(e, Item::QTY.gt(3)).await, [2, 3]);
+        assert_eq!(ids(e, Item::QTY.ge(3)).await, [1, 2, 3]);
+        assert_eq!(ids(e, Item::NAME.gt("banana")).await, [3, 4]);
+        assert_eq!(
+            ids(e, Item::ACTIVE.eq(false).or(Item::QTY.eq(0))).await,
+            [2, 4]
+        );
+    }
+
+    pub async fn case_three_valued_logic<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        // NULL = 'red' is NULL, and NOT NULL is still NULL: neither keeps rows 2 and 4.
+        assert_eq!(ids(e, Item::LABEL.eq("red")).await, [1]);
+        assert_eq!(ids(e, !Item::LABEL.eq("red")).await, [3]);
+        assert_eq!(ids(e, Item::LABEL.is_null()).await, [2, 4]);
+        assert_eq!(ids(e, Item::LABEL.is_not_null()).await, [1, 3]);
+        // NULL OR TRUE is TRUE; NULL AND FALSE is FALSE.
+        assert_eq!(ids(e, Item::LABEL.eq("x").or(Item::QTY.eq(12))).await, [2]);
+        assert_eq!(
+            ids(e, !(Item::LABEL.eq("x").and(Item::QTY.eq(-5)))).await,
+            [1, 2, 3, 4]
+        );
+    }
+
+    pub async fn case_in_lists<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        assert_eq!(ids(e, Item::ID.in_([1i64, 3, 99])).await, [1, 3]);
+        assert_eq!(ids(e, Item::ID.not_in([1i64, 3])).await, [2, 4]);
+        assert_eq!(
+            ids(e, Item::ID.in_(Vec::<i64>::new())).await,
+            Vec::<i64>::new()
+        );
+        assert_eq!(
+            ids(e, Item::ID.not_in(Vec::<i64>::new())).await,
+            [1, 2, 3, 4]
+        );
+        // x NOT IN (1, NULL) is never TRUE.
+        let null =
+            Expr::<Option<i64>>::from_node(ExprNode::Param(Value::Null(rupa_core::SqlType::I64)));
+        assert_eq!(
+            ids(
+                e,
+                Item::ID.not_in([Expr::from_node(ExprNode::Param(Value::I64(1))), null])
+            )
+            .await,
+            Vec::<i64>::new()
+        );
+    }
+
+    pub async fn case_like_patterns<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        assert_eq!(ids(e, Item::NAME.like("%an%")).await, [2]);
+        assert_eq!(ids(e, Item::NAME.like("_pple")).await, [1]);
+        assert_eq!(ids(e, Item::LABEL.like("dark\\_%")).await, [3]);
+        assert_eq!(ids(e, Item::LABEL.like("%")).await, [1, 3]);
+    }
+
+    pub async fn case_order_with_nulls<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        let asc = e
+            .run(
+                select::<Item>()
+                    .order_by(Item::LABEL.asc())
+                    .order_by(Item::ID.asc())
+                    .all(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            asc.iter().map(|i| i.id).collect::<Vec<_>>(),
+            [3, 1, 2, 4],
+            "NULLS LAST ascending"
+        );
+        let desc = e
+            .run(
+                select::<Item>()
+                    .order_by(Item::LABEL.desc())
+                    .order_by(Item::ID.desc())
+                    .all(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            desc.iter().map(|i| i.id).collect::<Vec<_>>(),
+            [4, 2, 1, 3],
+            "NULLS FIRST descending"
+        );
+    }
+
+    pub async fn case_limit_offset<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        let page = e
+            .run(
+                select::<Item>()
+                    .order_by(Item::ID.asc())
+                    .limit(2)
+                    .offset(1)
+                    .all(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(page.iter().map(|i| i.id).collect::<Vec<_>>(), [2, 3]);
+        let past_end = e
+            .run(select::<Item>().order_by(Item::ID.asc()).offset(10).all())
+            .await
+            .unwrap();
+        assert!(past_end.is_empty());
+        let zero = e.run(select::<Item>().limit(0).all()).await.unwrap();
+        assert!(zero.is_empty());
+    }
+
+    pub async fn case_exists<E: AsyncExecutor>(e: &mut E) {
+        assert!(
+            !e.run(select::<Item>().exists()).await.unwrap(),
+            "empty table"
+        );
+        seed(e).await;
+        assert!(
+            e.run(select::<Item>().filter(Item::NAME.eq("cherry")).exists())
+                .await
+                .unwrap()
+        );
+        assert!(
+            !e.run(select::<Item>().filter(Item::NAME.eq("fig")).exists())
+                .await
+                .unwrap()
+        );
+    }
+
+    pub async fn case_update<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        let meta = fixture::Meta {
+            score: 100,
+            flag: false,
+            tags: vec!["new".into()],
+            nested: None,
+            note: Some("n".into()),
+        };
+        let n = e
+            .run(
+                update::<Item>()
+                    .set(Item::META, &meta)
+                    .set_expr(Item::LABEL, Item::NAME)
+                    .filter(Item::ACTIVE.eq(true))
+                    .affected(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(n, 3);
+        let rows = e
+            .run(select::<Item>().order_by(Item::ID.asc()).all())
+            .await
+            .unwrap();
+        for item in &rows {
+            if item.active {
+                assert_eq!(item.meta, meta);
+                assert_eq!(
+                    item.label.as_deref(),
+                    Some(item.name.as_str()),
+                    "SET sees the pre-update row"
+                );
+            } else {
+                assert_eq!(item, &items()[1]);
+            }
+        }
+        let any = e
+            .run(
+                update::<Item>()
+                    .set(Item::QTY, &1)
+                    .filter(Item::ID.eq(99))
+                    .build::<bool>(),
+            )
+            .await
+            .unwrap();
+        assert!(!any);
+    }
+
+    pub async fn case_delete<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        assert_eq!(
+            e.run(delete::<Item>().filter(Item::QTY.lt(5)).affected())
+                .await
+                .unwrap(),
+            2
+        );
+        assert_eq!(ids(e, Item::ID.gt(0)).await, [2, 3]);
+        assert!(
+            !e.run(delete::<Item>().filter(Item::ID.eq(1)).build::<bool>())
+                .await
+                .unwrap()
+        );
+        assert_eq!(e.run(delete::<Item>().affected()).await.unwrap(), 2);
+    }
+
+    pub async fn case_json_paths<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        assert_eq!(
+            ids(e, Item::META.path("nested").key("k").text().eq("w")).await,
+            [3]
+        );
+        assert_eq!(
+            ids(e, Item::META.path("tags").index(0).text().eq("a")).await,
+            [1]
+        );
+        assert_eq!(
+            ids(e, Item::META.path("flag").cast::<bool>().eq(true)).await,
+            [1, 3]
+        );
+        assert_eq!(
+            ids(e, Item::META.path("score").cast::<i64>().gt(6)).await,
+            [2, 3]
+        );
+        // A missing key and a JSON null are both SQL NULL under ->>.
+        assert_eq!(
+            ids(e, Item::META.path("missing").text().is_null()).await,
+            [1, 2, 3, 4]
+        );
+        assert_eq!(
+            ids(e, Item::META.path("note").text().is_null()).await,
+            [1, 2, 3, 4]
+        );
+        assert_eq!(
+            ids(e, Item::META.path("nested").key("k").text().is_null()).await,
+            [1, 4]
+        );
+        // ...but under ->, a JSON null is a value, not SQL NULL.
+        let note_json = Expr::<bool>::from_node(ExprNode::Unary(
+            rupa_core::ir::UnOp::IsNull,
+            Box::new(Item::META.path("note").json().into_node()),
+        ));
+        assert_eq!(ids(e, note_json).await, Vec::<i64>::new());
+    }
+
+    pub async fn case_nullable_json<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        assert_eq!(
+            ids(e, Item::EXTRA.is_null()).await,
+            [1, 3, 4],
+            "None is SQL NULL, not JSON null"
+        );
+        assert_eq!(
+            ids(e, Item::EXTRA.path("score").cast::<i64>().eq(1)).await,
+            [2]
+        );
+        e.run(
+            update::<Item>()
+                .set(Item::EXTRA, &None)
+                .filter(Item::ID.eq(2))
+                .affected(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(ids(e, Item::EXTRA.is_not_null()).await, Vec::<i64>::new());
+    }
+
+    pub async fn case_timestamps<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        let cutoff = items()[1].created_at;
+        assert_eq!(ids(e, Item::CREATED_AT.gt(cutoff)).await, [3, 4]);
+        let latest = e
+            .run(
+                select::<Item>()
+                    .order_by(Item::CREATED_AT.desc())
+                    .limit(1)
+                    .one(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(latest.created_at, items()[3].created_at);
+    }
+
+    pub async fn case_dsl_lowering_and_eval_agree<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        let ci = |s: &str| {
+            Expr::<bool>::dsl(
+                &CI_EQ,
+                vec![
+                    ExprNode::Column(Item::NAME.column_ref()),
+                    ExprNode::Param(Value::Text(s.into())),
+                ],
+            )
+        };
+        assert_eq!(ids(e, ci("CHERRY")).await, [3]);
+        assert_eq!(ids(e, !ci("Cherry")).await, [1, 2, 4]);
+    }
+
+    pub async fn case_duplicate_key_is_an_error<E: AsyncExecutor>(e: &mut E) {
+        seed(e).await;
+        let r = e.run(insert::<Item>().value(&items()[0]).affected()).await;
+        assert!(r.is_err(), "duplicate primary key must fail");
+    }
+
+    pub async fn case_failed_multi_row_insert_is_atomic<E: AsyncExecutor>(e: &mut E) {
+        let mut batch = items();
+        batch.push(items()[0].clone());
+        assert!(
+            e.run(insert::<Item>().values(&batch).affected())
+                .await
+                .is_err()
+        );
+        assert!(
+            !e.run(select::<Item>().exists()).await.unwrap(),
+            "no partial insert"
+        );
+    }
+}

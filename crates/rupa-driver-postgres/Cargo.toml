@@ -5,5 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
+description = "Synchronous RUPA executor on the postgres crate"
 
 [dependencies]
+rupa-core.workspace = true
+rupa-sql.workspace = true
+rupa-driver-tokio-postgres.workspace = true
+postgres.workspace = true
+
+[dev-dependencies]
+rupa-conformance = { path = "../rupa-conformance" }
+pollster.workspace = true
+testcontainers-modules = { workspace = true, features = ["blocking"] }

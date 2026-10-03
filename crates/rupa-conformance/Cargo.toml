@@ -1,16 +1,15 @@
 [package]
-name = "rupa-driver-memory"
+name = "rupa-conformance"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
-description = "In-memory RUPA backend that evaluates the query IR directly"
+publish = false
+description = "Shared behavioural test suite run against every RUPA driver"
 
 [dependencies]
 rupa-core.workspace = true
+serde.workspace = true
 serde_json.workspace = true
-
-[dev-dependencies]
-rupa-conformance = { path = "../rupa-conformance" }
-pollster.workspace = true
+chrono.workspace = true

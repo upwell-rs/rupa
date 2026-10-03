@@ -5,5 +5,20 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
+description = "Async RUPA executor on tokio-postgres"
 
 [dependencies]
+rupa-core.workspace = true
+rupa-sql.workspace = true
+tokio-postgres.workspace = true
+postgres-types.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+rupa-conformance = { path = "../rupa-conformance" }
+tokio.workspace = true
+testcontainers-modules.workspace = true
