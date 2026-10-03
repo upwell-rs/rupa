@@ -1,4 +1,4 @@
-//! A tour of what RUPA can do so far (milestones 1–3).
+//! A tour of what RUPA can do so far (milestones 1–4).
 //!
 //! Run with: `cargo run -p rupa --example tour`
 //!
@@ -7,6 +7,7 @@
 //! - The same query rendered to Postgres SQL with bound parameters...
 //! - ...and executed by the in-memory backend, which never sees SQL.
 //! - A DSL function: lowered to SQL for Postgres, evaluated in memory.
+//! - Transactions: closure and guard APIs, nested savepoints.
 //! - An executor chosen at run time (`BoxAsyncExecutor`).
 
 use chrono::{DateTime, Utc};
@@ -182,6 +183,8 @@ fn run_in_memory(
     patch: Query<u64>,
 ) -> MemoryDb {
     use rupa::core::exec::Executor;
+    use rupa::core::tx::Transactional;
+    use rupa_driver_memory::MemoryError;
 
     println!("\nExecuted on the memory backend:");
     let mut db = MemoryDb::new();
@@ -225,6 +228,43 @@ fn run_in_memory(
     println!(
         "   full update -> theme is now {:?}",
         db.run(get::<User>(&1)).unwrap().unwrap().prefs.theme
+    );
+
+    // Transactions. The closure form commits on Ok and rolls back on Err;
+    // a nested call is a savepoint, so its failure leaves the outer work intact.
+    let outcome = db.transaction(|tx| {
+        tx.run(
+            update::<User>()
+                .one(&UserPatch {
+                    id: 2,
+                    nickname: Some(Some("amazing grace".into())),
+                    active: None,
+                })
+                .affected(),
+        )?;
+        let nested: Result<(), MemoryError> = tx.transaction(|inner| {
+            inner.run(delete::<User>().by_id(&1).affected())?;
+            Err(MemoryError::Unsupported("changed my mind".into()))
+        });
+        println!("   nested transaction rolled back: {}", nested.is_err());
+        Ok::<_, MemoryError>(())
+    });
+    outcome.unwrap();
+    println!(
+        "   after commit: grace is {:?}, ada still exists: {}",
+        db.run(get::<User>(&2)).unwrap().unwrap().nickname,
+        db.run(get::<User>(&1)).unwrap().is_some()
+    );
+
+    // The guard form: a dropped `Tx` rolls back.
+    {
+        let mut tx = db.begin().unwrap();
+        tx.run(delete::<User>().filter(col!(User::id).gt(0)).affected())
+            .unwrap();
+    }
+    println!(
+        "   dropped tx (deleted everything) -> {} users still there",
+        db.run(select::<User>().all()).unwrap().len()
     );
 
     let removed = db

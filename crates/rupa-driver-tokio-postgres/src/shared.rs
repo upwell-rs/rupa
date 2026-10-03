@@ -8,7 +8,7 @@ use bytes::BytesMut;
 use postgres_types::{IsNull, ToSql, Type, to_sql_checked};
 use rupa_core::exec::ExecError;
 use rupa_core::row::RowCursor;
-use rupa_core::{ResultError, RowError, SqlType, Value};
+use rupa_core::{ResultError, RowError, SqlType, TxError, Value};
 use rupa_sql::RenderError;
 
 #[derive(Debug)]
@@ -17,6 +17,7 @@ pub enum PgError {
     Render(RenderError),
     Db(tokio_postgres::Error),
     Result(ResultError),
+    Tx(TxError),
 }
 
 impl fmt::Display for PgError {
@@ -25,6 +26,7 @@ impl fmt::Display for PgError {
             PgError::Render(e) => write!(f, "rendering failed: {e}"),
             PgError::Db(e) => e.fmt(f),
             PgError::Result(e) => e.fmt(f),
+            PgError::Tx(e) => e.fmt(f),
         }
     }
 }
@@ -35,6 +37,7 @@ impl StdError for PgError {
             PgError::Render(e) => Some(e),
             PgError::Db(e) => Some(e),
             PgError::Result(e) => Some(e),
+            PgError::Tx(e) => Some(e),
         }
     }
 }

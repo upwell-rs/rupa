@@ -1793,6 +1793,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "postgres-types",
+ "rupa",
  "rupa-conformance",
  "rupa-core",
  "rupa-sql",

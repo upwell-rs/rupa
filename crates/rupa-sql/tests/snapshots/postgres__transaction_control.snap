@@ -1,0 +1,12 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: "out.join(\"\n\")"
+---
+BEGIN
+BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY
+BEGIN ISOLATION LEVEL READ COMMITTED
+SAVEPOINT rupa_sp_1
+RELEASE SAVEPOINT rupa_sp_1
+ROLLBACK TO SAVEPOINT rupa_sp_2; RELEASE SAVEPOINT rupa_sp_2
+COMMIT
+ROLLBACK

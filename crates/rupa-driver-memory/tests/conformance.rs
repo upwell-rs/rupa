@@ -40,7 +40,7 @@ fn conformance_async() {
 
 #[test]
 fn conformance_sync() {
-    pollster::block_on(rupa_conformance::run(&mut SyncMemory(Blocking(
-        MemoryDb::new(),
-    ))));
+    let mut h = SyncMemory(Blocking(MemoryDb::new()));
+    pollster::block_on(rupa_conformance::run(&mut h));
+    pollster::block_on(rupa_conformance::run_transactions(&mut h));
 }

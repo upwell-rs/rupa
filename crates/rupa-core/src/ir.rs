@@ -218,3 +218,48 @@ impl PartialEq for DslCall {
         std::ptr::eq(self.def, other.def) && self.args == other.args
     }
 }
+
+/// Transaction isolation level. Dialects without a level reject it when rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IsolationLevel {
+    ReadUncommitted,
+    ReadCommitted,
+    RepeatableRead,
+    Serializable,
+}
+
+/// Options for starting a top-level transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TxOptions {
+    pub isolation: Option<IsolationLevel>,
+    pub read_only: bool,
+}
+
+impl TxOptions {
+    pub fn isolation(mut self, level: IsolationLevel) -> Self {
+        self.isolation = Some(level);
+        self
+    }
+
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
+    }
+
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Transaction control. Depths start at 1 for the first savepoint inside a
+/// transaction; depth 0 is the transaction itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxStatement {
+    Begin(TxOptions),
+    Commit,
+    Rollback,
+    Savepoint(u32),
+    ReleaseSavepoint(u32),
+    /// Roll back to the savepoint and release it.
+    RollbackToSavepoint(u32),
+}

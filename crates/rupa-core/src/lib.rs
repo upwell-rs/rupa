@@ -12,6 +12,7 @@ pub mod expr;
 pub mod ir;
 pub mod query;
 pub mod row;
+pub mod tx;
 pub mod value;
 
 #[doc(hidden)]
@@ -40,13 +41,16 @@ pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Upda
 pub use column::{Column, ColumnKind, ColumnMeta, Json, Scalar};
 pub use dialect::{Capability, Dialect, DialectId, DynDialect, Memory, Postgres, Supports};
 pub use entity::{Entity, FromRow, IdValues};
-pub use error::{DecodeError, DslError, ResultError, RowError};
+pub use error::{DecodeError, DslError, ResultError, RowError, TxError};
 pub use exec::{
     AsyncExecutor, BoxAsyncExecutor, BoxExecutor, DynError, ExecError, Executor, Outcome,
 };
 pub use expr::{Expr, ExprOps, IntoExpr, bind};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 pub use row::{Row, RowCursor};
+pub use tx::{
+    AsyncTransaction, AsyncTransactional, IsolationLevel, Transaction, Transactional, TxOptions,
+};
 pub use value::{ScalarColumn, SqlType, Value};
 
 pub mod prelude {

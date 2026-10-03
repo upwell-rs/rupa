@@ -26,7 +26,8 @@ use rupa_core::dialect::Memory;
 use rupa_core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
 use rupa_core::ir::{ColumnRef, Delete, FromClause, Insert, Select, Statement, TableRef, Update};
 use rupa_core::row::ValueRows;
-use rupa_core::{DslError, Entity, Expect, ResultError, SqlType, Value};
+use rupa_core::tx::{AsyncTransaction, AsyncTransactional, Transaction, Transactional, TxOptions};
+use rupa_core::{DslError, Entity, Expect, ResultError, SqlType, TxError, Value};
 
 use eval::{Scope, eval, keeps, sort_cmp};
 
@@ -41,6 +42,9 @@ pub enum MemoryError {
     Unsupported(String),
     Dsl(DslError),
     Result(ResultError),
+    /// A write inside a read-only transaction.
+    ReadOnly,
+    Tx(TxError),
 }
 
 impl fmt::Display for MemoryError {
@@ -54,6 +58,8 @@ impl fmt::Display for MemoryError {
             MemoryError::Unsupported(m) => write!(f, "unsupported by the memory backend: {m}"),
             MemoryError::Dsl(e) => e.fmt(f),
             MemoryError::Result(e) => e.fmt(f),
+            MemoryError::ReadOnly => f.write_str("cannot write in a read-only transaction"),
+            MemoryError::Tx(e) => e.fmt(f),
         }
     }
 }
@@ -148,6 +154,8 @@ impl Scope for NoRow {
 pub struct MemoryDb {
     tables: HashMap<TableRef, Table>,
     dialect: Memory,
+    /// Table states to restore on rollback, one per open transaction level.
+    snapshots: Vec<HashMap<TableRef, Table>>,
 }
 
 impl MemoryDb {
@@ -473,5 +481,187 @@ impl AsyncExecutor for AsyncMemoryDb {
         _expect: Expect,
     ) -> impl Future<Output = Result<Outcome, MemoryError>> + Send {
         std::future::ready(self.0.run_statement(statement))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transactions: a stack of table snapshots.
+// ---------------------------------------------------------------------------
+
+/// A transaction (or, nested, a savepoint) on a [`MemoryDb`]. Rolled back
+/// when dropped without `commit`.
+#[derive(Debug)]
+pub struct MemoryTx<'t> {
+    db: &'t mut MemoryDb,
+    /// Number of snapshots on the stack while this transaction is open.
+    level: usize,
+    read_only: bool,
+    done: bool,
+}
+
+impl<'t> MemoryTx<'t> {
+    fn open(db: &'t mut MemoryDb, read_only: bool) -> Self {
+        db.snapshots.push(db.tables.clone());
+        let level = db.snapshots.len();
+        MemoryTx {
+            db,
+            level,
+            read_only,
+            done: false,
+        }
+    }
+
+    fn nested(&mut self, options: TxOptions) -> Result<MemoryTx<'_>, MemoryError> {
+        if !options.is_default() {
+            return Err(MemoryError::Tx(TxError::OptionsOnNested));
+        }
+        Ok(MemoryTx::open(&mut *self.db, self.read_only))
+    }
+
+    fn finish(&mut self, commit: bool) {
+        debug_assert_eq!(
+            self.db.snapshots.len(),
+            self.level,
+            "transactions end innermost first"
+        );
+        let snapshot = self
+            .db
+            .snapshots
+            .pop()
+            .expect("open transaction has a snapshot");
+        if !commit {
+            self.db.tables = snapshot;
+        }
+        self.done = true;
+    }
+
+    fn run(&mut self, statement: &Statement) -> Result<Outcome, MemoryError> {
+        let writes = matches!(
+            statement,
+            Statement::Insert(_) | Statement::Update(_) | Statement::Delete(_) | Statement::Raw(_)
+        );
+        if writes && self.read_only {
+            return Err(MemoryError::ReadOnly);
+        }
+        self.db.run_statement(statement)
+    }
+}
+
+impl Drop for MemoryTx<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            self.finish(false);
+        }
+    }
+}
+
+impl Executor for MemoryTx<'_> {
+    type Dialect = Memory;
+    type Error = MemoryError;
+
+    fn dialect(&self) -> &Memory {
+        &self.db.dialect
+    }
+
+    fn execute(&mut self, statement: &Statement, _expect: Expect) -> Result<Outcome, MemoryError> {
+        self.run(statement)
+    }
+}
+
+impl Transaction for MemoryTx<'_> {
+    fn commit(mut self) -> Result<(), MemoryError> {
+        self.finish(true);
+        Ok(())
+    }
+
+    fn rollback(mut self) -> Result<(), MemoryError> {
+        self.finish(false);
+        Ok(())
+    }
+}
+
+impl Transactional for MemoryTx<'_> {
+    type Tx<'s>
+        = MemoryTx<'s>
+    where
+        Self: 's;
+
+    fn begin_with(&mut self, options: TxOptions) -> Result<MemoryTx<'_>, MemoryError> {
+        self.nested(options)
+    }
+}
+
+impl Transactional for MemoryDb {
+    type Tx<'t>
+        = MemoryTx<'t>
+    where
+        Self: 't;
+
+    /// The memory backend is single-threaded, so every isolation level
+    /// behaves as serializable; read-only is enforced.
+    fn begin_with(&mut self, options: TxOptions) -> Result<MemoryTx<'_>, MemoryError> {
+        Ok(MemoryTx::open(self, options.read_only))
+    }
+}
+
+/// [`MemoryTx`] as an async transaction, for [`AsyncMemoryDb`].
+#[derive(Debug)]
+pub struct AsyncMemoryTx<'t>(MemoryTx<'t>);
+
+impl AsyncExecutor for AsyncMemoryTx<'_> {
+    type Dialect = Memory;
+    type Error = MemoryError;
+
+    fn dialect(&self) -> &Memory {
+        &self.0.db.dialect
+    }
+
+    fn execute(
+        &mut self,
+        statement: &Statement,
+        _expect: Expect,
+    ) -> impl Future<Output = Result<Outcome, MemoryError>> + Send {
+        std::future::ready(self.0.run(statement))
+    }
+}
+
+impl AsyncTransaction for AsyncMemoryTx<'_> {
+    fn commit(self) -> impl Future<Output = Result<(), MemoryError>> + Send {
+        std::future::ready(Transaction::commit(self.0))
+    }
+
+    fn rollback(self) -> impl Future<Output = Result<(), MemoryError>> + Send {
+        std::future::ready(Transaction::rollback(self.0))
+    }
+}
+
+impl AsyncTransactional for AsyncMemoryTx<'_> {
+    type Tx<'s>
+        = AsyncMemoryTx<'s>
+    where
+        Self: 's;
+
+    fn begin_with(
+        &mut self,
+        options: TxOptions,
+    ) -> impl Future<Output = Result<AsyncMemoryTx<'_>, MemoryError>> + Send {
+        std::future::ready(self.0.nested(options).map(AsyncMemoryTx))
+    }
+}
+
+impl AsyncTransactional for AsyncMemoryDb {
+    type Tx<'t>
+        = AsyncMemoryTx<'t>
+    where
+        Self: 't;
+
+    fn begin_with(
+        &mut self,
+        options: TxOptions,
+    ) -> impl Future<Output = Result<AsyncMemoryTx<'_>, MemoryError>> + Send {
+        std::future::ready(Ok(AsyncMemoryTx(MemoryTx::open(
+            &mut self.0,
+            options.read_only,
+        ))))
     }
 }

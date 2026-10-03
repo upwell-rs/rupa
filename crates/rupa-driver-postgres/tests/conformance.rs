@@ -11,6 +11,7 @@ impl Harness for Pg {
     type Exec = Blocking<PgExecutor>;
 
     async fn reset(&mut self) {
+        self.0.0.clean().expect("clean");
         self.0
             .0
             .client()
@@ -34,7 +35,7 @@ fn conformance() {
         node.get_host_port_ipv4(5432).unwrap()
     );
     let client = postgres::Client::connect(&url, postgres::NoTls).expect("connect");
-    pollster::block_on(rupa_conformance::run(&mut Pg(Blocking(PgExecutor::new(
-        client,
-    )))));
+    let mut h = Pg(Blocking(PgExecutor::new(client)));
+    pollster::block_on(rupa_conformance::run(&mut h));
+    pollster::block_on(rupa_conformance::run_transactions(&mut h));
 }

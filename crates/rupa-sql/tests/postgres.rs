@@ -475,3 +475,30 @@ fn raw_statement_ir() {
     });
     insta::assert_snapshot!(pg_stmt(&s));
 }
+
+#[test]
+fn transaction_control() {
+    use rupa_core::ir::{IsolationLevel, TxOptions, TxStatement};
+    let statements = [
+        TxStatement::Begin(TxOptions::default()),
+        TxStatement::Begin(
+            TxOptions::default()
+                .isolation(IsolationLevel::Serializable)
+                .read_only(),
+        ),
+        TxStatement::Begin(TxOptions::default().isolation(IsolationLevel::ReadCommitted)),
+        TxStatement::Savepoint(1),
+        TxStatement::ReleaseSavepoint(1),
+        TxStatement::RollbackToSavepoint(2),
+        TxStatement::Commit,
+        TxStatement::Rollback,
+    ];
+    let out: Vec<String> = statements
+        .iter()
+        .map(|s| rupa_sql::render_tx(s, &Postgres).unwrap())
+        .collect();
+    insta::assert_snapshot!(out.join(
+        "
+"
+    ));
+}

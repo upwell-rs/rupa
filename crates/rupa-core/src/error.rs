@@ -143,3 +143,24 @@ impl fmt::Display for DslError {
 }
 
 impl std::error::Error for DslError {}
+
+/// Misuse of the transaction API.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TxError {
+    /// Isolation level and read-only can only be set on a top-level
+    /// transaction; nested transactions are savepoints.
+    OptionsOnNested,
+}
+
+impl fmt::Display for TxError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TxError::OptionsOnNested => f.write_str(
+                "transaction options (isolation, read-only) cannot be set on a nested transaction",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TxError {}
