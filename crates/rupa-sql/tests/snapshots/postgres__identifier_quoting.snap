@@ -1,0 +1,5 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: pg_stmt(&s)
+---
+DELETE FROM "my schema"."t""1" WHERE "we""ird" IS NULL

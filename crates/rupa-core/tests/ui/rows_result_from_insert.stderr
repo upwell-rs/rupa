@@ -1,0 +1,22 @@
+error[E0277]: `Vec<User>` is not a result type for insert, update or delete
+ --> tests/ui/rows_result_from_insert.rs:7:61
+  |
+7 |     let _ = insert::<User>().value(&User::sample()).build::<Vec<User>>();
+  |                                                     -----   ^^^^^^^^^ the trait `AffectedResult` is not implemented for `Vec<User>`
+  |                                                     |
+  |                                                     required by a bound introduced by this call
+  |
+  = note: row-modifying queries return `u64` (affected rows) or `bool` (any row affected)
+help: the following other types implement trait `AffectedResult`
+ --> src/query.rs
+  |
+  | impl AffectedResult for u64 {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^ `u64`
+...
+  | impl AffectedResult for bool {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `bool`
+note: required by a bound in `InsertBuilder::<E>::build`
+ --> src/builder.rs
+  |
+  |     pub fn build<R: AffectedResult>(self) -> Query<R> {
+  |                     ^^^^^^^^^^^^^^ required by this bound in `InsertBuilder::<E>::build`

@@ -1,0 +1,7 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: "pg(&where_(dsl(&ILIKE).and(User::ACTIVE.eq(true))))"
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "email" ILIKE $1 AND "active" = $2
+$1 = Text("%A%")
+$2 = Bool(true)

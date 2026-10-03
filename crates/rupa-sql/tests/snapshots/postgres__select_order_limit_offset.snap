@@ -1,0 +1,8 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: pg(&q)
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "active" = $1 ORDER BY "created" DESC, "id" ASC LIMIT $2 OFFSET $3
+$1 = Bool(true)
+$2 = I64(50)
+$3 = I64(10)

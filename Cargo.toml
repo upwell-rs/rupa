@@ -1,0 +1,30 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "spikes/*"]
+
+[workspace.package]
+# Lockstep versioning: every member shares this version (see docs/design/versioning.md).
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+repository = "https://github.com/upwell-rs/rupa"
+
+[workspace.dependencies]
+# Intra-workspace crates are pinned exactly: macros emit paths into rupa-core's
+# hidden API, so mismatched versions must be impossible to resolve.
+rupa-core = { path = "crates/rupa-core", version = "=0.1.0" }
+rupa-macros = { path = "crates/rupa-macros", version = "=0.1.0" }
+rupa-sql = { path = "crates/rupa-sql", version = "=0.1.0" }
+rupa-dsl-std = { path = "crates/rupa-dsl-std", version = "=0.1.0" }
+rupa-upwell = { path = "crates/rupa-upwell", version = "=0.1.0" }
+
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+uuid = { version = "1", features = ["serde"] }
+trybuild = "1"
+insta = "1"

@@ -1,0 +1,7 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: "pg(&where_(raw.and(call.eq(\"x\"))))"
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE ("prefs" -> 'a') @> $1 AND lower("nickname") = $2
+$1 = Json(Object {"x": Number(1)})
+$2 = Text("x")

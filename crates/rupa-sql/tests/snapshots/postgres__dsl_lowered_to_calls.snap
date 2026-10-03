@@ -1,0 +1,6 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: pg(&where_(dsl(&CI_LIKE)))
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE LOWER("email") LIKE LOWER($1)
+$1 = Text("%A%")

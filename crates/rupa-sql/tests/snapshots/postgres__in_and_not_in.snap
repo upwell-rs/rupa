@@ -1,0 +1,9 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: pg(&where_(cond))
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "email" IN ($1, $2) AND "id" NOT IN ($3, $4)
+$1 = Text("a")
+$2 = Text("b")
+$3 = I64(1)
+$4 = I64(2)

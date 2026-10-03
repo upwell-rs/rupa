@@ -1,0 +1,7 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: pg(&where_(cond))
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "prefs" ->> 'it''s' = $1 AND "prefs" ->> E'back\\slash' = $2
+$1 = Text("x")
+$2 = Text("y")

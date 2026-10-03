@@ -1,0 +1,17 @@
+[package]
+name = "rupa-sql"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Renders RUPA query IR to SQL text plus bound parameters, per dialect"
+
+[dependencies]
+rupa-core.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true

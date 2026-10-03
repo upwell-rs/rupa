@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/set_column_of_other_entity.rs:10:34
+   |
+10 |     let _ = update::<User>().set(foreign, &"x".to_string());
+   |                              --- ^^^^^^^ expected `Column<User, String, _>`, found `Column<Other, String, Scalar>`
+   |                              |
+   |                              arguments to this method are incorrect
+   |
+   = note: expected struct `Column<User, String, _>`
+              found struct `Column<Other, String, rupa_core::Scalar>`
+note: method defined here
+  --> src/builder.rs
+   |
+   |     pub fn set<T, K>(mut self, column: Column<E, T, K>, value: &T) -> Self {
+   |            ^^^

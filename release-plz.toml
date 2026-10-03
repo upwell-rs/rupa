@@ -1,0 +1,40 @@
+[workspace]
+# Lockstep versioning: every published crate is released with the same version.
+changelog_update = true
+
+[[package]]
+name = "rupa"
+version_group = "rupa"
+[[package]]
+name = "rupa-core"
+version_group = "rupa"
+[[package]]
+name = "rupa-macros"
+version_group = "rupa"
+[[package]]
+name = "rupa-sql"
+version_group = "rupa"
+[[package]]
+name = "rupa-dsl-std"
+version_group = "rupa"
+[[package]]
+name = "rupa-upwell"
+version_group = "rupa"
+[[package]]
+name = "rupa-driver-sqlx"
+version_group = "rupa"
+[[package]]
+name = "rupa-driver-postgres"
+version_group = "rupa"
+[[package]]
+name = "rupa-driver-tokio-postgres"
+version_group = "rupa"
+[[package]]
+name = "rupa-driver-rusqlite"
+version_group = "rupa"
+[[package]]
+name = "rupa-driver-diesel"
+version_group = "rupa"
+[[package]]
+name = "rupa-driver-memory"
+version_group = "rupa"

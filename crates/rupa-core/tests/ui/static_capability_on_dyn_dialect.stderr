@@ -1,0 +1,24 @@
+error[E0277]: dialect `DynDialect` does not support `rupa_core::dialect::caps::Ilike`
+ --> tests/ui/static_capability_on_dyn_dialect.rs:6:17
+  |
+6 |     needs_ilike(&DynDialect::new(DialectId::Postgres));
+  |     ----------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ requires `rupa_core::dialect::caps::Ilike`
+  |     |
+  |     required by a bound introduced by this call
+  |
+  = help: the trait `Supports<rupa_core::dialect::caps::Ilike>` is not implemented for `DynDialect`
+  = note: use a dialect that supports it, or a runtime-checked function returning `Result`
+help: the trait `Supports<rupa_core::dialect::caps::Ilike>` is implemented for `rupa_core::Postgres`
+ --> src/dialect.rs
+  |
+  |         $(impl Supports<caps::$cap> for $ty {})*
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  | dialect!(Postgres => Postgres [Ilike, JsonPath, JsonContainment, Returning, Savepoints, NativeRls]);
+  | --------------------------------------------------------------------------------------------------- in this macro invocation
+note: required by a bound in `needs_ilike`
+ --> tests/ui/static_capability_on_dyn_dialect.rs:3:19
+  |
+3 | fn needs_ilike<D: Supports<caps::Ilike>>(_: &D) {}
+  |                   ^^^^^^^^^^^^^^^^^^^^^ required by this bound in `needs_ilike`
+  = note: this error originates in the macro `dialect` (in Nightly builds, run with -Z macro-backtrace for more info)

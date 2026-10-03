@@ -1,0 +1,8 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: "pg(&delete::<User>().filter(User::ID.in_([1i64, 2, 3])).affected())"
+---
+DELETE FROM "app"."users" WHERE "id" IN ($1, $2, $3)
+$1 = I64(1)
+$2 = I64(2)
+$3 = I64(3)

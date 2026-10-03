@@ -1,0 +1,7 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: pg(&q)
+---
+SELECT * FROM app.users WHERE email = $1 AND id > $2
+$1 = Text("a@b.c")
+$2 = I64(5)

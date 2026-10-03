@@ -1,0 +1,7 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: pg(&q)
+---
+$1, $2
+$1 = Null(I64)
+$2 = Null(Json)

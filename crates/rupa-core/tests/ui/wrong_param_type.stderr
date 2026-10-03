@@ -1,0 +1,19 @@
+error[E0277]: `i64` cannot be used as an expression of type `String`
+ --> tests/ui/wrong_param_type.rs:7:52
+  |
+7 |     let _ = select::<User>().filter(User::EMAIL.eq(5i64));
+  |                                                 -- ^^^^ expected a `String` value, column or expression
+  |                                                 |
+  |                                                 required by a bound introduced by this call
+  |
+  = help: the trait `IntoExpr<String>` is not implemented for `i64`
+help: the trait `IntoExpr<String>` is implemented for `&str`
+ --> src/expr.rs
+  |
+  | impl IntoExpr<String> for &str {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `rupa_core::ExprOps::eq`
+ --> src/expr.rs
+  |
+  |     fn eq(self, rhs: impl IntoExpr<Base<Self::Ty>>) -> Expr<bool> {
+  |                           ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `ExprOps::eq`

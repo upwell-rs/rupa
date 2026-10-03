@@ -1,0 +1,8 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: pg(&q)
+---
+UPDATE "app"."users" SET "prefs" = $1, "old_prefs" = $2, "nickname" = "email" WHERE "id" = $3
+$1 = Json(Object {"beta": Bool(false), "theme": String("light")})
+$2 = Null(Json)
+$3 = I64(7)

@@ -1,0 +1,10 @@
+---
+source: crates/rupa-sql/tests/postgres.rs
+expression: "pg(&where_(!User::ACTIVE.eq(true)).clone()) + \"\\n---\\n\" + &pg(&where_(cond))"
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE NOT ("active" = $1)
+$1 = Bool(true)
+---
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE NOT ("email" = $1 OR "active" = $2)
+$1 = Text("a")
+$2 = Bool(false)

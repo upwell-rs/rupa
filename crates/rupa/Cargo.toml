@@ -1,0 +1,20 @@
+[package]
+name = "rupa"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Rust Unified Persistence API: explicit, attribute-driven repositories over any SQL database"
+
+[features]
+nightly = ["rupa-core/nightly"]
+# DI integrations. Each is one optional dep + one feature; never default.
+upwell = ["dep:rupa-upwell"]
+
+[dependencies]
+rupa-core.workspace = true
+rupa-macros.workspace = true
+rupa-sql.workspace = true
+rupa-dsl-std.workspace = true
+rupa-upwell = { workspace = true, optional = true }
