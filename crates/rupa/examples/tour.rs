@@ -1,4 +1,4 @@
-//! A tour of what RUPA can do so far (milestones 1–5).
+//! A tour of what RUPA can do so far (milestones 1–7).
 //!
 //! Run with: `cargo run -p rupa --example tour`
 //!
@@ -177,6 +177,15 @@ fn main() {
         &signup,
     );
     show_sql("active users with the dark theme", &active_dark);
+    // The same query for other dialects: same meaning, dialect-specific SQL
+    // (MySQL needs emulated NULL ordering and JSON null handling).
+    for (name, dialect) in [
+        ("MySQL", &rupa::core::MySql as &dyn rupa::core::Dialect),
+        ("SQLite", &rupa::core::Sqlite),
+    ] {
+        let r = rupa::sql::render_query(&active_dark, dialect).expect("render");
+        println!("   {name}: {}", r.sql);
+    }
     show_sql(
         "case-insensitive email lookup (DSL function, lowered)",
         &by_email,

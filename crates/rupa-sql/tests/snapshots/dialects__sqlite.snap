@@ -1,0 +1,109 @@
+---
+source: crates/rupa-sql/tests/dialects.rs
+expression: cases(&Sqlite)
+---
+-- select
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "email" = ?
+  1 = Text("a@x")
+
+-- order by: Postgres null ordering
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" ORDER BY "nickname" ASC NULLS LAST, "id" DESC NULLS FIRST
+
+-- offset without limit
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" LIMIT -1 OFFSET ?
+  1 = I64(5)
+
+-- limit and offset
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" LIMIT ? OFFSET ?
+  1 = I64(10)
+  2 = I64(5)
+
+-- like
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "email" LIKE ? ESCAPE '\'
+  1 = Text("a\\_%")
+
+-- in / empty in
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "id" IN (?, ?) OR FALSE
+  1 = I64(1)
+  2 = I64(2)
+
+-- json path as text
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "prefs" ->> '$."theme"' = ?
+  1 = Text("dark")
+
+-- json path nested + index + cast
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE CAST("prefs" ->> '$."a"[0]."b"' AS INTEGER) = ?
+  1 = Bool(true)
+
+-- json path cast to integer
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE CAST("prefs" ->> '$."n"' AS INTEGER) > ?
+  1 = I64(3)
+
+-- exists
+SELECT EXISTS (SELECT 1 FROM "app"."users" WHERE "active" = ?)
+  1 = Bool(true)
+
+-- insert
+INSERT INTO "app"."users" ("id", "email", "nickname", "active", "created", "prefs", "old_prefs") VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)
+  1 = I64(7)
+  2 = Text("a@b.c")
+  3 = Null(Text)
+  4 = Bool(true)
+  5 = TimestampTz(2023-11-14T22:13:20Z)
+  6 = Json(Object {"beta": Bool(true), "theme": String("dark")})
+  7 = Null(Json)
+  8 = I64(7)
+  9 = Text("a@b.c")
+  10 = Null(Text)
+  11 = Bool(true)
+  12 = TimestampTz(2023-11-14T22:13:20Z)
+  13 = Json(Object {"beta": Bool(true), "theme": String("dark")})
+  14 = Null(Json)
+
+-- insert returning
+INSERT INTO "app"."users" ("id", "email", "nickname", "active", "created", "prefs", "old_prefs") VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING "id", "email", "nickname", "active", "created", "prefs", "old_prefs"
+  1 = I64(7)
+  2 = Text("a@b.c")
+  3 = Null(Text)
+  4 = Bool(true)
+  5 = TimestampTz(2023-11-14T22:13:20Z)
+  6 = Json(Object {"beta": Bool(true), "theme": String("dark")})
+  7 = Null(Json)
+
+-- update
+UPDATE "app"."users" SET "email" = ?, "nickname" = ?, "active" = ?, "created" = ?, "prefs" = ?, "old_prefs" = ? WHERE "id" = ?
+  1 = Text("a@b.c")
+  2 = Null(Text)
+  3 = Bool(true)
+  4 = TimestampTz(2023-11-14T22:13:20Z)
+  5 = Json(Object {"beta": Bool(true), "theme": String("dark")})
+  6 = Null(Json)
+  7 = I64(7)
+
+-- delete
+DELETE FROM "app"."users" WHERE "id" = ?
+  1 = I64(7)
+
+-- json key with a quote
+SELECT "id", "email", "nickname", "active", "created", "prefs", "old_prefs" FROM "app"."users" WHERE "prefs" ->> '$."it''s"' IS NULL
+
+-- json key with a double quote
+error: InvalidJsonKey("a\"b")
+
+-- tx: begin
+BEGIN
+
+-- tx: begin serializable
+BEGIN
+
+-- tx: begin read only
+error: UnsupportedCapability(ReadOnlyTransactions)
+
+-- tx: savepoint
+SAVEPOINT rupa_sp_1
+
+-- tx: rollback to savepoint
+ROLLBACK TO SAVEPOINT rupa_sp_1; RELEASE SAVEPOINT rupa_sp_1
+
+-- tx: commit
+COMMIT

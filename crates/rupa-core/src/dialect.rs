@@ -30,6 +30,8 @@ pub enum Capability {
     Returning,
     Savepoints,
     NativeRls,
+    /// `READ ONLY` transactions, enforced by the database.
+    ReadOnlyTransactions,
 }
 
 /// A dialect, usable both as a generic parameter and as `&dyn Dialect`.
@@ -81,7 +83,8 @@ pub mod caps {
         JsonContainment,
         Returning,
         Savepoints,
-        NativeRls
+        NativeRls,
+        ReadOnlyTransactions
     );
 }
 
@@ -107,7 +110,22 @@ macro_rules! dialect {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Postgres;
 
-dialect!(Postgres => Postgres [Ilike, JsonPath, JsonContainment, Returning, Savepoints, NativeRls]);
+dialect!(Postgres => Postgres [
+    Ilike, JsonPath, JsonContainment, Returning, Savepoints, NativeRls, ReadOnlyTransactions,
+]);
+
+/// MySQL 8.0+. No `RETURNING`, no `ILIKE`, no row-level security.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MySql;
+
+dialect!(MySql => MySql [JsonPath, JsonContainment, Savepoints, ReadOnlyTransactions]);
+
+/// SQLite 3.38+ (JSON `->`/`->>` operators; `RETURNING` since 3.35). No JSON
+/// containment, no read-only transactions, no row-level security.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Sqlite;
+
+dialect!(Sqlite => Sqlite [JsonPath, Returning, Savepoints]);
 
 /// The in-memory backend. Supports what it can evaluate directly; DSL
 /// functions additionally need an `eval` implementation to run on it.
@@ -115,15 +133,15 @@ dialect!(Postgres => Postgres [Ilike, JsonPath, JsonContainment, Returning, Save
 pub struct Memory;
 
 // Capabilities the memory backend can evaluate (via `eval` for DSL functions).
-dialect!(Memory => Memory [JsonPath, JsonContainment, Returning]);
+dialect!(Memory => Memory [JsonPath, JsonContainment, Returning, Savepoints, ReadOnlyTransactions]);
 
 /// The capabilities of a known dialect, as declared by its `dialect!` entry.
 pub fn capabilities_of(id: DialectId) -> &'static [Capability] {
     match id {
         DialectId::Postgres => Postgres::CAPABILITIES,
         DialectId::Memory => Memory::CAPABILITIES,
-        // Declared with their dialect types in milestone 7.
-        DialectId::MySql | DialectId::Sqlite => &[],
+        DialectId::MySql => MySql::CAPABILITIES,
+        DialectId::Sqlite => Sqlite::CAPABILITIES,
     }
 }
 

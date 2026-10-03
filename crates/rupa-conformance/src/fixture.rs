@@ -92,6 +92,54 @@ CREATE TABLE conformance.notes (
 );
 "#;
 
+/// MySQL schema (the `conformance` database). A binary collation gives
+/// Postgres-like (case- and accent-sensitive) text comparison and `LIKE`.
+pub const MYSQL_DDL: &str = r#"
+DROP DATABASE IF EXISTS conformance;
+CREATE DATABASE conformance CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;
+CREATE TABLE conformance.items (
+    id      BIGINT PRIMARY KEY,
+    name    VARCHAR(255) NOT NULL,
+    label   VARCHAR(255),
+    qty     INT NOT NULL,
+    active  BOOLEAN NOT NULL,
+    created DATETIME(6) NOT NULL,
+    meta    JSON NOT NULL,
+    extra   JSON
+);
+CREATE TABLE conformance.notes (
+    id      BIGINT AUTO_INCREMENT PRIMARY KEY,
+    title   VARCHAR(255) NOT NULL,
+    body    TEXT,
+    pinned  BOOLEAN NOT NULL
+);
+"#;
+
+/// Attaches the `conformance` schema; run once per SQLite connection.
+pub const SQLITE_ATTACH: &str = "ATTACH DATABASE ':memory:' AS conformance;";
+
+/// SQLite schema (in the attached `conformance` database). Drops and recreates.
+pub const SQLITE_DDL: &str = r#"
+DROP TABLE IF EXISTS conformance.items;
+DROP TABLE IF EXISTS conformance.notes;
+CREATE TABLE conformance.items (
+    id      INTEGER PRIMARY KEY,
+    name    TEXT NOT NULL,
+    label   TEXT,
+    qty     INTEGER NOT NULL,
+    active  INTEGER NOT NULL,
+    created TEXT NOT NULL,
+    meta    TEXT NOT NULL,
+    extra   TEXT
+);
+CREATE TABLE conformance.notes (
+    id      INTEGER PRIMARY KEY,
+    title   TEXT NOT NULL,
+    body    TEXT,
+    pinned  INTEGER NOT NULL
+);
+"#;
+
 fn at(secs: i64) -> DateTime<Utc> {
     DateTime::from_timestamp(secs, 0).expect("valid timestamp")
 }

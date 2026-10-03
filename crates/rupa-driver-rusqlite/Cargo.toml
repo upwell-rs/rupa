@@ -5,5 +5,22 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
+description = "Synchronous RUPA executor on rusqlite (SQLite 3.38+)"
+
+[features]
+default = ["bundled"]
+# Compile SQLite from source (rusqlite's `bundled`); turn off to link a system SQLite >= 3.38.
+bundled = ["rusqlite/bundled"]
 
 [dependencies]
+rupa-core.workspace = true
+rupa-sql.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+rupa-conformance = { path = "../rupa-conformance" }
+rupa = { path = "../rupa" }
+pollster.workspace = true

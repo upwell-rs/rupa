@@ -58,7 +58,10 @@ fn ilike_branches_per_dialect_at_runtime() {
     ));
     for d in [DialectId::MySql, DialectId::Sqlite] {
         assert!(
-            matches!(lowered(&e, d), Ok(ExprNode::RawOp("LIKE", ..))),
+            matches!(
+                lowered(&e, d),
+                Ok(ExprNode::Binary(rupa_core::ir::BinOp::Like, ..))
+            ),
             "{d:?}"
         );
     }

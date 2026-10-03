@@ -454,8 +454,8 @@ fn render_errors() {
         Err(RenderError::UnsupportedDialect(DialectId::Memory))
     );
     assert_eq!(
-        render_query(&select::<User>().all(), &DynDialect::new(DialectId::MySql)),
-        Err(RenderError::UnsupportedDialect(DialectId::MySql))
+        render_query(&select::<User>().all(), &DynDialect::new(DialectId::Memory)),
+        Err(RenderError::UnsupportedDialect(DialectId::Memory))
     );
 }
 

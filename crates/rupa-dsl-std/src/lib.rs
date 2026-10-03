@@ -5,14 +5,15 @@
 //! |---|---|---|---|
 //! | [`ilike`] | runtime (per dialect) | `a ILIKE b` | `eval` |
 //! | [`lower`], [`upper`] | none (standard SQL) | `lower(a)` | `eval` |
-//! | [`json_contains`] | static: `JsonContainment` | `a @> b` | `eval` |
-//! | [`json_has_key`] | static: `JsonPath` | `jsonb_exists(a, k)` | `eval` |
+//! | [`json_contains`] | static: `JsonContainment` | `a @> b` (MySQL `JSON_CONTAINS`) | `eval` |
+//! | [`json_has_key`] | static: `JsonPath` | `jsonb_exists(a, k)` (MySQL `JSON_CONTAINS_PATH`, SQLite `json_type`) | `eval` |
 //!
 //! Every function takes and returns expressions; arguments that carry data
 //! are bound parameters.
 
+use rupa_core::ir::ExprNode;
 use rupa_core::sem;
-use rupa_core::{Dialect, DialectId, DslError, Expr, SqlType, Value};
+use rupa_core::{Dialect, DialectId, DslError, Expr, ExprOps, SqlType, Value};
 use rupa_macros::function;
 
 type Json = serde_json::Value;
@@ -47,11 +48,11 @@ pub fn ilike(
 ) -> Result<Expr<bool>, DslError> {
     match dialect.id() {
         DialectId::Postgres => Ok(Expr::raw_op("ILIKE", s, pattern)),
-        DialectId::MySql | DialectId::Sqlite => Ok(Expr::raw_op(
-            "LIKE",
-            Expr::<String>::call("LOWER", [s]),
-            Expr::<String>::call("LOWER", [pattern]),
-        )),
+        // A `LIKE` node (not a raw operator), so dialect-specific LIKE
+        // handling such as SQLite's `ESCAPE` clause applies.
+        DialectId::MySql | DialectId::Sqlite => {
+            Ok(Expr::<String>::call("LOWER", [s]).like(Expr::<String>::call("LOWER", [pattern])))
+        }
         other => Err(DslError::unsupported("ilike", other)),
     }
 }
@@ -122,6 +123,7 @@ pub fn json_contains(
 ) -> Result<Expr<bool>, DslError> {
     match dialect.id() {
         DialectId::Postgres => Ok(Expr::raw_op("@>", doc, part)),
+        DialectId::MySql => Ok(Expr::call("JSON_CONTAINS", [doc, part])),
         other => Err(DslError::unsupported("json_contains", other)),
     }
 }
@@ -134,18 +136,33 @@ fn eval_json_contains(args: &[Value]) -> Result<Value, DslError> {
 }
 
 /// Whether JSON object `doc` has top-level key `key`. Statically gated on
-/// `JsonPath`.
+/// `JsonPath`. On MySQL and SQLite the key goes into a JSON path, so keys
+/// containing `"` are not supported there.
 #[function(crate = ::rupa_core, requires = JsonPath, eval = eval_json_has_key)]
 pub fn json_has_key(
     dialect: &dyn Dialect,
     doc: Expr<Json>,
     key: Expr<String>,
 ) -> Result<Expr<bool>, DslError> {
+    let text = |s: &str| Expr::<String>::from_node(ExprNode::Param(Value::Text(s.into())));
+    let any = |e: Expr<Json>| Expr::<String>::from_node(e.into_node());
     match dialect.id() {
-        DialectId::Postgres => Ok(Expr::call(
-            "jsonb_exists",
-            [doc.into_node(), key.into_node()].map(Expr::<Json>::from_node),
-        )),
+        DialectId::Postgres => Ok(Expr::call("jsonb_exists", [any(doc), key])),
+        DialectId::MySql => {
+            let path = Expr::<String>::call("CONCAT", [text("$.\""), key, text("\"")]);
+            Ok(Expr::call(
+                "JSON_CONTAINS_PATH",
+                [any(doc), text("one"), path],
+            ))
+        }
+        DialectId::Sqlite => {
+            let path = Expr::<String>::raw_op(
+                "||",
+                Expr::<String>::raw_op("||", text("$.\""), key),
+                text("\""),
+            );
+            Ok(Expr::<Option<String>>::call("json_type", [any(doc), path]).is_not_null())
+        }
         other => Err(DslError::unsupported("json_has_key", other)),
     }
 }

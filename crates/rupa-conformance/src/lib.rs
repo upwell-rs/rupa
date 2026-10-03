@@ -12,12 +12,15 @@ use std::future::Future;
 
 use rupa::core::dialect::Dialect;
 use rupa::core::exec::{AsyncExecutor, ExecError};
-use rupa::core::ir::{DslFnDef, ExprNode};
+use rupa::core::ir::ExprNode;
 use rupa::core::tx::{AsyncTransaction, AsyncTransactional, IsolationLevel, TxOptions};
-use rupa::core::{DialectId, DslError, ResultError, Value};
+use rupa::core::{Capability, DialectId, DslError, ResultError, Value};
 use rupa::prelude::*;
 
-pub use fixture::{Item, NewNote, Note, NotePatch, POSTGRES_DDL, SetPinned, items};
+pub use fixture::{
+    Item, MYSQL_DDL, NewNote, Note, NotePatch, POSTGRES_DDL, SQLITE_ATTACH, SQLITE_DDL, SetPinned,
+    items,
+};
 
 /// Gives the suite a fresh, empty schema per case.
 pub trait Harness {
@@ -96,28 +99,22 @@ where
     );
 }
 
-/// `upper(a) = upper(b)`: lowered for SQL dialects, evaluated by the memory backend.
-pub static CI_EQ: DslFnDef = DslFnDef {
-    name: "ci_eq",
-    lower: lower_ci_eq,
-    eval: Some(eval_ci_eq),
-};
-
-fn lower_ci_eq(dialect: &dyn Dialect, mut args: Vec<ExprNode>) -> Result<ExprNode, DslError> {
-    if args.len() != 2 {
-        return Err(DslError::Arity {
-            function: "ci_eq",
-            expected: 2,
-            got: args.len(),
-        });
-    }
-    let (b, a) = (args.pop().unwrap(), args.pop().unwrap());
+/// `upper(a) = upper(b)`: lowered for every SQL dialect (standard SQL),
+/// evaluated by the memory backend through `eval`.
+#[rupa::dsl::function(eval = eval_ci_eq)]
+pub fn ci_eq(
+    dialect: &dyn Dialect,
+    a: Expr<String>,
+    b: Expr<String>,
+) -> Result<Expr<bool>, DslError> {
     match dialect.id() {
-        DialectId::Postgres => Ok(ExprNode::Binary(
-            rupa::core::ir::BinOp::Eq,
-            Box::new(ExprNode::Call("upper", vec![a])),
-            Box::new(ExprNode::Call("upper", vec![b])),
-        )),
+        DialectId::Postgres | DialectId::MySql | DialectId::Sqlite => {
+            let (a, b) = (
+                Expr::<String>::call("upper", [a]),
+                Expr::<String>::call("upper", [b]),
+            );
+            Ok(Expr::raw_op("=", a, b))
+        }
         other => Err(DslError::unsupported("ci_eq", other)),
     }
 }
@@ -510,15 +507,7 @@ mod cases {
 
     pub async fn case_dsl_lowering_and_eval_agree<E: AsyncExecutor>(e: &mut E) {
         seed(e).await;
-        let ci = |s: &str| {
-            Expr::<bool>::dsl(
-                &CI_EQ,
-                vec![
-                    ExprNode::Column(col!(Item::name).column_ref()),
-                    ExprNode::Param(Value::Text(s.into())),
-                ],
-            )
-        };
+        let ci = |s: &str| ci_eq(col!(Item::name), s);
         assert_eq!(ids(e, ci("CHERRY")).await, [3]);
         assert_eq!(ids(e, !ci("Cherry")).await, [1, 2, 4]);
     }
@@ -549,29 +538,50 @@ mod cases {
         }
     }
 
-    pub async fn case_generated_ids_and_returning<E: AsyncExecutor>(e: &mut E) {
-        let first = e
-            .run(insert::<Note>().value(&new_note("first")).returning_one())
+    /// Whether the dialect has `RETURNING`; without it, generated values are
+    /// read back with a query instead.
+    fn returning<E: AsyncExecutor>(e: &E) -> bool {
+        e.dialect().supports(Capability::Returning)
+    }
+
+    /// Inserts notes and returns them as stored (with generated ids).
+    async fn insert_notes<E: AsyncExecutor>(e: &mut E, notes: &[NewNote]) -> Vec<Note> {
+        if returning(e) {
+            return e
+                .run(insert::<Note>().values(notes).returning_all())
+                .await
+                .unwrap();
+        }
+        let n = e
+            .run(insert::<Note>().values(notes).affected())
+            .await
+            .unwrap() as usize;
+        let mut newest = e
+            .run(
+                select::<Note>()
+                    .order_by(col!(Note::id).desc())
+                    .limit(n as u64)
+                    .all(),
+            )
             .await
             .unwrap();
+        newest.reverse();
+        newest
+    }
+
+    pub async fn case_generated_ids_and_returning<E: AsyncExecutor>(e: &mut E) {
+        let first = insert_notes(e, &[new_note("first")]).await;
         assert_eq!(
             first,
-            Note {
+            [Note {
                 id: 1,
                 title: "first".into(),
                 body: None,
                 pinned: false
-            }
+            }]
         );
 
-        let more = e
-            .run(
-                insert::<Note>()
-                    .values(&[new_note("b"), new_note("c")])
-                    .returning_all(),
-            )
-            .await
-            .unwrap();
+        let more = insert_notes(e, &[new_note("b"), new_note("c")]).await;
         assert_eq!(more.iter().map(|n| n.id).collect::<Vec<_>>(), [2, 3]);
 
         // One model: the entity inserts itself; its generated id is ignored.
@@ -581,17 +591,26 @@ mod cases {
             body: Some("text".into()),
             pinned: true,
         };
-        let saved = e
-            .run(insert::<Note>().value(&draft).returning_one())
-            .await
-            .unwrap();
-        assert_eq!(saved, Note { id: 4, ..draft });
-
-        let n = e
-            .run(insert::<Note>().value(&new_note("plain")).affected())
-            .await
-            .unwrap();
-        assert_eq!(n, 1);
+        if returning(e) {
+            let saved = e
+                .run(insert::<Note>().value(&draft).returning_one())
+                .await
+                .unwrap();
+            assert_eq!(saved, Note { id: 4, ..draft });
+        } else {
+            e.run(insert::<Note>().value(&draft).affected())
+                .await
+                .unwrap();
+            assert_eq!(
+                e.run(get::<Note>(&4)).await.unwrap(),
+                Some(Note { id: 4, ..draft })
+            );
+            // Asking for RETURNING where it does not exist is an error, not a silent no-op.
+            let refused = e
+                .run(insert::<Note>().value(&new_note("x")).returning_one())
+                .await;
+            assert!(refused.is_err());
+        }
     }
 
     pub async fn case_get_by_id<E: AsyncExecutor>(e: &mut E) {
@@ -608,10 +627,7 @@ mod cases {
     }
 
     pub async fn case_update_entity_and_patches<E: AsyncExecutor>(e: &mut E) {
-        let mut a = e
-            .run(insert::<Note>().value(&new_note("a")).returning_one())
-            .await
-            .unwrap();
+        let mut a = insert_notes(e, &[new_note("a")]).await.remove(0);
         e.run(insert::<Note>().value(&new_note("b")).affected())
             .await
             .unwrap();
@@ -653,14 +669,7 @@ mod cases {
     }
 
     pub async fn case_delete_one_and_by_id<E: AsyncExecutor>(e: &mut E) {
-        let all = e
-            .run(
-                insert::<Note>()
-                    .values(&[new_note("a"), new_note("b"), new_note("c")])
-                    .returning_all(),
-            )
-            .await
-            .unwrap();
+        let all = insert_notes(e, &[new_note("a"), new_note("b"), new_note("c")]).await;
         assert_eq!(
             e.run(delete::<Note>().one(&all[0]).affected())
                 .await
@@ -698,6 +707,18 @@ mod cases {
         use rupa::dsl::{json_contains, json_has_key};
         seed(e).await;
         assert_eq!(
+            ids(e, json_has_key(col!(Item::extra), "score")).await,
+            [2],
+            "SQL NULL `extra` is not a match"
+        );
+        assert_eq!(
+            ids(e, !json_has_key(col!(Item::meta), "missing")).await,
+            [1, 2, 3, 4]
+        );
+        if !e.dialect().supports(Capability::JsonContainment) {
+            return;
+        }
+        assert_eq!(
             ids(
                 e,
                 json_contains(col!(Item::meta), serde_json::json!({"tags": ["a"]}))
@@ -723,15 +744,6 @@ mod cases {
         );
         assert_eq!(
             ids(e, json_contains(col!(Item::meta), serde_json::json!({}))).await,
-            [1, 2, 3, 4]
-        );
-        assert_eq!(
-            ids(e, json_has_key(col!(Item::extra), "score")).await,
-            [2],
-            "SQL NULL `extra` is not a match"
-        );
-        assert_eq!(
-            ids(e, !json_has_key(col!(Item::meta), "missing")).await,
             [1, 2, 3, 4]
         );
     }
@@ -881,6 +893,16 @@ mod tx_cases {
 
     pub async fn tx_read_only_rejects_writes<E: AsyncTransactional>(e: &mut E) {
         add(e, "a").await;
+        if !e.dialect().supports(Capability::ReadOnlyTransactions) {
+            // Requesting it must be an error, never silently ignored.
+            assert!(
+                e.begin_with(TxOptions::default().read_only())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(titles(e).await, ["a"]);
+            return;
+        }
         let mut tx = e
             .begin_with(TxOptions::default().read_only())
             .await

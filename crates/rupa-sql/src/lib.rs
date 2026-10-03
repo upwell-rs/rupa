@@ -11,10 +11,12 @@
 
 use std::fmt;
 
-use rupa_core::ir::{IsolationLevel, Statement, TxStatement};
+use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::{Dialect, DialectId, DslError, Query, Value};
 
+mod mysql;
 mod postgres;
+mod sqlite;
 mod writer;
 
 /// SQL text and its parameters, in placeholder order.
@@ -68,13 +70,18 @@ impl fmt::Display for RenderError {
 
 impl std::error::Error for RenderError {}
 
+fn syntax_for(dialect: &dyn Dialect) -> Result<&'static dyn writer::Syntax, RenderError> {
+    Ok(match dialect.id() {
+        DialectId::Postgres => &postgres::Postgres,
+        DialectId::MySql => &mysql::MySql,
+        DialectId::Sqlite => &sqlite::Sqlite,
+        other => return Err(RenderError::UnsupportedDialect(other)),
+    })
+}
+
 /// Renders a statement for `dialect`.
 pub fn render(statement: &Statement, dialect: &dyn Dialect) -> Result<Rendered, RenderError> {
-    let syntax: &dyn writer::Syntax = match dialect.id() {
-        DialectId::Postgres => &postgres::Postgres,
-        other => return Err(RenderError::UnsupportedDialect(other)),
-    };
-    writer::Writer::new(dialect, syntax).statement(statement)
+    writer::Writer::new(dialect, syntax_for(dialect)?).statement(statement)
 }
 
 /// Renders a query's statement for `dialect`.
@@ -85,34 +92,5 @@ pub fn render_query<R>(query: &Query<R>, dialect: &dyn Dialect) -> Result<Render
 /// Renders a transaction control statement for `dialect`. The result may hold
 /// several statements; drivers send it with their simple-query path.
 pub fn render_tx(statement: &TxStatement, dialect: &dyn Dialect) -> Result<String, RenderError> {
-    if dialect.id() != DialectId::Postgres {
-        return Err(RenderError::UnsupportedDialect(dialect.id()));
-    }
-    let savepoint = |depth: &u32| format!("rupa_sp_{depth}");
-    Ok(match statement {
-        TxStatement::Begin(options) => {
-            let mut sql = String::from("BEGIN");
-            if let Some(level) = options.isolation {
-                sql.push_str(" ISOLATION LEVEL ");
-                sql.push_str(match level {
-                    IsolationLevel::ReadUncommitted => "READ UNCOMMITTED",
-                    IsolationLevel::ReadCommitted => "READ COMMITTED",
-                    IsolationLevel::RepeatableRead => "REPEATABLE READ",
-                    IsolationLevel::Serializable => "SERIALIZABLE",
-                });
-            }
-            if options.read_only {
-                sql.push_str(" READ ONLY");
-            }
-            sql
-        }
-        TxStatement::Commit => "COMMIT".into(),
-        TxStatement::Rollback => "ROLLBACK".into(),
-        TxStatement::Savepoint(d) => format!("SAVEPOINT {}", savepoint(d)),
-        TxStatement::ReleaseSavepoint(d) => format!("RELEASE SAVEPOINT {}", savepoint(d)),
-        TxStatement::RollbackToSavepoint(d) => {
-            let sp = savepoint(d);
-            format!("ROLLBACK TO SAVEPOINT {sp}; RELEASE SAVEPOINT {sp}")
-        }
-    })
+    syntax_for(dialect)?.tx(statement)
 }

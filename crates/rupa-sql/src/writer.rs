@@ -3,7 +3,7 @@
 
 use rupa_core::ir::{
     BinOp, ColumnRef, Delete, Direction, ExprNode, FromClause, Insert, PathSeg, RawPart, Select,
-    Statement, TableRef, UnOp, Update,
+    Statement, TableRef, TxStatement, UnOp, Update,
 };
 use rupa_core::{Capability, Dialect};
 use rupa_core::{SqlType, Value};
@@ -12,6 +12,18 @@ use crate::{RenderError, Rendered};
 
 /// Maximum nesting of DSL lowerings (a lowering may produce further DSL calls).
 const MAX_LOWERING_DEPTH: usize = 32;
+
+/// How a dialect gets Postgres' default NULL ordering (`NULLS LAST`
+/// ascending, `NULLS FIRST` descending), which every backend must match.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NullsOrdering {
+    /// The dialect's default already matches.
+    Default,
+    /// `NULLS LAST` / `NULLS FIRST` keywords.
+    Keyword,
+    /// No keyword: sort by `(x IS NULL)` first.
+    Emulate,
+}
 
 pub(crate) trait Syntax {
     /// Writes the placeholder for 1-based parameter `n`.
@@ -28,9 +40,11 @@ pub(crate) trait Syntax {
         out.push('"');
     }
 
-    fn cast_type(&self, ty: SqlType) -> &'static str;
+    /// `inner` (already rendered) converted to `ty`.
+    fn cast(&self, inner: &str, ty: SqlType) -> Result<String, RenderError>;
 
     /// Writes a path into the already-rendered JSON column `column`.
+    /// `as_text` must give SQL `NULL` for a missing key or a JSON `null`.
     fn json_path(
         &self,
         column: &str,
@@ -38,6 +52,54 @@ pub(crate) trait Syntax {
         as_text: bool,
         out: &mut String,
     ) -> Result<(), RenderError>;
+
+    fn nulls_ordering(&self) -> NullsOrdering {
+        NullsOrdering::Default
+    }
+
+    /// The `LIMIT` to write when only `OFFSET` is given, if the dialect
+    /// requires one.
+    fn unbounded_limit(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Written after a `LIKE` pattern, making `\` the escape character.
+    fn like_escape(&self) -> &'static str {
+        ""
+    }
+
+    /// Transaction control; may hold several statements.
+    fn tx(&self, statement: &TxStatement) -> Result<String, RenderError>;
+}
+
+/// Savepoint name for nesting depth `depth`.
+pub(crate) fn savepoint(depth: u32) -> String {
+    format!("rupa_sp_{depth}")
+}
+
+/// The savepoint and commit/rollback statements, identical across dialects.
+pub(crate) fn common_tx(statement: &TxStatement) -> Option<String> {
+    Some(match statement {
+        TxStatement::Begin(_) => return None,
+        TxStatement::Commit => "COMMIT".into(),
+        TxStatement::Rollback => "ROLLBACK".into(),
+        TxStatement::Savepoint(d) => format!("SAVEPOINT {}", savepoint(*d)),
+        TxStatement::ReleaseSavepoint(d) => format!("RELEASE SAVEPOINT {}", savepoint(*d)),
+        TxStatement::RollbackToSavepoint(d) => {
+            let sp = savepoint(*d);
+            format!("ROLLBACK TO SAVEPOINT {sp}; RELEASE SAVEPOINT {sp}")
+        }
+    })
+}
+
+pub(crate) fn isolation_sql(level: rupa_core::ir::IsolationLevel) -> &'static str {
+    use rupa_core::ir::IsolationLevel::*;
+    match level {
+        ReadUncommitted => "READ UNCOMMITTED",
+        ReadCommitted => "READ COMMITTED",
+        RepeatableRead => "REPEATABLE READ",
+        Serializable => "SERIALIZABLE",
+    }
 }
 
 pub(crate) struct Writer<'a> {
@@ -190,15 +252,41 @@ impl<'a> Writer<'a> {
         self.where_clause(s.filter.as_ref())?;
         for (i, o) in s.order_by.iter().enumerate() {
             self.sql.push_str(if i == 0 { " ORDER BY " } else { ", " });
-            self.expr(&o.expr, prec::ANY)?;
-            self.sql.push_str(match o.direction {
+            let dir = match o.direction {
                 Direction::Asc => " ASC",
                 Direction::Desc => " DESC",
-            });
+            };
+            match self.syntax.nulls_ordering() {
+                NullsOrdering::Default => {
+                    self.expr(&o.expr, prec::ANY)?;
+                    self.sql.push_str(dir);
+                }
+                NullsOrdering::Keyword => {
+                    self.expr(&o.expr, prec::ANY)?;
+                    self.sql.push_str(dir);
+                    self.sql.push_str(match o.direction {
+                        Direction::Asc => " NULLS LAST",
+                        Direction::Desc => " NULLS FIRST",
+                    });
+                }
+                NullsOrdering::Emulate => {
+                    // `(x IS NULL) ASC` puts NULLs last; DESC puts them first.
+                    self.sql.push('(');
+                    self.expr(&o.expr, prec::ABOVE_CMP)?;
+                    self.sql.push_str(" IS NULL)");
+                    self.sql.push_str(dir);
+                    self.sql.push_str(", ");
+                    self.expr(&o.expr, prec::ANY)?;
+                    self.sql.push_str(dir);
+                }
+            }
         }
         if let Some(limit) = &s.limit {
             self.sql.push_str(" LIMIT ");
             self.expr(limit, prec::ANY)?;
+        } else if let (Some(_), Some(unbounded)) = (&s.offset, self.syntax.unbounded_limit()) {
+            self.sql.push_str(" LIMIT ");
+            self.sql.push_str(unbounded);
         }
         if let Some(offset) = &s.offset {
             self.sql.push_str(" OFFSET ");
@@ -348,6 +436,9 @@ impl<'a> Writer<'a> {
                 self.sql.push_str(binop(*op));
                 self.sql.push(' ');
                 self.expr(r, p)?;
+                if *op == BinOp::Like {
+                    self.sql.push_str(self.syntax.like_escape());
+                }
             }
             ExprNode::In { list, negated, .. } if list.is_empty() => {
                 // `x IN ()` is invalid SQL; an empty list matches nothing.
@@ -373,11 +464,14 @@ impl<'a> Writer<'a> {
                 self.syntax.json_path(&col, path, *as_text, &mut self.sql)?;
             }
             ExprNode::Cast(e, ty) => {
-                self.sql.push_str("CAST(");
-                self.expr(e, prec::ANY)?;
-                self.sql.push_str(" AS ");
-                self.sql.push_str(self.syntax.cast_type(*ty));
-                self.sql.push(')');
+                // Render the operand on its own (parameters still number in
+                // order), then let the dialect wrap it.
+                let outer = std::mem::take(&mut self.sql);
+                let inner = self
+                    .expr(e, prec::ANY)
+                    .map(|()| std::mem::replace(&mut self.sql, outer))?;
+                let cast = self.syntax.cast(&inner, *ty)?;
+                self.sql.push_str(&cast);
             }
             ExprNode::RawOp(op, l, r) => {
                 if !valid_operator(op) {

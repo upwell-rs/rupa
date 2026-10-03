@@ -48,7 +48,8 @@ pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
 pub use column::{Column, ColumnKind, ColumnMeta, Json, Scalar};
 pub use dialect::{
-    Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, Postgres, Supports,
+    Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, MySql, Postgres, Sqlite,
+    Supports,
 };
 pub use entity::{Entity, FromRow, IdValues};
 pub use error::{DecodeError, DslError, ResultError, RowError, TxError};
