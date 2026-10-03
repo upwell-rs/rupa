@@ -1,0 +1,9 @@
+---
+source: crates/rupa-dsl-std/tests/std.rs
+expression: "out.join(\"\n\")"
+---
+SELECT 1 FROM "t" WHERE "email" ILIKE $1  -- Text("%@x")
+SELECT 1 FROM "t" WHERE "prefs" @> $1  -- Json(Object {"beta": Bool(true)})
+SELECT 1 FROM "t" WHERE jsonb_exists("prefs", $1)  -- Text("theme")
+SELECT 1 FROM "t" WHERE lower("email")  -- 
+SELECT 1 FROM "t" WHERE upper(lower("email"))  --

@@ -1,0 +1,5 @@
+error[E0425]: cannot find type `Telepathy` in module `::rupa::__macro_support::caps`
+  --> tests/ui/dsl_unknown_capability.rs:10:28
+   |
+10 | #[dsl::function(requires = Telepathy)]
+   |                            ^^^^^^^^^ not found in `::rupa::__macro_support::caps`

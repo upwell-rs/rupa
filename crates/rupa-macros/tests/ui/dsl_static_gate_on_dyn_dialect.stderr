@@ -1,0 +1,32 @@
+error[E0277]: dialect `DynDialect` does not support `rupa::dsl::caps::JsonContainment`
+  --> tests/ui/dsl_static_gate_on_dyn_dialect.rs:16:5
+   |
+16 |     std::sync::Arc::new(Repo::shared_async(exec))
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ requires `rupa::dsl::caps::JsonContainment`
+   |
+   = help: the trait `Supports<rupa::dsl::caps::JsonContainment>` is not implemented for `DynDialect`
+   = note: use a dialect that supports it, or a runtime-checked function returning `Result`
+help: the following other types implement trait `Supports<C>`
+  --> $WORKSPACE/crates/rupa-core/src/dialect.rs
+   |
+   |         $(impl Supports<caps::$cap> for $ty {})*
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |           |
+   |           `rupa::rupa_core::Memory`
+   |           `rupa::rupa_core::Postgres`
+...
+   | dialect!(Postgres => Postgres [Ilike, JsonPath, JsonContainment, Returning, Savepoints, NativeRls]);
+   | --------------------------------------------------------------------------------------------------- in this macro invocation
+...
+   | dialect!(Memory => Memory [JsonPath, JsonContainment, Returning]);
+   | ----------------------------------------------------------------- in this macro invocation
+   = note: required for `json_contains` to implement `DslAvailable<DynDialect>`
+note: required for `rupa::Repo<SharedAsync<BoxAsyncExecutor>>` to implement `Users`
+  --> tests/ui/dsl_static_gate_on_dyn_dialect.rs:10:1
+   |
+10 | #[repository]
+   | ^^^^^^^^^^^^^
+11 | pub trait Users: Send + Sync {
+   |           ^^^^^
+   = note: required for the cast from `Arc<rupa::Repo<SharedAsync<BoxAsyncExecutor>>>` to `Arc<(dyn Users + 'static)>`
+   = note: this error originates in the macro `dialect` which comes from the expansion of the attribute macro `repository` (in Nightly builds, run with -Z macro-backtrace for more info)

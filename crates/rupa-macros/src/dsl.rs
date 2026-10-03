@@ -54,8 +54,8 @@ pub enum Expr {
     Field(Vec<Ident>),
     Param(Ident),
     Lit(Lit),
-    /// Lowered in milestone 6 (`#[dsl::function]`); parsed now for errors.
-    Call(Path, #[allow(dead_code)] Vec<Expr>),
+    /// A `#[dsl::function]` call, resolved by Rust path.
+    Call(Path, Vec<Expr>),
 }
 
 impl Expr {

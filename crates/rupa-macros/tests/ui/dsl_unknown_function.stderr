@@ -1,0 +1,5 @@
+error[E0425]: cannot find function `no_such_fn` in this scope
+  --> tests/ui/dsl_unknown_function.rs:10:18
+   |
+10 | #[query(filter = no_such_fn(email, $p))]
+   |                  ^^^^^^^^^^ not found in this scope

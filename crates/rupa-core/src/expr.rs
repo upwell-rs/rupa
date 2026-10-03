@@ -108,6 +108,53 @@ impl IntoExpr<String> for &str {
     }
 }
 
+// JSON expressions are typed `serde_json::Value`: JSON columns, JSON paths
+// (`->`), and JSON values bound as parameters. DSL functions over JSON
+// (containment, key tests) take `impl IntoExpr<serde_json::Value>`.
+
+impl IntoExpr<serde_json::Value> for serde_json::Value {
+    fn into_node(self) -> ExprNode {
+        ExprNode::Param(crate::value::Value::Json(self))
+    }
+}
+
+impl IntoExpr<serde_json::Value> for &serde_json::Value {
+    fn into_node(self) -> ExprNode {
+        ExprNode::Param(crate::value::Value::Json(self.clone()))
+    }
+}
+
+impl IntoExpr<serde_json::Value> for Expr<serde_json::Value> {
+    fn into_node(self) -> ExprNode {
+        self.node
+    }
+}
+
+impl IntoExpr<serde_json::Value> for Expr<Option<serde_json::Value>> {
+    fn into_node(self) -> ExprNode {
+        self.node
+    }
+}
+
+impl<E, T> IntoExpr<serde_json::Value> for Column<E, T, Json> {
+    fn into_node(self) -> ExprNode {
+        ExprNode::Column(self.column_ref())
+    }
+}
+
+impl IntoExpr<serde_json::Value> for JsonPath {
+    fn into_node(self) -> ExprNode {
+        self.node(false)
+    }
+}
+
+/// Binds any serializable value as a JSON parameter.
+pub fn json<T: serde::Serialize>(value: &T) -> Expr<serde_json::Value> {
+    Expr::from_node(ExprNode::Param(crate::value::Value::Json(
+        serde_json::to_value(value).expect("JSON parameter failed to serialize"),
+    )))
+}
+
 /// Binds a value as a parameter expression.
 pub fn bind<T: ScalarColumn>(v: T) -> Expr<T> {
     Expr::from_node(ExprNode::Param(v.to_value()))

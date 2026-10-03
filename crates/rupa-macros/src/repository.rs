@@ -22,7 +22,7 @@ use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{FnArg, ItemTrait, ReturnType, TraitItem, TraitItemFn, Type, TypeParamBound};
 
-use crate::query::{QueryAttr, Signature, query_body};
+use crate::query::{QueryAttr, Signature, called_functions, query_body};
 
 struct Method {
     item: TraitItemFn,
@@ -182,6 +182,23 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
     let error_bounds = errors
         .iter()
         .map(|e| quote!(#e: ::core::convert::From<<__S as #source_bound>::Error>));
+    // Statically gated DSL functions: the implementation requires each used
+    // function to be available on the source's dialect. The bound sits on
+    // this impl, not on the trait: hand-written implementors are unaffected.
+    let mut functions: Vec<syn::Path> = Vec::new();
+    for m in &methods {
+        for p in called_functions(&m.attr) {
+            if !functions
+                .iter()
+                .any(|q| quote!(#q).to_string() == quote!(#p).to_string())
+            {
+                functions.push(p);
+            }
+        }
+    }
+    let dsl_bounds = functions
+        .iter()
+        .map(|p| quote!(#p: #ms::DslAvailable<<__S as #source_bound>::Dialect>));
     let super_bounds = tr.supertraits.iter().filter_map(|b| match b {
         TypeParamBound::Trait(t) => Some(quote!(#ms::Repo<__S>: #t)),
         _ => None,
@@ -256,6 +273,7 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
         where
             __S: #source_bound,
             #(#error_bounds,)*
+            #(#dsl_bounds,)*
             #(#super_bounds,)*
         {
             #(#impl_fns)*

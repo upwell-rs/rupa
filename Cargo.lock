@@ -1809,6 +1809,13 @@ dependencies = [
 [[package]]
 name = "rupa-dsl-std"
 version = "0.1.0"
+dependencies = [
+ "insta",
+ "rupa-core",
+ "rupa-macros",
+ "rupa-sql",
+ "serde_json",
+]
 
 [[package]]
 name = "rupa-macros"

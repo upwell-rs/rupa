@@ -16,6 +16,21 @@ pub use rupa_core::{
 };
 pub use rupa_macros::{Deletable, Entity, Gettable, Insertable, Updatable, query, repository};
 
+/// DSL functions: the built-ins, and the macro to write your own.
+///
+/// ```ignore
+/// use rupa::dsl::{self, Dialect, DialectId, DslError, Expr};
+///
+/// #[dsl::function(requires = Ilike)]          // or runtime-checked: branch on `dialect.id()`
+/// fn starts_with_ci(dialect: &dyn Dialect, s: Expr<String>, prefix: Expr<String>) -> Result<Expr<bool>, DslError> { .. }
+/// ```
+pub mod dsl {
+    pub use rupa_core::dialect::{Capability, Dialect, DialectId, DslAvailable, Supports, caps};
+    pub use rupa_core::{DslError, Expr, Value, json};
+    pub use rupa_dsl_std::*;
+    pub use rupa_macros::function;
+}
+
 #[cfg(feature = "upwell")]
 pub use rupa_upwell as upwell;
 

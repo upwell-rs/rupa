@@ -1,0 +1,5 @@
+error: a DSL function returns `Expr<R>` or `Result<Expr<R>, DslError>`
+  --> tests/ui/dsl_bad_return.rs:11:26
+   |
+11 | fn f(a: Expr<String>) -> bool { todo!() }
+   |                          ^^^^

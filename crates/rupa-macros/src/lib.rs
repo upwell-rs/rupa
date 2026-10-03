@@ -11,6 +11,7 @@ use syn::{DeriveInput, parse_macro_input};
 
 mod capability;
 mod dsl;
+mod dsl_fn;
 mod entity;
 mod model;
 mod query;
@@ -135,5 +136,14 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
             out.extend(repository::strip_query_attrs(item));
             out
         })
+        .into()
+}
+
+/// A dialect-aware DSL function; use as `#[rupa::dsl::function]`.
+/// See the `dsl_fn` module docs for the generated items.
+#[proc_macro_attribute]
+pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
+    dsl_fn::function(attr.into(), item.into())
+        .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

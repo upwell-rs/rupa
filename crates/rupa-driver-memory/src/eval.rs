@@ -199,54 +199,8 @@ pub(crate) fn sort_cmp(a: &Value, b: &Value) -> Result<Ordering, MemoryError> {
     }
 }
 
-/// Postgres LIKE: `%` any run, `_` one character, `\` escapes the next one.
 fn like(s: &str, pattern: &str) -> Result<bool, MemoryError> {
-    enum Tok {
-        Any,
-        One,
-        Lit(char),
-    }
-    let mut toks = Vec::new();
-    let mut chars = pattern.chars();
-    while let Some(c) = chars.next() {
-        toks.push(match c {
-            '%' => Tok::Any,
-            '_' => Tok::One,
-            '\\' => Tok::Lit(chars.next().ok_or_else(|| {
-                MemoryError::Type("LIKE pattern must not end with escape character".into())
-            })?),
-            c => Tok::Lit(c),
-        });
-    }
-    let s: Vec<char> = s.chars().collect();
-    // Iterative wildcard matching with backtracking to the last `%`.
-    let (mut si, mut pi) = (0, 0);
-    let mut star: Option<(usize, usize)> = None;
-    while si < s.len() {
-        match toks.get(pi) {
-            Some(Tok::Any) => {
-                star = Some((pi, si));
-                pi += 1;
-            }
-            Some(Tok::One) => {
-                si += 1;
-                pi += 1;
-            }
-            Some(Tok::Lit(c)) if *c == s[si] => {
-                si += 1;
-                pi += 1;
-            }
-            _ => match star {
-                Some((sp, ss)) => {
-                    pi = sp + 1;
-                    si = ss + 1;
-                    star = Some((sp, ss + 1));
-                }
-                None => return Ok(false),
-            },
-        }
-    }
-    Ok(toks[pi..].iter().all(|t| matches!(t, Tok::Any)))
+    rupa_core::sem::like(s, pattern).map_err(MemoryError::Type)
 }
 
 /// `->` / `->>`: a missing key or index, or a path through a non-container,
@@ -356,32 +310,4 @@ fn cast(v: Value, ty: SqlType) -> Result<Value, MemoryError> {
         _ => return Err(MemoryError::Unsupported(format!("cast to {ty:?}"))),
     };
     out.ok_or_else(|| fail(&v))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn like_matches_postgres_semantics() {
-        let cases = [
-            ("abc", "abc", true),
-            ("abc", "a%", true),
-            ("abc", "%c", true),
-            ("abc", "a_c", true),
-            ("abc", "a_", false),
-            ("abc", "%", true),
-            ("", "%", true),
-            ("", "_", false),
-            ("a%c", "a\\%c", true),
-            ("abc", "a\\%c", false),
-            ("aXbXc", "%b%c", true),
-            ("mississippi", "%iss%ppi", true),
-            ("ABC", "abc", false),
-        ];
-        for (s, p, expect) in cases {
-            assert_eq!(like(s, p).unwrap(), expect, "{s:?} LIKE {p:?}");
-        }
-        assert!(like("a", "a\\").is_err());
-    }
 }

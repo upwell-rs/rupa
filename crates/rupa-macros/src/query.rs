@@ -624,11 +624,16 @@ impl Ctx<'_> {
                     return Err(syn::Error::new(*span, "`is_null` applies to a field"));
                 }
             }),
-            Expr::Call(path, _) => {
-                return Err(syn::Error::new_spanned(
-                    path,
-                    "DSL function calls are not supported yet (milestone 6: `#[dsl::function]`)",
-                ));
+            Expr::Call(path, args) => {
+                // Resolved by Rust path: `#[dsl::function]` generates a
+                // builder function of that name taking `impl IntoExpr<T>`.
+                let mut lowered = Vec::with_capacity(args.len());
+                for a in args {
+                    lowered.push(match self.lower(a)? {
+                        Gen::Cond(t) | Gen::Column(t) | Gen::Json(t) | Gen::Value(t) => t,
+                    });
+                }
+                Gen::Cond(quote_spanned!(path.segments[0].ident.span()=> #path(#(#lowered),*)))
             }
         })
     }
@@ -869,6 +874,40 @@ pub fn query_fn(attr: TokenStream, item: TokenStream, ms: TokenStream) -> syn::R
             #body
         }
     })
+}
+
+/// The DSL function paths called in `attr`, for availability bounds.
+pub fn called_functions(attr: &QueryAttr) -> Vec<syn::Path> {
+    fn walk(e: &Expr, out: &mut Vec<syn::Path>) {
+        match e {
+            Expr::Or(a, b) | Expr::And(a, b) => {
+                walk(a, out);
+                walk(b, out);
+            }
+            Expr::Cmp(_, a, b, _) | Expr::In(a, b, _) | Expr::Like(a, b, _) => {
+                walk(a, out);
+                walk(b, out);
+            }
+            Expr::Not(a, _) | Expr::IsNull(a, _) => walk(a, out),
+            Expr::Call(p, args) => {
+                if !out
+                    .iter()
+                    .any(|q| quote!(#q).to_string() == quote!(#p).to_string())
+                {
+                    out.push(p.clone());
+                }
+                for a in args {
+                    walk(a, out);
+                }
+            }
+            Expr::Field(_) | Expr::Param(_) | Expr::Lit(_) => {}
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(f) = &attr.filter {
+        walk(f, &mut out);
+    }
+    out
 }
 
 #[cfg(test)]

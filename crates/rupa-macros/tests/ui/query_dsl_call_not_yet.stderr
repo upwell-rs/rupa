@@ -1,5 +1,0 @@
-error: DSL function calls are not supported yet (milestone 6: `#[dsl::function]`)
- --> tests/ui/query_dsl_call_not_yet.rs:8:18
-  |
-8 | #[query(filter = ilike(email, $p))]
-  |                  ^^^^^

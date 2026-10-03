@@ -1,0 +1,5 @@
+error: a DSL function is not generic: it is lowered at render time with the target dialect as `&dyn Dialect`; gate it statically with `requires = Capability`
+  --> tests/ui/dsl_generic_function.rs:11:5
+   |
+11 | fn f<T>(a: Expr<String>) -> Expr<bool> { todo!() }
+   |     ^^^

@@ -14,6 +14,7 @@ use std::future::Future;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use crate::dialect::Dialect;
 use crate::exec::{AsyncExecutor, ExecError, Executor, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
@@ -58,8 +59,9 @@ impl<E> Repo<SharedAsync<E>> {
 
 /// A source of sync connections, used through `&self`.
 pub trait Acquire: Send + Sync {
+    type Dialect: Dialect;
     type Error: ExecError;
-    type Conn<'a>: Executor<Error = Self::Error>
+    type Conn<'a>: Executor<Dialect = Self::Dialect, Error = Self::Error>
     where
         Self: 'a;
 
@@ -68,8 +70,9 @@ pub trait Acquire: Send + Sync {
 
 /// A source of async connections, used through `&self`.
 pub trait AcquireAsync: Send + Sync {
+    type Dialect: Dialect;
     type Error: ExecError;
-    type Conn<'a>: AsyncExecutor<Error = Self::Error>
+    type Conn<'a>: AsyncExecutor<Dialect = Self::Dialect, Error = Self::Error>
     where
         Self: 'a;
 
@@ -124,6 +127,7 @@ impl<E: Executor> Executor for SharedConn<'_, E> {
 }
 
 impl<E: Executor + Send> Acquire for Shared<E> {
+    type Dialect = E::Dialect;
     type Error = E::Error;
     type Conn<'a>
         = SharedConn<'a, E>
@@ -147,6 +151,7 @@ impl<E: Executor + Send> AcquireAsync for Shared<E>
 where
     E::Dialect: Clone + Send,
 {
+    type Dialect = E::Dialect;
     type Error = E::Error;
     type Conn<'a>
         = SharedBlocking<'a, E>
@@ -243,6 +248,7 @@ impl<E: AsyncExecutor> AsyncExecutor for SharedAsyncConn<'_, E> {
 }
 
 impl<E: AsyncExecutor> AcquireAsync for SharedAsync<E> {
+    type Dialect = E::Dialect;
     type Error = E::Error;
     type Conn<'a>
         = SharedAsyncConn<'a, E>

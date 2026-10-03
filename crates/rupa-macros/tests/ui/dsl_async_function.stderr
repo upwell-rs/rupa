@@ -1,0 +1,5 @@
+error: a DSL function's lowering is synchronous
+  --> tests/ui/dsl_async_function.rs:11:1
+   |
+11 | async fn f(a: Expr<String>) -> Expr<bool> { todo!() }
+   | ^^^^^

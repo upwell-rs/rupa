@@ -12,7 +12,6 @@
 //! - A repository trait shared as `Arc<dyn Trait>`, the way DI holds it.
 
 use chrono::{DateTime, Utc};
-use rupa::core::ir::{BinOp, DslFnDef, ExprNode};
 use rupa::core::{Dialect, DialectId, DslError, Postgres, Value};
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
@@ -72,6 +71,16 @@ trait UserRepository: Send + Sync {
     #[query(filter = email == $email)]
     async fn by_email(&self, email: &str) -> Result<Option<User>, rupa::DynError>;
 
+    /// Built-in DSL functions in the query grammar, resolved by Rust path.
+    /// `json_contains` is statically gated: this impl requires a dialect
+    /// with `JsonContainment` (Postgres, memory), checked at compile time.
+    #[query(filter = rupa::dsl::ilike(email, $pattern) && rupa::dsl::json_contains(prefs, $prefs), order_by = id)]
+    async fn search(
+        &self,
+        pattern: &str,
+        prefs: serde_json::Value,
+    ) -> Result<Vec<User>, rupa::DynError>;
+
     /// A plain `fn` in an async repository blocks in place.
     #[query(filter = active == $active && prefs.theme == $theme, order_by = created_at desc)]
     fn active_by_theme(&self, active: bool, theme: &str) -> Result<Vec<User>, rupa::DynError>;
@@ -104,21 +113,20 @@ fn new_user(email: &str, nickname: Option<&str>, active: bool, theme: &str, hour
 // A DSL function: case-insensitive equality
 // ---------------------------------------------------------------------------
 
-/// Postgres gets `upper(a) = upper(b)`; the memory backend calls `eval`.
-static CI_EQ: DslFnDef = DslFnDef {
-    name: "ci_eq",
-    lower: lower_ci_eq,
-    eval: Some(eval_ci_eq),
-};
-
-fn lower_ci_eq(dialect: &dyn Dialect, mut args: Vec<ExprNode>) -> Result<ExprNode, DslError> {
-    let (b, a) = (args.pop().unwrap(), args.pop().unwrap());
+/// Written with `#[dsl::function]`. The body lowers the call per dialect at
+/// render time (runtime-checked: other dialects get an error, not bad SQL);
+/// the memory backend runs `eval` instead. Arguments are expressions, so the
+/// compared value is always a bound parameter.
+#[rupa::dsl::function(eval = eval_ci_eq)]
+fn ci_eq(dialect: &dyn Dialect, a: Expr<String>, b: Expr<String>) -> Result<Expr<bool>, DslError> {
     match dialect.id() {
-        DialectId::Postgres => Ok(ExprNode::Binary(
-            BinOp::Eq,
-            Box::new(ExprNode::Call("upper", vec![a])),
-            Box::new(ExprNode::Call("upper", vec![b])),
-        )),
+        DialectId::Postgres => {
+            let (a, b) = (
+                Expr::<String>::call("upper", [a]),
+                Expr::<String>::call("upper", [b]),
+            );
+            Ok(Expr::raw_op("=", a, b))
+        }
         other => Err(DslError::unsupported("ci_eq", other)),
     }
 }
@@ -128,16 +136,6 @@ fn eval_ci_eq(args: &[Value]) -> Result<Value, DslError> {
         [Value::Text(a), Value::Text(b)] => Ok(Value::Bool(a.eq_ignore_ascii_case(b))),
         _ => Ok(Value::Null(rupa::core::SqlType::Bool)),
     }
-}
-
-fn ci_eq(column: Column<User, String, Scalar>, value: &str) -> Expr<bool> {
-    Expr::dsl(
-        &CI_EQ,
-        vec![
-            ExprNode::Column(column.column_ref()),
-            ExprNode::Param(Value::Text(value.into())),
-        ],
-    )
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +203,12 @@ Repository behind Arc<dyn UserRepository>:"
     println!(
         "   active_by_theme (sync, blocks in place) -> {:?}",
         dark.iter().map(|u| &u.email).collect::<Vec<_>>()
+    );
+    let found = pollster::block_on(users.search("%EXAMPLE.COM", serde_json::json!({"beta": true})))
+        .unwrap();
+    println!(
+        "   search with ilike + json_contains -> {:?}",
+        found.iter().map(|u| &u.email).collect::<Vec<_>>()
     );
 }
 

@@ -1,0 +1,22 @@
+error[E0277]: `i64` cannot be used as an expression of type `std::string::String`
+  --> tests/ui/dsl_wrong_arg_type.rs:10:37
+   |
+10 | #[query(filter = dsl::ilike(email, $n))]
+   |                  ----------         ^ expected a `std::string::String` value, column or expression
+   |                  |
+   |                  required by a bound introduced by this call
+   |
+   = help: the trait `IntoExpr<std::string::String>` is not implemented for `i64`
+help: the trait `IntoExpr<std::string::String>` is implemented for `&str`
+  --> $WORKSPACE/crates/rupa-core/src/expr.rs
+   |
+   | impl IntoExpr<String> for &str {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+note: required by a bound in `ilike`
+  --> $WORKSPACE/crates/rupa-dsl-std/src/lib.rs
+   |
+   | #[function(crate = ::rupa_core, eval = eval_ilike)]
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `ilike`
+   | pub fn ilike(
+   |        ----- required by a bound in this function
+   = note: this error originates in the attribute macro `function` (in Nightly builds, run with -Z macro-backtrace for more info)

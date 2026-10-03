@@ -1,0 +1,5 @@
+error: DSL function parameters are expressions: `Expr<T>` (the dialect, if needed, comes first as `&dyn Dialect`)
+  --> tests/ui/dsl_param_not_expr.rs:11:9
+   |
+11 | fn f(a: String) -> Expr<bool> { todo!() }
+   |         ^^^^^^
