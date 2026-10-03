@@ -1,5 +1,0 @@
-error: column kind cannot be inferred for a field whose type depends on a generic parameter; add #[column(scalar)] or #[column(json)]
- --> tests/ui/generic_field.rs:8:11
-  |
-8 |     body: T,
-  |           ^

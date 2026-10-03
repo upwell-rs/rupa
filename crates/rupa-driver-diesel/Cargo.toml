@@ -5,5 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
+description = "Synchronous RUPA executor on Diesel connections (planned)"
+# Not published until it has content.
+publish = false
 
 [dependencies]

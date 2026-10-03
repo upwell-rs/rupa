@@ -1,1 +1,1 @@
-//! `rupa-driver-diesel` — not yet implemented (see milestones).
+//! `rupa-driver-diesel`: planned: a sync executor using Diesel connections (not Diesel's query DSL).

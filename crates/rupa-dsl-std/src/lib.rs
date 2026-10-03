@@ -3,10 +3,10 @@
 //!
 //! | function | gating | Postgres | memory backend |
 //! |---|---|---|---|
-//! | [`ilike`] | runtime (per dialect) | `a ILIKE b` | `eval` |
-//! | [`lower`], [`upper`] | none (standard SQL) | `lower(a)` | `eval` |
-//! | [`json_contains`] | static: `JsonContainment` | `a @> b` (MySQL `JSON_CONTAINS`) | `eval` |
-//! | [`json_has_key`] | static: `JsonPath` | `jsonb_exists(a, k)` (MySQL `JSON_CONTAINS_PATH`, SQLite `json_type`) | `eval` |
+//! | [`ilike()`] | runtime (per dialect) | `a ILIKE b` | `eval` |
+//! | [`lower()`], [`upper()`] | none (standard SQL) | `lower(a)` | `eval` |
+//! | [`json_contains()`] | static: `JsonContainment` | `a @> b` (MySQL `JSON_CONTAINS`) | `eval` |
+//! | [`json_has_key()`] | static: `JsonPath` | `jsonb_exists(a, k)` (MySQL `JSON_CONTAINS_PATH`, SQLite `json_type`) | `eval` |
 //!
 //! Every function takes and returns expressions; arguments that carry data
 //! are bound parameters.

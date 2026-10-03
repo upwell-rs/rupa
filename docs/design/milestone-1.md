@@ -7,7 +7,9 @@ License: `MIT OR Apache-2.0`. Releases: release-plz, with one `version_group` fo
 
 ## 1. Spike: scalar-vs-JSON inference via autoref specialization
 
-Code: `spikes/column-kind` (runtime) + `spikes/column-kind-macros` (derive).
+Code: `spikes/column-kind` (runtime) + `spikes/column-kind-macros` (derive). The spike was
+removed after milestone 8; its machinery lives in `rupa_core::column::__private`, and the
+code is in git history (commit `504d0b2`).
 `cargo +stable test -p rupa-spike-column-kind` passes on 1.99. Nightly 1.101
 also passes, apart from the trybuild diagnostic wording.
 

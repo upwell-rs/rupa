@@ -9,6 +9,22 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  lint:
+    name: lint (fmt, clippy, docs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99"
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
   test:
     name: test (${{ matrix.toolchain }})
     runs-on: ubuntu-latest
@@ -17,11 +33,12 @@ jobs:
       matrix:
         toolchain: ["1.99", nightly]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
       - uses: Swatinem/rust-cache@v2
+      # Includes the Docker-backed suites (Postgres, MySQL) and in-process SQLite.
       # trybuild snapshots are pinned to MSRV diagnostics; nightly wording drifts.
       - if: matrix.toolchain == '1.99'
         run: cargo test --workspace
@@ -32,7 +49,7 @@ jobs:
     name: upwell integration
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99"

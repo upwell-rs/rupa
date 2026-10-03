@@ -2,15 +2,4 @@ error[E0080]: evaluation panicked: this Insertable struct is missing field `emai
  --> tests/ui/companion_missing_required.rs:5:10
   |
 5 | #[derive(Insertable)]
-  |          ^^^^^^^^^^ evaluation of `_` failed inside this call
-  |
-note: inside `rupa::__macro_support::assert_insert_covers`
- --> $RUST/core/src/panic.rs
-  |
-  |         $crate::panicking::panic_display(&$arg);
-  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the failure occurred here
-  |
- ::: $WORKSPACE/crates/rupa-core/src/column.rs
-  |
-  |                 panic!("{}", message);
-  |                 --------------------- in this macro invocation
+  |          ^^^^^^^^^^ evaluation of `_` failed here

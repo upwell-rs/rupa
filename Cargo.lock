@@ -2238,27 +2238,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rupa-spike-column-kind"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "rupa-spike-column-kind-macros",
- "serde",
- "serde_json",
- "trybuild",
- "uuid",
-]
-
-[[package]]
-name = "rupa-spike-column-kind-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "rupa-sql"
 version = "0.1.0"
 dependencies = [

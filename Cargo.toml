@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "spikes/*"]
+members = ["crates/*"]
 
 [workspace.package]
 # Lockstep versioning: every member shares this version (see docs/design/versioning.md).

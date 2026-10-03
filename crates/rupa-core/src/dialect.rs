@@ -5,7 +5,7 @@
 //! - **Runtime:** `dialect.supports(Capability::Ilike)` / `dialect.id()`, for code
 //!   whose dialect is chosen at run time (e.g. from config, via [`DynDialect`]).
 //!
-//! Both forms come from one [`dialect!`] declaration per dialect, so they cannot
+//! Both forms come from one `dialect!` declaration per dialect, so they cannot
 //! drift. [`DynDialect`] implements no `Supports<_>` at all: statically gated
 //! functions are unusable with it by construction, and the runtime form applies.
 

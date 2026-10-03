@@ -123,7 +123,10 @@ pub fn insertable(input: DeriveInput) -> syn::Result<TokenStream> {
             }
         }
 
-        const _: () = #ms::assert_insert_covers(<#entity>::__RUPA_INSERT_REQUIRED, &[#(#names),*]);
+        const _: () = match #ms::missing_insert_field(<#entity>::__RUPA_INSERT_REQUIRED, &[#(#names),*]) {
+            ::core::option::Option::Some(message) => ::core::panic!("{}", message),
+            ::core::option::Option::None => {}
+        };
     })
 }
 
@@ -201,7 +204,7 @@ pub fn updatable(input: DeriveInput) -> syn::Result<TokenStream> {
             (
                 quote!(#ms::Keyed<<#entity as #ms::Entity>::Id>),
                 quote!(#ms::Keyed(#ms::Clone::clone(&self.#fi))),
-                quote!(#ms::assert_id_field(<#entity>::__RUPA_ID_FIELD, #name, #message);),
+                quote!(if !#ms::same_str(<#entity>::__RUPA_ID_FIELD, #name) { ::core::panic!(#message) }),
             )
         }
         None => (quote!(#ms::NoKey), quote!(#ms::NoKey), quote!()),

@@ -8,7 +8,7 @@
 //! [`Column::json`] / [`Column::nullable_json`], which check that the field type
 //! can be stored that way. `#[derive(Entity)]` instead infers the kind per
 //! field (autoref specialization in `__private`); since that only works in
-//! expression context, derived handles are obtained with [`col!`].
+//! expression context, derived handles are obtained with [`col!`](crate::col).
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -472,9 +472,16 @@ pub mod __private {
         true
     }
 
-    /// Const check that an `Insertable` companion provides every field the
-    /// entity requires on insert. `required` pairs a field with its error message.
-    pub const fn assert_insert_covers(required: &[(&str, &str)], provided: &[&str]) {
+    /// For an `Insertable` companion: the error message of the first field
+    /// the entity requires on insert that `provided` lacks. `required` pairs
+    /// a field with its message. The generated code panics with it in its
+    /// own `const` item, so the error points at the user's derive rather
+    /// than into this function (or into `core`'s panic machinery, whose
+    /// source may not be installed).
+    pub const fn missing_insert_field(
+        required: &'static [(&'static str, &'static str)],
+        provided: &[&str],
+    ) -> Option<&'static str> {
         let mut i = 0;
         while i < required.len() {
             let (field, message) = required[i];
@@ -487,16 +494,15 @@ pub mod __private {
                 j += 1;
             }
             if !found {
-                panic!("{}", message);
+                return Some(message);
             }
             i += 1;
         }
+        None
     }
 
-    /// Const check that a patch's `#[id]` field is the entity's id field.
-    pub const fn assert_id_field(entity_id: &str, patch_id: &str, message: &str) {
-        if !str_eq(entity_id, patch_id) {
-            panic!("{}", message);
-        }
+    /// Const string equality, for generated checks.
+    pub const fn same_str(a: &str, b: &str) -> bool {
+        str_eq(a, b)
     }
 }
