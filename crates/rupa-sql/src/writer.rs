@@ -5,7 +5,7 @@ use rupa_core::ir::{
     BinOp, ColumnRef, Delete, Direction, ExprNode, FromClause, Insert, PathSeg, RawPart, Select,
     Statement, TableRef, TxStatement, UnOp, Update,
 };
-use rupa_core::{Capability, Dialect};
+use rupa_core::{Capability, Dialect, SecurityContext};
 use rupa_core::{SqlType, Value};
 
 use crate::{RenderError, Rendered};
@@ -214,6 +214,7 @@ impl<'a> Writer<'a> {
             Statement::Insert(i) => self.insert(i)?,
             Statement::Update(u) => self.update(u)?,
             Statement::Delete(d) => self.delete(d)?,
+            Statement::ApplySecurity(ctx) => self.apply_security(ctx)?,
             Statement::Raw(raw) => {
                 for part in &raw.parts {
                     match part {
@@ -291,6 +292,36 @@ impl<'a> Writer<'a> {
         if let Some(offset) = &s.offset {
             self.sql.push_str(" OFFSET ");
             self.expr(offset, prec::ANY)?;
+        }
+        Ok(())
+    }
+
+    /// `SELECT set_config($1, $2, true), ..`: transaction-local settings, and
+    /// the role through the `role` setting (`SET LOCAL ROLE`, but bindable).
+    /// Every name and value is a bound parameter. Only Postgres has native
+    /// row-level security (`NativeRls`); everything else is refused.
+    fn apply_security(&mut self, ctx: &SecurityContext) -> Result<(), RenderError> {
+        if !self.dialect.supports(Capability::NativeRls) {
+            return Err(RenderError::UnsupportedCapability(Capability::NativeRls));
+        }
+        if let Some(bad) = ctx.invalid_key() {
+            return Err(RenderError::InvalidSecurityKey(bad.to_owned()));
+        }
+        let mut pairs: Vec<(String, String)> =
+            ctx.settings().map(|(k, v)| (k, v.to_owned())).collect();
+        if let Some(role) = ctx.get_role() {
+            pairs.push(("role".into(), role.to_owned()));
+        }
+        self.sql.push_str("SELECT ");
+        for (i, (name, value)) in pairs.into_iter().enumerate() {
+            if i > 0 {
+                self.sql.push_str(", ");
+            }
+            self.sql.push_str("set_config(");
+            self.param(Value::Text(name));
+            self.sql.push_str(", ");
+            self.param(Value::Text(value));
+            self.sql.push_str(", true)");
         }
         Ok(())
     }

@@ -9,6 +9,9 @@ pub use rupa_macros as macros;
 pub use rupa_sql as sql;
 
 pub use rupa_core::exec::DynError;
+pub use rupa_core::security::{
+    AsyncSecureTransactional, SecureTransactional, SecureTx, SecurityContext,
+};
 pub use rupa_core::{
     Acquire, AcquireAsync, AsyncExecutor, Column, Deletable, Entity, Executor, Expr, ExprOps,
     FromRow, Gettable, Insertable, Json, NoKey, Query, Repo, Scalar, Shared, SharedAsync,

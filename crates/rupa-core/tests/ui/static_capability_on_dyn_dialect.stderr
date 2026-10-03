@@ -7,7 +7,7 @@ error[E0277]: dialect `DynDialect` does not support `rupa_core::dialect::caps::I
   |     required by a bound introduced by this call
   |
   = help: the trait `Supports<rupa_core::dialect::caps::Ilike>` is not implemented for `DynDialect`
-  = note: use a dialect that supports it, or a runtime-checked function returning `Result`
+  = note: this needs a dialect with that capability; for DSL functions, a runtime-checked variant (returning `Result`) works on any dialect
 help: the trait `Supports<rupa_core::dialect::caps::Ilike>` is implemented for `rupa_core::Postgres`
  --> src/dialect.rs
   |

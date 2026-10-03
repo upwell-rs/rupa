@@ -15,5 +15,6 @@ postgres.workspace = true
 
 [dev-dependencies]
 rupa-conformance = { path = "../rupa-conformance" }
+rupa = { path = "../rupa" }
 pollster.workspace = true
 testcontainers-modules = { workspace = true, features = ["blocking"] }

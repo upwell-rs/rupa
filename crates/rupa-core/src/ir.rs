@@ -24,6 +24,9 @@ pub enum Statement {
     Update(Update),
     Delete(Delete),
     Raw(RawSql),
+    /// Applies a security context inside the current transaction
+    /// (transaction-local settings). Requires `Capability::NativeRls`.
+    ApplySecurity(crate::security::SecurityContext),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

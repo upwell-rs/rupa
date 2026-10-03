@@ -5,7 +5,7 @@ error[E0277]: dialect `DynDialect` does not support `rupa::dsl::caps::JsonContai
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ requires `rupa::dsl::caps::JsonContainment`
    |
    = help: the trait `Supports<rupa::dsl::caps::JsonContainment>` is not implemented for `DynDialect`
-   = note: use a dialect that supports it, or a runtime-checked function returning `Result`
+   = note: this needs a dialect with that capability; for DSL functions, a runtime-checked variant (returning `Result`) works on any dialect
 help: the following other types implement trait `Supports<C>`
   --> $WORKSPACE/crates/rupa-core/src/dialect.rs
    |

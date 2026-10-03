@@ -13,6 +13,7 @@ pub mod ir;
 pub mod query;
 pub mod repo;
 pub mod row;
+pub mod security;
 pub mod sem;
 pub mod tx;
 pub mod value;
@@ -60,6 +61,7 @@ pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 pub use repo::{Acquire, AcquireAsync, Repo, Shared, SharedAsync};
 pub use row::{Row, RowCursor};
+pub use security::{AsyncSecureTransactional, SecureTransactional, SecureTx, SecurityContext};
 pub use tx::{
     AsyncTransaction, AsyncTransactional, IsolationLevel, Transaction, Transactional, TxOptions,
 };

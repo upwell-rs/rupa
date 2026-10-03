@@ -1,0 +1,42 @@
+error[E0277]: dialect `rupa::rupa_core::Memory` does not support `rupa::dsl::caps::NativeRls`
+ --> tests/ui/rls_on_dialect_without_native_rls.rs:7:16
+  |
+7 |     let _ = db.begin_with_security(TxOptions::default(), SecurityContext::new());
+  |                ^^^^^^^^^^^^^^^^^^^ requires `rupa::dsl::caps::NativeRls`
+  |
+  = help: the trait `Supports<rupa::dsl::caps::NativeRls>` is not implemented for `rupa::rupa_core::Memory`
+  = note: this needs a dialect with that capability; for DSL functions, a runtime-checked variant (returning `Result`) works on any dialect
+  = help: `rupa::rupa_core::Memory` implements trait `Supports<C>`:
+            Supports<rupa::dsl::caps::JsonContainment>
+            Supports<rupa::dsl::caps::JsonPath>
+            Supports<rupa::dsl::caps::ReadOnlyTransactions>
+            Supports<rupa::dsl::caps::Returning>
+            Supports<rupa::dsl::caps::Savepoints>
+note: required by a bound in `rupa::SecureTransactional::begin_with_security`
+ --> $WORKSPACE/crates/rupa-core/src/security.rs
+  |
+  |     fn begin_with_security(
+  |        ------------------- required by a bound in this associated function
+...
+  |         Self::Dialect: Supports<caps::NativeRls>,
+  |                        ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SecureTransactional::begin_with_security`
+
+error[E0277]: dialect `rupa::rupa_core::Memory` does not support `rupa::dsl::caps::NativeRls`
+ --> tests/ui/rls_on_dialect_without_native_rls.rs:9:16
+  |
+9 |     let _ = db.begin_with_security(TxOptions::default(), SecurityContext::new());
+  |                ^^^^^^^^^^^^^^^^^^^ requires `rupa::dsl::caps::NativeRls`
+  |
+  = help: the trait `Supports<rupa::dsl::caps::NativeRls>` is not implemented for `rupa::rupa_core::Memory`
+  = note: this needs a dialect with that capability; for DSL functions, a runtime-checked variant (returning `Result`) works on any dialect
+  = help: `rupa::rupa_core::Memory` implements trait `Supports<C>`:
+            Supports<rupa::dsl::caps::JsonContainment>
+            Supports<rupa::dsl::caps::JsonPath>
+            Supports<rupa::dsl::caps::ReadOnlyTransactions>
+            Supports<rupa::dsl::caps::Returning>
+            Supports<rupa::dsl::caps::Savepoints>
+note: required by a bound in `AsyncSecureTransactional::begin_with_security::{anon_assoc#0}`
+ --> $WORKSPACE/crates/rupa-core/src/security.rs
+  |
+  |         Self::Dialect: Supports<caps::NativeRls>,
+  |                        ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `AsyncSecureTransactional::begin_with_security::{anon_assoc#0}`

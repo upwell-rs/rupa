@@ -251,6 +251,9 @@ impl MemoryDb {
             Statement::Update(u) => self.update(u).map(Outcome::Affected),
             Statement::Delete(d) => self.delete(d).map(Outcome::Affected),
             Statement::Raw(_) => Err(MemoryError::Unsupported("raw SQL".into())),
+            Statement::ApplySecurity(_) => Err(MemoryError::Unsupported(
+                "row-level security (no native policies)".into(),
+            )),
         }
     }
 

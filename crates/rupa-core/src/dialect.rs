@@ -49,7 +49,7 @@ pub trait CapabilityMarker: 'static {
 #[diagnostic::on_unimplemented(
     message = "dialect `{Self}` does not support `{C}`",
     label = "requires `{C}`",
-    note = "use a dialect that supports it, or a runtime-checked function returning `Result`"
+    note = "this needs a dialect with that capability; for DSL functions, a runtime-checked variant (returning `Result`) works on any dialect"
 )]
 pub trait Supports<C: CapabilityMarker>: Dialect {}
 

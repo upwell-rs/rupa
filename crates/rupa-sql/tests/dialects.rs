@@ -189,3 +189,41 @@ fn capabilities_are_enforced() {
         ))
     );
 }
+
+#[test]
+fn security_context_rendering() {
+    use rupa_core::SecurityContext;
+    use rupa_core::ir::Statement;
+    let ctx = SecurityContext::new()
+        .set("tenant_id", "42")
+        .set("user_id", "7")
+        .role("app_user");
+    let r = rupa_sql::render(&Statement::ApplySecurity(ctx.clone()), &rupa_core::Postgres).unwrap();
+    assert_eq!(
+        r.sql,
+        "SELECT set_config($1, $2, true), set_config($3, $4, true), set_config($5, $6, true)"
+    );
+    let params: Vec<String> = r.params.iter().map(|p| format!("{p:?}")).collect();
+    assert_eq!(
+        params,
+        [
+            r#"Text("app.tenant_id")"#,
+            r#"Text("42")"#,
+            r#"Text("app.user_id")"#,
+            r#"Text("7")"#,
+            r#"Text("role")"#,
+            r#"Text("app_user")"#
+        ]
+    );
+    for d in [&MySql as &dyn Dialect, &Sqlite] {
+        assert_eq!(
+            rupa_sql::render(&Statement::ApplySecurity(ctx.clone()), d),
+            Err(RenderError::UnsupportedCapability(Capability::NativeRls))
+        );
+    }
+    let bad = SecurityContext::new().set("tenant-id", "1");
+    assert_eq!(
+        rupa_sql::render(&Statement::ApplySecurity(bad), &rupa_core::Postgres),
+        Err(RenderError::InvalidSecurityKey("tenant-id".into()))
+    );
+}

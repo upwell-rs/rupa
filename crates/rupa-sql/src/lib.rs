@@ -35,6 +35,8 @@ pub enum RenderError {
     Dsl(DslError),
     /// The statement needs a capability the dialect lacks (e.g. `RETURNING`).
     UnsupportedCapability(rupa_core::Capability),
+    /// A security-context key that is not a valid setting name.
+    InvalidSecurityKey(String),
     /// An `INSERT` with no rows.
     EmptyInsert,
     /// An `UPDATE` with no assignments.
@@ -59,6 +61,7 @@ impl fmt::Display for RenderError {
             RenderError::UnsupportedDialect(id) => write!(f, "no SQL renderer for dialect {id:?}"),
             RenderError::Dsl(e) => e.fmt(f),
             RenderError::UnsupportedCapability(c) => write!(f, "dialect does not support {c:?}"),
+            RenderError::InvalidSecurityKey(k) => write!(f, "invalid security context key {k:?}"),
             RenderError::EmptyInsert => f.write_str("INSERT without rows"),
             RenderError::EmptyUpdate => f.write_str("UPDATE without assignments"),
             RenderError::InvalidToken(t) => write!(f, "invalid operator or function name `{t}`"),
