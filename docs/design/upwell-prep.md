@@ -11,7 +11,7 @@ milestone 8 and the CI stabilisation (`057d7af`).
 | 1. Type-erased transactions | done: `BoxTx`/`BoxAsyncTx`, transactional `Box*Executor`, `try_begin_with_security`; owned transactions are option (a) |
 | 2. Pools behind `Acquire`/`AcquireAsync` | done: `Pool`/`AsyncPool` in core; deadpool (tokio-postgres) and r2d2 (sync drivers) behind each driver's `pool` feature |
 | 3. Descriptors and registry | done: `DbConfig` (typed `DriverConfig` enum), `Driver`, `Registry`, `Database`; option (a); explicit registration from facade features instead of `inventory` |
-| 4. Smaller items | prepared-statement caching done (render caching open); sync MySQL driver done (sqlx still planned); `rupa-upwell` placeholder and release-plz workflow unchanged |
+| 4. Smaller items | statement caching done (rendered SQL by shape, plus native prepared statements; see [`caching.md`](caching.md)); sync MySQL driver done (sqlx still planned); `rupa-upwell` placeholder and release-plz workflow unchanged |
 
 ## Why wait
 

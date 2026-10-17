@@ -16,6 +16,7 @@ pub mod error;
 pub mod exec;
 pub mod expr;
 pub mod ir;
+pub mod lru;
 pub mod pool;
 pub mod query;
 pub mod registry;

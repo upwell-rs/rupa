@@ -8,6 +8,10 @@
 //!
 //! DSL calls are lowered here, with the target dialect, so a statement stays
 //! dialect-free until this point.
+//!
+//! [`render`] renders every time. Drivers call [`render_cached`] instead,
+//! which reuses the SQL of earlier statements with the same *shape* (never
+//! the same values; see [`cache`]).
 
 #![warn(missing_docs)]
 
@@ -16,10 +20,13 @@ use std::fmt;
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::{Dialect, DialectId, DslError, Query, Value};
 
+pub mod cache;
 mod mysql;
 mod postgres;
 mod sqlite;
 mod writer;
+
+pub use cache::{CacheStats, CachedSql, RenderCache, render_cache, render_cached};
 
 /// SQL text and its parameters, in placeholder order.
 #[derive(Debug, Clone, PartialEq)]

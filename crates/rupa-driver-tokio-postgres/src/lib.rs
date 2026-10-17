@@ -7,10 +7,13 @@
 //!
 //! # Performance
 //!
-//! Each distinct SQL text is prepared once per connection and reused (see
-//! [`StatementCache`]): a cached query costs one round trip instead of two.
-//! Queries are still rendered on every call; caching rendered SQL per query
-//! site is a planned optimization.
+//! Two caches, so a repeated query neither renders nor parses again:
+//!
+//! - rendered SQL, by statement shape, process-wide (`rupa_sql::cache`);
+//! - server-side prepared statements, by SQL text, per connection
+//!   ([`StatementCache`], [`STATEMENT_CACHE_CAPACITY`] by default; see
+//!   [`PgExecutor::with_statement_cache_size`]). A cached query costs one
+//!   round trip instead of two.
 //!
 //! # Transactions
 //!
@@ -31,6 +34,8 @@ pub mod shared;
 
 use futures_util::{StreamExt, TryStreamExt, pin_mut};
 use postgres_types::ToSql;
+use std::sync::Arc;
+
 use rupa_core::Postgres;
 use rupa_core::exec::{AsyncExecutor, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
@@ -66,6 +71,13 @@ impl PgExecutor {
         }
     }
 
+    /// Keeps at most `capacity` prepared statements (`0`: prepare every
+    /// query anew).
+    pub fn with_statement_cache_size(mut self, capacity: usize) -> Self {
+        self.statements.set_capacity(capacity);
+        self
+    }
+
     /// The underlying client. Statements sent through it directly bypass the
     /// pending-rollback check; call [`clean`](AsyncTxConnection::clean) first.
     pub fn client(&self) -> &tokio_postgres::Client {
@@ -83,18 +95,21 @@ impl PgExecutor {
         &mut self.statements
     }
 
-    async fn prepare(&mut self, sql: &str) -> Result<tokio_postgres::Statement, PgError> {
+    /// The prepared statement for `sql`, from the cache or prepared now.
+    async fn prepare(&mut self, sql: &Arc<str>) -> Result<tokio_postgres::Statement, PgError> {
         if let Some(statement) = self.statements.get(sql) {
             return Ok(statement);
         }
         let statement = self.client.prepare(sql).await?;
-        self.statements.insert(sql, statement.clone());
+        self.statements.insert(sql.clone(), statement.clone());
         Ok(statement)
     }
 
     async fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
         self.clean().await?;
-        let rendered = rupa_sql::render(statement, &self.dialect)?;
+        // Rendered SQL is cached by statement shape, prepared statements by
+        // SQL text: a repeated query skips both rendering and parsing.
+        let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let prepared = self.prepare(&rendered.sql).await?;
         let params: Vec<Param<'_>> = rendered.params.iter().map(Param).collect();
         let result = self.query(&prepared, &params, expect).await;

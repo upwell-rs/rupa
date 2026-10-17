@@ -105,8 +105,9 @@ milestone in [`docs/design`](docs/design).
 
 - **Done:** entities, queries and repositories, transactions with savepoints,
   DSL functions, Postgres/MySQL/SQLite rendering and drivers, native
-  row-level security, connection pools, and configuration-driven drivers.
-- **Next:** the Upwell dependency-injection integration (`rupa-upwell`),
-  rendered-SQL caching, and async drivers on sqlx.
+  row-level security, connection pools, configuration-driven drivers, and
+  caching of rendered SQL and prepared statements.
+- **Next:** the Upwell dependency-injection integration (`rupa-upwell`) and
+  async drivers on sqlx.
 
 Requires Rust 1.99. Licensed under MIT OR Apache-2.0.

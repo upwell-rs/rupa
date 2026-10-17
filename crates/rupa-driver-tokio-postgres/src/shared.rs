@@ -2,13 +2,14 @@
 //! with the sync driver (`postgres::Row`, `postgres::Statement` and
 //! `postgres::Error` are re-exports of tokio-postgres').
 
-use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
+use std::sync::Arc;
 
 use bytes::BytesMut;
 use postgres_types::{IsNull, ToSql, Type, to_sql_checked};
 use rupa_core::exec::ExecError;
+use rupa_core::lru::LruCache;
 use rupa_core::row::RowCursor;
 use rupa_core::{ResultError, RowError, SqlType, TxError, Value};
 use rupa_sql::RenderError;
@@ -234,44 +235,45 @@ impl From<PgError> for rupa_core::DynError {
     }
 }
 
-/// Prepared statements kept per connection.
+/// Prepared statements kept per connection by default.
 pub const STATEMENT_CACHE_CAPACITY: usize = 256;
 
-/// Prepared statements by SQL text, per connection: each distinct query is
-/// prepared once instead of on every call (which costs a round trip).
+/// Server-side prepared statements by SQL text, per connection: each distinct
+/// query is prepared once (`Parse`) and then only executed (`Bind`/`Execute`),
+/// which saves a round trip and lets Postgres reuse its plan (after a few
+/// executions it may switch to a generic plan; see `plan_cache_mode`).
 ///
-/// When full, the least recently used statement is evicted. Callers evict a
-/// statement whose execution failed, since it may be stale (e.g. its table
-/// was dropped and recreated with other column types).
-#[derive(Debug, Default)]
+/// Bounded: when full, the least recently used statement is dropped, which
+/// closes it on the server. A statement whose execution failed is evicted too,
+/// since it may be stale (e.g. its table was recreated with other column
+/// types). Keys share the render cache's SQL text, so caching costs no copy.
+#[derive(Debug)]
 pub struct StatementCache {
-    statements: HashMap<String, (tokio_postgres::Statement, u64)>,
-    clock: u64,
+    statements: LruCache<Arc<str>, tokio_postgres::Statement>,
+}
+
+impl Default for StatementCache {
+    fn default() -> Self {
+        Self::new(STATEMENT_CACHE_CAPACITY)
+    }
 }
 
 impl StatementCache {
+    /// A cache for at most `capacity` statements (`0`: prepare every time).
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            statements: LruCache::new(capacity),
+        }
+    }
+
     /// The cached statement for `sql`, marking it used.
     pub fn get(&mut self, sql: &str) -> Option<tokio_postgres::Statement> {
-        self.clock += 1;
-        let (statement, used) = self.statements.get_mut(sql)?;
-        *used = self.clock;
-        Some(statement.clone())
+        self.statements.get(sql).cloned()
     }
 
     /// Caches `statement` for `sql`.
-    pub fn insert(&mut self, sql: &str, statement: tokio_postgres::Statement) {
-        if self.statements.len() >= STATEMENT_CACHE_CAPACITY
-            && let Some(oldest) = self
-                .statements
-                .iter()
-                .min_by_key(|(_, (_, used))| *used)
-                .map(|(k, _)| k.clone())
-        {
-            self.statements.remove(&oldest);
-        }
-        self.clock += 1;
-        self.statements
-            .insert(sql.to_owned(), (statement, self.clock));
+    pub fn insert(&mut self, sql: Arc<str>, statement: tokio_postgres::Statement) {
+        self.statements.insert(sql, statement);
     }
 
     /// Forgets the statement for `sql`.
@@ -292,5 +294,16 @@ impl StatementCache {
     /// Whether nothing is cached.
     pub fn is_empty(&self) -> bool {
         self.statements.is_empty()
+    }
+
+    /// The most statements kept.
+    pub fn capacity(&self) -> usize {
+        self.statements.capacity()
+    }
+
+    /// Changes the capacity, dropping the least recently used statements
+    /// that no longer fit.
+    pub fn set_capacity(&mut self, capacity: usize) {
+        self.statements.set_capacity(capacity);
     }
 }

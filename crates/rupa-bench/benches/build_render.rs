@@ -64,6 +64,27 @@ fn render(c: &mut Criterion) {
         });
     }
     g.finish();
+
+    // The same statements through the render cache: every iteration after
+    // the first is a hit (shape, lookup, binding the new values).
+    let cache = rupa::sql::RenderCache::default();
+    let mut g = c.benchmark_group("render_cached");
+    for (name, dialect) in dialects {
+        g.bench_function(format!("get_by_id/{name}"), |b| {
+            b.iter(|| cache.render(black_box(get.statement()), dialect).unwrap())
+        });
+        g.bench_function(format!("select_filtered_page/{name}"), |b| {
+            b.iter(|| cache.render(black_box(page.statement()), dialect).unwrap())
+        });
+        g.bench_function(format!("insert_100/{name}"), |b| {
+            b.iter(|| {
+                cache
+                    .render(black_box(insert_100.statement()), dialect)
+                    .unwrap()
+            })
+        });
+    }
+    g.finish();
 }
 
 criterion_group!(benches, build, render);

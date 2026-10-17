@@ -107,6 +107,9 @@ pub(crate) struct Writer<'a> {
     syntax: &'a dyn Syntax,
     sql: String,
     params: Vec<Value>,
+    /// When recording: the address of the IR value behind each placeholder,
+    /// so the render cache can rebind fresh values to cached SQL.
+    sources: Option<Vec<*const Value>>,
     lowering_depth: usize,
 }
 
@@ -199,11 +202,32 @@ impl<'a> Writer<'a> {
             syntax,
             sql: String::new(),
             params: Vec::new(),
+            sources: None,
             lowering_depth: 0,
         }
     }
 
-    pub(crate) fn statement(mut self, stmt: &Statement) -> Result<Rendered, RenderError> {
+    pub(crate) fn statement(self, stmt: &Statement) -> Result<Rendered, RenderError> {
+        self.render(stmt).map(|(rendered, _)| rendered)
+    }
+
+    /// Renders `stmt`, also returning the address of the IR value behind each
+    /// placeholder, in placeholder order (see [`crate::cache`]). A value the
+    /// writer creates itself (none outside `ApplySecurity`) has an address
+    /// that is not in the IR, which the cache treats as uncacheable.
+    pub(crate) fn statement_with_sources(
+        mut self,
+        stmt: &Statement,
+    ) -> Result<(Rendered, Vec<*const Value>), RenderError> {
+        self.sources = Some(Vec::new());
+        self.render(stmt)
+            .map(|(rendered, sources)| (rendered, sources.unwrap_or_default()))
+    }
+
+    fn render(
+        mut self,
+        stmt: &Statement,
+    ) -> Result<(Rendered, Option<Vec<*const Value>>), RenderError> {
         match stmt {
             Statement::Select(s) => self.select(s)?,
             Statement::Exists(s) => {
@@ -219,15 +243,16 @@ impl<'a> Writer<'a> {
                 for part in &raw.parts {
                     match part {
                         RawPart::Sql(s) => self.sql.push_str(s),
-                        RawPart::Param(v) => self.param(v.clone()),
+                        RawPart::Param(v) => self.param(v),
                     }
                 }
             }
         }
-        Ok(Rendered {
+        let rendered = Rendered {
             sql: self.sql,
             params: self.params,
-        })
+        };
+        Ok((rendered, self.sources))
     }
 
     fn select(&mut self, s: &Select) -> Result<(), RenderError> {
@@ -318,9 +343,9 @@ impl<'a> Writer<'a> {
                 self.sql.push_str(", ");
             }
             self.sql.push_str("set_config(");
-            self.param(Value::Text(name));
+            self.param(&Value::Text(name));
             self.sql.push_str(", ");
-            self.param(Value::Text(value));
+            self.param(&Value::Text(value));
             self.sql.push_str(", true)");
         }
         Ok(())
@@ -411,8 +436,11 @@ impl<'a> Writer<'a> {
         self.ident(c.name);
     }
 
-    fn param(&mut self, v: Value) {
-        self.params.push(v);
+    fn param(&mut self, v: &Value) {
+        if let Some(sources) = &mut self.sources {
+            sources.push(std::ptr::from_ref(v));
+        }
+        self.params.push(v.clone());
         self.syntax.placeholder(self.params.len(), &mut self.sql);
     }
 
@@ -447,7 +475,7 @@ impl<'a> Writer<'a> {
         }
         match node {
             ExprNode::Column(c) => self.column(*c),
-            ExprNode::Param(v) => self.param(v.clone()),
+            ExprNode::Param(v) => self.param(v),
             ExprNode::Unary(UnOp::Not, e) => {
                 self.sql.push_str("NOT ");
                 self.expr(e, prec::ABOVE_CMP)?;

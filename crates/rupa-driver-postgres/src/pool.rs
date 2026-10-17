@@ -40,6 +40,7 @@ type ConnectFn =
 pub struct PgManager {
     config: postgres::Config,
     connect: Arc<ConnectFn>,
+    statement_cache_size: Option<usize>,
 }
 
 impl PgManager {
@@ -58,7 +59,21 @@ impl PgManager {
     {
         Self {
             config,
+            statement_cache_size: None,
             connect: Arc::new(move |config: &postgres::Config| config.connect(tls.clone())),
+        }
+    }
+
+    /// Keeps at most `capacity` prepared statements per connection.
+    pub fn statement_cache_size(mut self, capacity: Option<usize>) -> Self {
+        self.statement_cache_size = capacity;
+        self
+    }
+
+    fn wrap(&self, conn: PgExecutor) -> PgExecutor {
+        match self.statement_cache_size {
+            Some(size) => conn.with_statement_cache_size(size),
+            None => conn,
         }
     }
 
@@ -83,7 +98,7 @@ impl r2d2::ManageConnection for PgManager {
     type Error = PgError;
 
     fn connect(&self) -> Result<PgExecutor, PgError> {
-        Ok(PgExecutor::new((self.connect)(&self.config)?))
+        Ok(self.wrap(PgExecutor::new((self.connect)(&self.config)?)))
     }
 
     fn is_valid(&self, conn: &mut PgExecutor) -> Result<(), PgError> {
@@ -134,8 +149,8 @@ impl PgPool {
         if let Some(timeout) = options.connect_timeout {
             pg.connect_timeout(timeout);
         }
-        Self::new(PgManager::new(pg), &config.pool)
-            .map_err(|e| ConnectError::Connect(DynError::new(e)))
+        let manager = PgManager::new(pg).statement_cache_size(options.statement_cache_size);
+        Self::new(manager, &config.pool).map_err(|e| ConnectError::Connect(DynError::new(e)))
     }
 
     /// Wraps an `r2d2` pool built elsewhere.

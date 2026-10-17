@@ -102,7 +102,9 @@ impl MySqlExecutor {
 
     fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, MySqlError> {
         self.clean()?;
-        let rendered = rupa_sql::render(statement, &self.dialect)?;
+        // Rendered SQL is cached by statement shape; the `mysql` crate caches
+        // server-side prepared statements by SQL text (`statement_cache_size`).
+        let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let params = if rendered.params.is_empty() {
             mysql::Params::Empty
         } else {
@@ -110,12 +112,12 @@ impl MySqlExecutor {
         };
         // `exec*` prepares through the connection's statement cache.
         if expect == Expect::Affected {
-            self.conn.exec_drop(&rendered.sql, params)?;
+            self.conn.exec_drop(&*rendered.sql, params)?;
             return Ok(Outcome::Affected(self.conn.affected_rows()));
         }
         let limit = expect.fetch_limit().unwrap_or(usize::MAX);
         let mut rows = Vec::new();
-        for row in self.conn.exec_iter(&rendered.sql, params)? {
+        for row in self.conn.exec_iter(&*rendered.sql, params)? {
             if rows.len() == limit {
                 // Dropping the iterator drains the remaining rows.
                 break;

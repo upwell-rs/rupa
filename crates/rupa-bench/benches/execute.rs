@@ -84,6 +84,14 @@ fn sqlite(c: &mut Criterion) {
         })
     });
 
+    // The same lookup with the render cache off: the difference is what
+    // caching rendered SQL saves per query.
+    rupa::sql::render_cache().set_capacity(0);
+    g.bench_function("get_by_id/executor_render_uncached", |b| {
+        b.iter(|| exec.run(get::<User>(&next())).unwrap().unwrap())
+    });
+    rupa::sql::render_cache().set_capacity(rupa::sql::cache::DEFAULT_CAPACITY);
+
     let shared: Arc<dyn Users> = Arc::new(Repo::shared(seeded_sqlite()));
     let mut next = ids();
     g.bench_function("get_by_id/repo_shared", |b| {

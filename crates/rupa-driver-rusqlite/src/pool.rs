@@ -15,7 +15,7 @@
 //!
 //! [`SqliteOptions`] (`driver = "sqlite"` in a `DbConfig`): `busy_timeout`,
 //! `foreign_keys` (on by default, as references are always enforced in
-//! Postgres) and `journal_mode`.
+//! Postgres), `journal_mode` and `statement_cache_size`.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -112,6 +112,7 @@ pub struct SqliteManager {
     busy_timeout: Option<Duration>,
     foreign_keys: bool,
     journal_mode: Option<String>,
+    statement_cache_size: Option<usize>,
     on_connect: Option<Arc<InitFn>>,
 }
 
@@ -128,6 +129,7 @@ impl SqliteManager {
             busy_timeout: options.busy_timeout,
             foreign_keys: options.foreign_keys,
             journal_mode: options.journal_mode,
+            statement_cache_size: options.statement_cache_size,
             on_connect: None,
         }
     }
@@ -200,6 +202,7 @@ impl fmt::Debug for SqliteManager {
             .field("busy_timeout", &self.busy_timeout)
             .field("foreign_keys", &self.foreign_keys)
             .field("journal_mode", &self.journal_mode)
+            .field("statement_cache_size", &self.statement_cache_size)
             .field("on_connect", &self.on_connect.is_some())
             .finish()
     }
@@ -210,7 +213,11 @@ impl r2d2::ManageConnection for SqliteManager {
     type Error = SqliteError;
 
     fn connect(&self) -> Result<SqliteExecutor, SqliteError> {
-        SqliteExecutor::new(self.open()?)
+        let mut conn = SqliteExecutor::new(self.open()?)?;
+        if let Some(size) = self.statement_cache_size {
+            conn.set_statement_cache_size(size);
+        }
+        Ok(conn)
     }
 
     fn is_valid(&self, conn: &mut SqliteExecutor) -> Result<(), SqliteError> {

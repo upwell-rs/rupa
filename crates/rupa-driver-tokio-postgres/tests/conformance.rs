@@ -60,8 +60,10 @@ async fn conformance() {
 /// A pooled connection whose transaction was dropped goes back dirty; the
 /// pool rolls it back before handing it out again.
 async fn dirty_connections_are_cleaned_on_return(url: &str) {
+    use rupa::core::ExprOps as _;
     use rupa::core::tx::AsyncTransactional;
     use rupa::{AsyncPool, PoolConfig};
+    use rupa_conformance::Note;
 
     let pool = PgPool::connect(&DbConfig::new(url).pool(PoolConfig::default().max_size(1)))
         .await
@@ -71,8 +73,33 @@ async fn dirty_connections_are_cleaned_on_return(url: &str) {
         drop(conn.begin().await.unwrap());
         assert!(conn.is_dirty());
     }
-    let conn = pool.get().await.unwrap();
+    let mut conn = pool.get().await.unwrap();
     assert!(!conn.is_dirty(), "recycling cleaned it");
+    assert_eq!(conn.statement_cache().capacity(), 256, "the default");
+    drop(conn);
+
+    // `statement_cache_size` bounds each connection's prepared statements.
+    let config: DbConfig =
+        serde_json::from_value(serde_json::json!({ "url": url, "statement_cache_size": 2 }))
+            .unwrap();
+    let small = PgPool::connect(&config).await.unwrap();
+    let mut conn = small.get().await.unwrap();
+    for n in 1..=4i64 {
+        let ids: Vec<i64> = (0..n).collect();
+        let q = rupa::core::select::<Note>()
+            .filter(rupa::col!(Note::id).in_(ids))
+            .all();
+        rupa::core::exec::AsyncExecutor::run(&mut conn, q)
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        conn.statement_cache().len(),
+        2,
+        "least recently used dropped"
+    );
+    drop(conn);
+    let conn = pool.get().await.unwrap();
     let outside = conn.client().batch_execute("SAVEPOINT probe").await;
     assert!(
         outside.is_err(),

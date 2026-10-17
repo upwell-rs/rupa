@@ -347,6 +347,9 @@ pub struct PostgresOptions {
     /// How long opening one connection may take. Overrides the URL's.
     #[serde(with = "duration")]
     pub connect_timeout: Option<Duration>,
+    /// Server-side prepared statements kept per connection (an LRU). `0`
+    /// prepares every query anew. Default: the driver's (256).
+    pub statement_cache_size: Option<usize>,
 }
 
 /// SQLite options.
@@ -362,6 +365,9 @@ pub struct SqliteOptions {
     /// `PRAGMA journal_mode`, e.g. `wal` for concurrent readers. Default:
     /// SQLite's.
     pub journal_mode: Option<String>,
+    /// Prepared statements kept per connection (an LRU). `0` prepares every
+    /// query anew. Default: the driver's (128).
+    pub statement_cache_size: Option<usize>,
 }
 
 impl Default for SqliteOptions {
@@ -370,6 +376,7 @@ impl Default for SqliteOptions {
             busy_timeout: Some(Duration::from_secs(5)),
             foreign_keys: true,
             journal_mode: None,
+            statement_cache_size: None,
         }
     }
 }
@@ -378,8 +385,8 @@ impl Default for SqliteOptions {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct MySqlOptions {
-    /// Prepared statements cached per connection. Default: the `mysql`
-    /// crate's (32).
+    /// Server-side prepared statements kept per connection (an LRU, kept by
+    /// the `mysql` crate). Default: the crate's (32).
     pub statement_cache_size: Option<usize>,
     /// Statements run on every new connection, e.g.
     /// `"SET time_zone = '+00:00'"`.
@@ -678,6 +685,7 @@ mod tests {
                 busy_timeout: Some(Duration::from_secs(1)),
                 foreign_keys: true,
                 journal_mode: Some("wal".into()),
+                statement_cache_size: None,
             })
         );
         let err = parse(json!({ "url": "sqlite://a.db", "driver": "sqlite", "busy": "1s" }));
@@ -697,6 +705,7 @@ mod tests {
             DriverConfig::Postgres(PostgresOptions {
                 application_name: Some("api".into()),
                 connect_timeout: None,
+                statement_cache_size: None,
             })
         );
         assert!(parse(json!({ "url": "foo://h", "x": 1 })).is_err());
@@ -727,6 +736,7 @@ mod tests {
             DbConfig::new("postgres://h/db").driver(DriverConfig::PostgresSync(PostgresOptions {
                 application_name: None,
                 connect_timeout: Some(Duration::from_secs(3)),
+                statement_cache_size: Some(0),
             })),
             DbConfig::new("memory:").driver(DriverConfig::Memory),
         ] {

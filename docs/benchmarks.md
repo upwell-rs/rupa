@@ -14,7 +14,7 @@ cargo bench -p rupa-bench -- --quick                    # fast and rough
 
 | bench | measures | needs |
 |---|---|---|
-| `build_render` | building queries; rendering them for Postgres, MySQL and SQLite | nothing |
+| `build_render` | building queries; rendering them for Postgres, MySQL and SQLite, uncached (`render`) and through the render cache (`render_cached`) | nothing |
 | `execute` | in-memory and SQLite round trips through each layer; pool checkout and owned transactions | nothing (SQLite runs in memory) |
 | `postgres` | real round trips: rupa vs the raw tokio-postgres client vs a repository over `Database` | `RUPA_BENCH_POSTGRES_URL` (skipped without it) |
 
@@ -59,12 +59,29 @@ locally against a baseline.
 | memory `get_by_id` (1000 rows, full scan) | 39.8 µs |
 | memory insert in a rolled-back transaction | 942 µs |
 
-What they say:
+What they said, at the time:
 
-- **Rendering is the biggest fixed cost** in a cached SQLite lookup (~350 ns
-  of ~2 µs). Caching rendered SQL per query site is the next optimization.
+- **Rendering was the biggest fixed cost** in a cached SQLite lookup (~350 ns
+  of ~2 µs). Since cached by shape; see "Render cache" below.
 - **Repositories are nearly free** (+60 ns), and a pooled, erased `Database`
   adds ~0.6 µs per call (checkout, boxing, dynamic dispatch). That is noise
   next to a network round trip.
 - **The memory backend is a test backend.** Lookups scan, and transactions
   snapshot every table.
+
+## Render cache
+
+2026-10-17, `--quick`, same machine and session (this day's machine was ~20%
+slower across the board than the first results, so compare within the
+table):
+
+| benchmark | `render` | `render_cached` |
+|---|---|---|
+| `get_by_id`, Postgres / MySQL / SQLite | 387 / 452 / 417 ns | 190 / 164 / 163 ns |
+| `select_filtered_page`, Postgres / MySQL / SQLite | 1.09 / 1.80 / 1.49 µs | 342 / 340 / 348 ns |
+| `insert_100` | 36–50 µs | 33–35 µs |
+| SQLite `get_by_id`, end to end | 2.33 µs (`executor_render_uncached`) | 2.18 µs (`executor`) |
+
+See [`design/caching.md`](design/caching.md) for what is cached and why
+values never are.
+

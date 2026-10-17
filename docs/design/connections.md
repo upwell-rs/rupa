@@ -224,8 +224,7 @@ This is the `Arc<dyn ..>` the Upwell executor component will provide.
 
 ## Still open
 
-- **Render caching per query site.** Rendering is ~350 ns of a ~2 µs SQLite
-  lookup (see the benchmarks), so it is now the biggest fixed cost.
+- ~~**Render caching.**~~ Done since: see [`caching.md`](caching.md).
 - **TLS** for the registry's Postgres drivers. Today it is programmatic only:
   `PgManager::with_tls` and `Database::new(pool)`.
 - **The memory backend clones whole tables** on `begin` (snapshots) and on

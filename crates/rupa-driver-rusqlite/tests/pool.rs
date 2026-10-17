@@ -157,6 +157,7 @@ fn registry_builds_a_pool_from_config() {
             busy_timeout: Some(Duration::from_millis(250)),
             foreign_keys: true,
             journal_mode: Some("wal".into()),
+            statement_cache_size: None,
         })
     );
     let db = pollster::block_on(Registry::new().with(SqliteDriver).connect(&config)).unwrap();
@@ -192,3 +193,41 @@ fn bad_configs_fail_at_connect() {
             .contains("could not connect")
     );
 }
+
+#[test]
+fn repeated_queries_hit_the_render_cache() {
+    let file = TempDb::new("render-cache");
+    let pool = file.pool(1);
+    add(&mut pool.get().unwrap(), "first");
+    // The process-wide cache is shared with other tests: count our own hits.
+    let before = rupa::sql::render_cache().stats().hits;
+    for _ in 0..5 {
+        count(&pool);
+    }
+    assert!(rupa::sql::render_cache().stats().hits >= before + 4);
+}
+
+#[test]
+fn statement_cache_size_is_configurable() {
+    let file = TempDb::new("stmt-cache");
+    let config: DbConfig = serde_json::from_value(serde_json::json!({
+        "url": file.url(),
+        "statement_cache_size": 0,
+    }))
+    .unwrap();
+    let DriverConfig::Sqlite(options) = &config.driver else {
+        panic!("{config:?}")
+    };
+    assert_eq!(options.statement_cache_size, Some(0));
+    // Still works with prepared statements turned off.
+    let pool = SqlitePool::connect(&config).unwrap();
+    let mut conn = pool.get().unwrap();
+    conn.connection().execute_batch(NOTES_DDL_MAIN).unwrap();
+    assert_eq!(
+        conn.run(raw().sql("SELECT 1 FROM notes").rows::<Vec<Note>>())
+            .unwrap(),
+        []
+    );
+}
+
+const NOTES_DDL_MAIN: &str = "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT, pinned INTEGER NOT NULL)";

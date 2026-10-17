@@ -54,6 +54,7 @@ type ConnectFn = dyn Fn(
 pub struct PgManager {
     config: tokio_postgres::Config,
     connect: Arc<ConnectFn>,
+    statement_cache_size: Option<usize>,
     idle_timeout: Option<Duration>,
     max_lifetime: Option<Duration>,
 }
@@ -87,6 +88,7 @@ impl PgManager {
         };
         Self {
             config,
+            statement_cache_size: None,
             connect: Arc::new(connect),
             idle_timeout: None,
             max_lifetime: None,
@@ -105,6 +107,19 @@ impl PgManager {
     pub fn max_lifetime(mut self, lifetime: Option<Duration>) -> Self {
         self.max_lifetime = lifetime;
         self
+    }
+
+    /// Keeps at most `capacity` prepared statements per connection.
+    pub fn statement_cache_size(mut self, capacity: Option<usize>) -> Self {
+        self.statement_cache_size = capacity;
+        self
+    }
+
+    fn wrap(&self, conn: PgExecutor) -> PgExecutor {
+        match self.statement_cache_size {
+            Some(size) => conn.with_statement_cache_size(size),
+            None => conn,
+        }
     }
 
     /// The connection settings.
@@ -131,7 +146,7 @@ impl managed::Manager for PgManager {
 
     async fn create(&self) -> Result<PgExecutor, PgError> {
         let client = (self.connect)(self.config.clone()).await?;
-        Ok(PgExecutor::new(client))
+        Ok(self.wrap(PgExecutor::new(client)))
     }
 
     async fn recycle(&self, conn: &mut PgExecutor, metrics: &Metrics) -> RecycleResult<PgError> {
@@ -193,7 +208,8 @@ impl PgPool {
         if let Some(timeout) = options.connect_timeout {
             pg.connect_timeout(timeout);
         }
-        Self::new(PgManager::new(pg), &config.pool)
+        let manager = PgManager::new(pg).statement_cache_size(options.statement_cache_size);
+        Self::new(manager, &config.pool)
             .await
             .map_err(|e| ConnectError::Connect(DynError::new(e)))
     }

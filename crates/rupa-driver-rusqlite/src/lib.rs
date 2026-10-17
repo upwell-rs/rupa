@@ -29,8 +29,12 @@
 //!
 //! # Performance
 //!
-//! Statements are prepared once per connection and reused (rusqlite's
-//! `prepare_cached`, [`STATEMENT_CACHE_CAPACITY`] statements per connection).
+//! Two caches, so a repeated query neither renders nor parses again:
+//!
+//! - rendered SQL, by statement shape, process-wide (`rupa_sql::cache`);
+//! - prepared statements, by SQL text, per connection (rusqlite's
+//!   `prepare_cached`, an LRU of [`STATEMENT_CACHE_CAPACITY`] statements by
+//!   default; see [`SqliteExecutor::set_statement_cache_size`]).
 //!
 //! # Transactions
 //!
@@ -88,6 +92,12 @@ impl SqliteExecutor {
         })
     }
 
+    /// Keeps at most `capacity` prepared statements (`0`: prepare every
+    /// query anew).
+    pub fn set_statement_cache_size(&mut self, capacity: usize) {
+        self.conn.set_prepared_statement_cache_capacity(capacity);
+    }
+
     /// Opens a private in-memory database.
     pub fn open_in_memory() -> Result<Self, SqliteError> {
         Self::new(rusqlite::Connection::open_in_memory()?)
@@ -111,7 +121,9 @@ impl SqliteExecutor {
 
     fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqliteError> {
         self.clean()?;
-        let rendered = rupa_sql::render(statement, &self.dialect)?;
+        // Rendered SQL is cached by statement shape, prepared statements by
+        // SQL text: a repeated query skips both rendering and parsing.
+        let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let params = rusqlite::params_from_iter(rendered.params.iter().map(to_sql));
         let mut stmt = self.conn.prepare_cached(&rendered.sql)?;
         if expect == Expect::Affected {
