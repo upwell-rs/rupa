@@ -1,0 +1,5 @@
+error: `Entity::field` names a field of a joined entity; write just `field` here
+ --> tests/ui/query_qualified_field.rs:6:24
+  |
+6 | #[query(filter = User::email == $email)]
+  |                        ^^^^^

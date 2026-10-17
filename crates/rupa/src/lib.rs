@@ -43,7 +43,7 @@ pub use rupa_core::{
     FromRow, Gettable, Insertable, Json, NoKey, Query, Repo, Scalar, Shared, SharedAsync,
     Updatable, bind, col, delete, get, insert, raw, select, update,
 };
-pub use rupa_macros::{Deletable, Entity, Gettable, Insertable, Updatable, query, repository};
+pub use rupa_macros::{Deletable, Entity, Gettable, Insertable, Updatable, on, query, repository};
 
 /// DSL functions: the built-ins, and the macro to write your own.
 ///
@@ -167,5 +167,7 @@ pub mod prelude {
     pub use rupa_core::tx::{
         AsyncTransaction, AsyncTransactional, Transaction, Transactional, TxOptions,
     };
-    pub use rupa_macros::{Deletable, Entity, Gettable, Insertable, Updatable, query, repository};
+    pub use rupa_macros::{
+        Deletable, Entity, Gettable, Insertable, Updatable, on, query, repository,
+    };
 }

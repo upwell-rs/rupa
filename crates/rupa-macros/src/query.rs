@@ -257,8 +257,8 @@ fn crud_body(ms: &TokenStream, attr: &QueryAttr, sig: &Signature) -> syn::Result
         }
         let mut ctx = Ctx {
             ms,
-            entity,
-            params: &sig.params,
+            fields: Fields::Entity(entity),
+            params: Some(&sig.params),
             used: BTreeSet::new(),
         };
         let c = ctx.cond(filter)?;
@@ -471,16 +471,31 @@ enum Gen {
     Value(TokenStream),
 }
 
-struct Ctx<'a> {
-    ms: &'a TokenStream,
-    entity: &'a Type,
-    params: &'a [(Ident, Type)],
-    used: BTreeSet<String>,
+/// Where field names resolve.
+pub enum Fields<'a> {
+    /// `#[query]`: plain fields of one entity.
+    Entity(&'a Type),
+    /// `on!`: `Entity::field`, found among a join's sources (the closure
+    /// argument named here) by entity type.
+    Sources(Ident),
+}
+
+pub struct Ctx<'a> {
+    pub ms: &'a TokenStream,
+    pub fields: Fields<'a>,
+    /// The function's parameters, which `$name` must be one of; `None` in
+    /// `on!`, where `$name` is any variable in scope.
+    pub params: Option<&'a [(Ident, Type)]>,
+    pub used: BTreeSet<String>,
 }
 
 impl Ctx<'_> {
     fn param(&mut self, p: &Ident) -> syn::Result<TokenStream> {
-        if !self.params.iter().any(|(name, _)| name == p) {
+        let Some(params) = self.params else {
+            let ms = respan(self.ms, p.span());
+            return Ok(quote_spanned!(p.span()=> #ms::Clone::clone(&#p)));
+        };
+        if !params.iter().any(|(name, _)| name == p) {
             return Err(syn::Error::new(
                 p.span(),
                 format!("unknown parameter `${p}`: it must be an argument of this function"),
@@ -491,24 +506,50 @@ impl Ctx<'_> {
         Ok(quote_spanned!(p.span()=> #ms::Clone::clone(&#p)))
     }
 
-    fn column(&self, field: &Ident) -> TokenStream {
-        let entity = self.entity;
-        column_expr(self.ms, &quote!(#entity), field, field.span())
+    /// A plain field: a column of the query's entity.
+    fn column(&self, field: &Ident) -> syn::Result<TokenStream> {
+        match &self.fields {
+            Fields::Entity(entity) => {
+                Ok(column_expr(self.ms, &quote!(#entity), field, field.span()))
+            }
+            Fields::Sources(_) => Err(syn::Error::new(
+                field.span(),
+                format!("name the field's entity: `Entity::{field}`"),
+            )),
+        }
+    }
+
+    /// `Entity::field`: the column of `entity`'s source in a join.
+    fn qualified(&self, entity: &syn::Path, field: &Ident) -> syn::Result<TokenStream> {
+        match &self.fields {
+            Fields::Sources(sources) => {
+                let ms = respan(self.ms, field.span());
+                let column = column_expr(self.ms, &quote!(#entity), field, field.span());
+                Ok(quote_spanned!(field.span()=> #ms::source_col(&#sources, #column)))
+            }
+            Fields::Entity(_) => Err(syn::Error::new(
+                field.span(),
+                "`Entity::field` names a field of a joined entity; write just `field` here",
+            )),
+        }
+    }
+
+    /// A column, or a JSON path into it when `path` has keys.
+    fn field(column: TokenStream, path: &[Ident]) -> Gen {
+        if path.len() == 1 {
+            Gen::Column(column)
+        } else {
+            let first = path[1].to_string();
+            let rest = path[2..].iter().map(|k| k.to_string());
+            Gen::Json(quote_spanned!(path[0].span()=> #column.path(#first)#(.key(#rest))*))
+        }
     }
 
     fn lower(&mut self, e: &Expr) -> syn::Result<Gen> {
         let ms = self.ms.clone();
         Ok(match e {
-            Expr::Field(path) => {
-                let column = self.column(&path[0]);
-                if path.len() == 1 {
-                    Gen::Column(column)
-                } else {
-                    let first = path[1].to_string();
-                    let rest = path[2..].iter().map(|k| k.to_string());
-                    Gen::Json(quote_spanned!(path[0].span()=> #column.path(#first)#(.key(#rest))*))
-                }
-            }
+            Expr::Field(path) => Self::field(self.column(&path[0])?, path),
+            Expr::Qualified(entity, path) => Self::field(self.qualified(entity, &path[0])?, path),
             Expr::Param(p) => Gen::Value(self.param(p)?),
             Expr::Lit(l) => Gen::Value(quote!(#l)),
             Expr::Not(inner, span) => {
@@ -639,7 +680,7 @@ impl Ctx<'_> {
     }
 
     /// A node used as a boolean condition.
-    fn cond(&mut self, e: &Expr) -> syn::Result<TokenStream> {
+    pub fn cond(&mut self, e: &Expr) -> syn::Result<TokenStream> {
         let span = e.span();
         let ms = self.ms.clone();
         match self.lower(e)? {
@@ -694,8 +735,8 @@ pub fn query_body(ms: &TokenStream, attr: &QueryAttr, sig: &Signature) -> syn::R
         };
         let mut ctx = Ctx {
             ms,
-            entity: &entity,
-            params: &sig.params,
+            fields: Fields::Entity(&entity),
+            params: Some(&sig.params),
             used: BTreeSet::new(),
         };
         let mut b = quote!(#ms::select::<#entity>());
@@ -704,7 +745,7 @@ pub fn query_body(ms: &TokenStream, attr: &QueryAttr, sig: &Signature) -> syn::R
             b = quote!(#b.filter(#c));
         }
         for key in &attr.order_by {
-            let column = ctx.column(&key.field);
+            let column = ctx.column(&key.field)?;
             let dir = if key.desc { quote!(desc) } else { quote!(asc) };
             b = quote!(#b.order_by({
                 #[allow(unused_imports)]
@@ -900,7 +941,7 @@ pub fn called_functions(attr: &QueryAttr) -> Vec<syn::Path> {
                     walk(a, out);
                 }
             }
-            Expr::Field(_) | Expr::Param(_) | Expr::Lit(_) => {}
+            Expr::Field(_) | Expr::Qualified(..) | Expr::Param(_) | Expr::Lit(_) => {}
         }
     }
     let mut out = Vec::new();

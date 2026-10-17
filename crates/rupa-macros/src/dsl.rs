@@ -6,12 +6,14 @@
 //!          | operand ('==' | '!=' | '<' | '<=' | '>' | '>=') operand
 //!          | operand 'in' operand | operand 'like' operand | operand 'is_null'
 //!          | '(' expr ')' | operand
-//! operand := field ('.' key)* | '$' param | literal | path '(' expr,* ')'
+//! operand := field ('.' key)* | Entity '::' field ('.' key)*
+//!          | '$' param | literal | path '(' expr,* ')'
 //! ```
 //!
 //! Precedence, loosest first: `||`, `&&`, `!`, comparisons / `in` / `like`
 //! (non-associative), postfix `is_null`. Field paths with more than one
 //! segment are JSON paths: `prefs.theme` is key `theme` of column `prefs`.
+//! `Entity::field` names the field of a given entity, for joins (`on!`).
 
 use proc_macro2::Span;
 use syn::ext::IdentExt;
@@ -52,6 +54,8 @@ pub enum Expr {
     IsNull(Box<Expr>, Span),
     /// `column` or `column.key.key`: the first segment is an entity field.
     Field(Vec<Ident>),
+    /// `Entity::column` (or `Entity::column.key`): a field of a named entity.
+    Qualified(Path, Vec<Ident>),
     Param(Ident),
     Lit(Lit),
     /// A `#[dsl::function]` call, resolved by Rust path.
@@ -67,7 +71,7 @@ impl Expr {
             | Expr::In(.., s)
             | Expr::Like(.., s)
             | Expr::IsNull(_, s) => *s,
-            Expr::Field(path) => path[0].span(),
+            Expr::Field(path) | Expr::Qualified(_, path) => path[0].span(),
             Expr::Param(p) => p.span(),
             Expr::Lit(l) => l.span(),
             Expr::Call(p, _) => p.segments[0].ident.span(),
@@ -213,10 +217,24 @@ fn parse_prefix(input: ParseStream) -> syn::Result<Expr> {
             let args = content.parse_terminated(parse_expr, Token![,])?;
             return Ok(Expr::Call(path, args.into_iter().collect()));
         }
-        let mut segments = vec![input.parse::<Ident>()?];
-        if input.peek(Token![::]) {
-            return Err(input.error("expected a field, or a function call `path(..)`"));
-        }
+        let entity = if path.segments.len() > 1 {
+            // `Entity::field`: everything before the last segment names the entity.
+            let mut entity = input.call(Path::parse_mod_style)?;
+            let field = entity
+                .segments
+                .pop()
+                .expect("two segments")
+                .into_value()
+                .ident;
+            entity.segments.pop_punct();
+            Some((entity, field))
+        } else {
+            None
+        };
+        let mut segments = match &entity {
+            Some((_, field)) => vec![field.clone()],
+            None => vec![input.parse::<Ident>()?],
+        };
         while input.peek(Token![.]) {
             input.parse::<Token![.]>()?;
             segments.push(
@@ -233,7 +251,10 @@ fn parse_prefix(input: ParseStream) -> syn::Result<Expr> {
                 ));
             }
         }
-        return Ok(Expr::Field(segments));
+        return Ok(match entity {
+            Some((entity, _)) => Expr::Qualified(entity, segments),
+            None => Expr::Field(segments),
+        });
     }
     Err(input.error("expected a field, `$param`, literal, `!`, `(` or function call"))
 }
@@ -270,6 +291,14 @@ mod tests {
                 .map(|i| i.to_string())
                 .collect::<Vec<_>>()
                 .join("."),
+            Expr::Qualified(e, p) => format!(
+                "{}::{}",
+                quote::quote!(#e).to_string().replace(' ', ""),
+                p.iter()
+                    .map(|i| i.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".")
+            ),
             Expr::Param(p) => format!("${p}"),
             Expr::Lit(_) => "lit".into(),
             Expr::Call(p, args) => format!(
@@ -317,6 +346,14 @@ mod tests {
             "(and rupa::dsl::ilike(email, $p) a)"
         );
         assert_eq!(p("a.b.c == 1"), "(Eq a.b.c lit)");
+        assert_eq!(
+            p("Order::user_id == User::id && Order::meta.k == $k"),
+            "(and (Eq Order::user_id User::id) (Eq Order::meta.k $k))"
+        );
+        assert_eq!(
+            p("app::model::User::id is_null"),
+            "(is_null app::model::User::id)"
+        );
     }
 
     #[test]

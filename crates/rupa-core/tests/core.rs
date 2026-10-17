@@ -276,8 +276,8 @@ fn ui() {
 fn join_numbers_sources_and_qualifies_columns() {
     let q = select::<User>()
         .filter(User::ACTIVE.eq(true))
-        .left_join::<User>(|a, b| b.col(User::ID).eq(a.col(User::ID)))
-        .filter(|_, b| b.col(User::EMAIL).eq("x"))
+        .left_join_on::<User>(|(a, b)| b.col(User::ID).eq(a.col(User::ID)))
+        .filter(|(_, b)| b.col(User::EMAIL).eq("x"))
         .all();
     let Statement::Select(s) = q.statement() else {
         panic!()
@@ -314,7 +314,7 @@ fn join_numbers_sources_and_qualifies_columns() {
 #[test]
 fn joined_rows_decode_into_tuples_with_none_for_unmatched() {
     let q = select::<User>()
-        .left_join::<User>(|a, b| b.col(User::ID).eq(a.col(User::ID)))
+        .left_join_on::<User>(|(a, b)| b.col(User::ID).eq(a.col(User::ID)))
         .all();
     let user = User::sample();
     let width = User::columns().len();
@@ -336,22 +336,33 @@ fn joined_rows_decode_into_tuples_with_none_for_unmatched() {
 fn up_to_ten_sources() {
     let on = |n: i64| move |a: Src<User, 0>| a.col(User::ID).eq(n);
     let q = select::<User>()
-        .inner_join::<User>(|a, _| on(1)(a))
-        .inner_join::<User>(|a, _, _| on(2)(a))
-        .inner_join::<User>(|a, _, _, _| on(3)(a))
-        .inner_join::<User>(|a, _, _, _, _| on(4)(a))
-        .inner_join::<User>(|a, _, _, _, _, _| on(5)(a))
-        .inner_join::<User>(|a, _, _, _, _, _, _| on(6)(a))
-        .inner_join::<User>(|a, _, _, _, _, _, _, _| on(7)(a))
-        .inner_join::<User>(|a, _, _, _, _, _, _, _, _| on(8)(a))
-        .left_join::<User>(|a, _, _, _, _, _, _, _, _, j| on(9)(a).and(j.col(User::ACTIVE)))
-        .filter(|_, _, _, _, _, _, _, _, _, j| j.col(User::ID).eq(1))
+        .inner_join_on::<User>(|(a, ..)| on(1)(a))
+        .inner_join_on::<User>(|(a, ..)| on(2)(a))
+        .inner_join_on::<User>(|(a, ..)| on(3)(a))
+        .inner_join_on::<User>(|(a, ..)| on(4)(a))
+        .inner_join_on::<User>(|(a, ..)| on(5)(a))
+        .inner_join_on::<User>(|(a, ..)| on(6)(a))
+        .inner_join_on::<User>(|(a, ..)| on(7)(a))
+        .inner_join_on::<User>(|(a, ..)| on(8)(a))
+        .left_join_on::<User>(|(a, _, _, _, _, _, _, _, _, j)| on(9)(a).and(j.col(User::ACTIVE)))
+        .filter(|(_, _, _, _, _, _, _, _, _, j)| j.col(User::ID).eq(1))
         .all();
     let Statement::Select(s) = q.statement() else {
         panic!()
     };
     assert_eq!(s.from.source_count(), 10);
     assert_eq!(s.projection.len(), 10 * User::columns().len());
-    type Ten = (User, User, User, User, User, User, User, User, User, Option<User>);
+    type Ten = (
+        User,
+        User,
+        User,
+        User,
+        User,
+        User,
+        User,
+        User,
+        User,
+        Option<User>,
+    );
     let _: &Query<Vec<Ten>> = &q;
 }

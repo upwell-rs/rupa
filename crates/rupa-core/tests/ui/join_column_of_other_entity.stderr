@@ -1,10 +1,10 @@
 error[E0308]: mismatched types
-  --> tests/ui/join_column_of_other_entity.rs:11:62
+  --> tests/ui/join_column_of_other_entity.rs:11:67
    |
-11 |     let _ = select::<User>().inner_join::<User>(|a, b| b.col(foreign).eq(a.col(User::ID)));
-   |                                                          --- ^^^^^^^ expected `Column<User, _, _>`, found `Column<Other, i64, Scalar>`
-   |                                                          |
-   |                                                          arguments to this method are incorrect
+11 |     let _ = select::<User>().inner_join_on::<User>(|(a, b)| b.col(foreign).eq(a.col(User::ID)));
+   |                                                               --- ^^^^^^^ expected `Column<User, _, _>`, found `Column<Other, i64, Scalar>`
+   |                                                               |
+   |                                                               arguments to this method are incorrect
    |
    = note: expected struct `Column<User, _, _>`
               found struct `Column<Other, i64, rupa_core::Scalar>`

@@ -1,11 +1,12 @@
 # Joins
 
-Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 and 2 of
+Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 to 3 of
 the build order are done:
 
-- the IR, rendering (aliases `t0`, `t1`, ..), render-cache shapes, and
-  nested-loop joins in the memory backend;
-- `Src` handles, the join builder for up to 10 sources, and tuple decoding.
+1. the IR, rendering (aliases `t0`, `t1`, ..), render-cache shapes, and
+   nested-loop joins in the memory backend;
+2. `Src` handles, the join builder for up to 10 sources, and tuple decoding;
+3. `on!`.
 
 They are covered by join conformance cases on every backend.
 
@@ -98,14 +99,14 @@ closes known gap 4 for joined queries:
 
 ```rust
 let rows: Vec<(User, Option<Order>)> = select::<User>()
-    .left_join::<Order>(|u, o| o.col(col!(Order::user_id)).eq(u.col(col!(User::id))))
-    .filter(|u, o| u.col(col!(User::active)).eq(true))
-    .order_by(|_, o| o.col(col!(Order::placed_at)).desc())
+    .left_join_on::<Order>(|(u, o)| o.col(col!(Order::user_id)).eq(u.col(col!(User::id))))
+    .filter(|(u, _)| u.col(col!(User::active)).eq(true))
+    .order_by(|(_, o)| o.col(col!(Order::placed_at)).desc())
     .all()
     .run(&mut db)?;
 ```
 
-- **Join builder type.** `left_join`/`inner_join` turn `SelectBuilder<User>`
+- **Join builder type.** `left_join_on`/`inner_join_on` turn `SelectBuilder<User>`
   into `JoinBuilder<(Src<User, 0>, Src<Order, 1>), (User, Option<Order>)>`.
   The second parameter is the row type. Each further join adds a source and a
   tuple element.
@@ -136,6 +137,14 @@ As built (step 2):
 - **Closures return `Expr<bool>`,** not `impl IntoExpr<bool>`. With a generic
   return type the turbofish would have to be `::<Order, _>`. With `Expr<bool>`
   it is just `::<Order>`.
+- **Closures take one tuple of handles,** `|(u, o)|`, not one argument per
+  source, which is what `on!` needs (step 3). A macro can't write a closure
+  whose arity it doesn't know, but it can write `|sources| ..` over a tuple.
+  It also made `filter`, `order_by`, `limit` and the result methods a single
+  generic impl. Only the next-join methods are per arity.
+- **Names (decided 2026-10-18).** The closure forms are `inner_join_on` and
+  `left_join_on`. `inner_join` and `left_join` are kept for joins inferred
+  from declared relations (step 4).
 
 ### `on!` for the common case
 
@@ -144,15 +153,27 @@ above:
 
 ```rust
 select::<User>()
-    .left_join::<Order>(on!(Order::user_id == User::id))
+    .left_join_on::<Order>(on!(Order::user_id == User::id))
+    .filter(on!(Order::total > $min && User::prefs.theme == "dark"))
 ```
 
-- **How it works.** `on!` resolves each `Entity::field` to the one source of
-  that entity, and it uses the same comparison grammar as `#[query]`
-  (`==`, `!=`, `<`, `&&`, ..).
-- **Ambiguity is an error.** If an entity appears twice, as in a self-join,
-  `on!` can't tell which source is meant. That is a compile error that points
-  to the closure form.
+- **How it works.** `on!` uses the same grammar as `#[query]` (`==`, `!=`,
+  `<`, `&&`, `||`, `!`, `in`, `like`, `is_null`, JSON paths and DSL calls),
+  with fields written `Entity::field`. It expands to
+  `|sources| -> Expr<bool> { .. }`. Each field becomes
+  `source_col(&sources, column)`, and `Has<E, At<N>>` (one impl per tuple
+  position) infers where `E` sits in the tuple.
+- **`$name` binds a variable in scope** by cloning it, so the variable can
+  still be used afterwards. In `#[query]`, `$name` must be a parameter of the
+  function; in `on!`, it can be any variable.
+- **Errors.**
+  - An entity that isn't a source: "`Item` is not a source of this join".
+  - An unqualified field: "name the field's entity: `Entity::user_id`".
+  - `Entity::field` inside `#[query]`: rejected until step 6.
+  - An entity that is a source twice (a self-join): Rust's own
+    "type annotations needed" (E0283). The error lists the two candidate
+    positions, but stable Rust can't customize ambiguity errors, so the
+    message doesn't mention the handles. Use the closure form there.
 
 ## Declared relations
 
@@ -182,14 +203,7 @@ struct Order {
 
   This is resolved through the type system, using the index-marker trick. It
   compiles when exactly one relation fits, and it is a compile error when none
-  or several do.
-
-  **Open (naming):** Rust has no overloading, so `inner_join::<Order>()` with
-  no condition can't share a name with `inner_join::<Order>(on)`, the closure
-  form that step 2 built. The proposal is to give the inferred form the short
-  name, since it's the one that saves work, and rename the closure form to
-  `inner_join_on` / `left_join_on`. Then `on!` reads
-  `.inner_join_on::<Order>(on!(..))`. To decide before step 4.
+  or several do. Explicit conditions use `inner_join_on` / `left_join_on`.
 - **Several relations.** When there is more than one relation to the same
   entity, as with `user_id` and `reviewed_by` above, the join names the one it
   wants: `.inner_join_via(Order::reviewer())`. Each relation gets a generated
