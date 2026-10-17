@@ -1,12 +1,13 @@
 # Joins
 
-Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 to 3 of
+Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 to 4 of
 the build order are done:
 
 1. the IR, rendering (aliases `t0`, `t1`, ..), render-cache shapes, and
    nested-loop joins in the memory backend;
 2. `Src` handles, the join builder for up to 10 sources, and tuple decoding;
-3. `on!`.
+3. `on!`;
+4. declared relations and inferred joins (`join::<J>().inner()`).
 
 They are covered by join conformance cases on every backend.
 
@@ -189,31 +190,49 @@ struct Order {
 - **What the attribute means.** `references = User` says this column holds
   `User`'s id, so `User::ID_COLUMNS` must have exactly one column. The derive
   checks that the column's type matches `User::Id`, allowing for `Option`.
-- **What the derive generates.** For each referenced entity it generates
-  `impl Related<User, R> for Order`, where `R` is a marker type per relation.
-  The ON condition is `order.user_id = user.id`.
-- **Inferred joins.** Without an `on` argument, the join method looks for one
-  declared relation between the new source and any earlier source, in either
-  direction:
+- **What the derive generates.** For each `references` field, the derive
+  generates a hidden marker type `R` for the relation and two impls:
+  - `impl JoinTo<User, Fwd, R> for Order`, for `Order` joined onto a `User`
+    source;
+  - `impl JoinTo<Order, Rev, R> for User`, for the reverse. Order's crate may
+    write this impl, because `Order` is local and appears in the trait's
+    parameters.
+
+  Both build the `ON` condition `order.user_id = user.id`.
+- **Inferred joins (decided 2026-10-18: `join::<J>()`, then `.inner()` /
+  `.left()`).** Rust has no partial turbofish, so `.inner_join::<Order>()`
+  can't also infer the relation's marker types. Picking the entity and
+  finishing the join are therefore two calls:
 
   ```rust
-  select::<User>().inner_join::<Order>()        // Order.user_id -> User
-      .inner_join::<Item>()                     // Item.order_id -> Order
+  select::<User>()
+      .join::<Order>().inner()    // Order.user_id -> User
+      .join::<Line>().left()      // Line.order_id -> Order, at source 1
   ```
 
-  This is resolved through the type system, using the index-marker trick. It
-  compiles when exactly one relation fits, and it is a compile error when none
-  or several do. Explicit conditions use `inner_join_on` / `left_join_on`.
-- **Several relations.** When there is more than one relation to the same
-  entity, as with `user_id` and `reviewed_by` above, the join names the one it
-  wants: `.inner_join_via(Order::reviewer())`. Each relation gets a generated
-  accessor, named by `relation = ..`. If that is left out, the name is the
-  field name with a trailing `_id` removed. This only names the accessor; the
-  relation itself is declared by the attribute.
+  `JoinOnto<J, At<P>, D, R>` is implemented for each tuple position `P`,
+  with the bound `J: JoinTo<E_P, D, R>`. The compiler drops the positions
+  whose entity has no relation with `J`. So the join compiles when exactly
+  one relation fits, at any earlier source and in either direction.
+  Explicit conditions use `inner_join_on` / `left_join_on`.
+- **Several relations.** When more than one relation fits, as with `user_id`
+  and `reviewed_by` above, the join names the one it wants:
+  `.join::<Order>().inner_via(Order::reviewer())`. Each relation gets a
+  generated accessor returning `Rel<R>`, named by `relation = ..`. If that
+  is left out, the name is the field name with a trailing `_id` removed.
+  This only names the accessor; the relation itself is declared by the
+  attribute.
+- **Errors.**
+  - No relation: "`Order` has no declared relation to `User`".
+  - Several relations: Rust's E0283, which points at the `references`
+    attributes that fit.
+  - A field whose type isn't the target's id (or an `Option` of it):
+    "a `references` field must hold the referenced entity's id".
+  - `relation` without `references`: rejected by the derive.
 - **Self-references.** A self-reference such as `manager_id` referencing
-  `User` works the same way. If the same entity is joined twice, an inferred
-  join may be ambiguous, which is again a compile error. In that case, write
-  the closure.
+  `User` fits both ways round: an employee joined to their manager, or a
+  manager joined to their reports. So even `via` is ambiguous between `Fwd`
+  and `Rev`. Write the condition with `left_join_on` there.
 - **Not a foreign-key check.** Relations don't validate anything in the
   database. They only build `ON` conditions. Database foreign keys belong to
   migrations, which come later.
@@ -256,8 +275,8 @@ struct OrderLine {
 }
 
 let lines: Vec<OrderLine> = select::<Order>()
-    .inner_join::<User>()
-    .left_join::<Coupon>()
+    .join::<User>().inner()
+    .join::<Coupon>().left()
     .filter(on!(Order::total > 100))
     .into::<OrderLine>()
     .all()

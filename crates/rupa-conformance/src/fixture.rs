@@ -76,6 +76,7 @@ pub struct SetPinned {
 pub struct Review {
     #[id]
     pub id: i64,
+    #[column(references = Item)]
     pub item_id: i64,
     pub stars: i32,
     pub comment: Option<String>,

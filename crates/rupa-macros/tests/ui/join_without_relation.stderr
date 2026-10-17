@@ -1,0 +1,35 @@
+error[E0277]: `Order` has no declared relation to `User`
+  --> tests/ui/join_without_relation.rs:10:46
+   |
+10 |     let _ = select::<User>().join::<Order>().inner();
+   |                                              ^^^^^ no `#[column(references = ..)]` between them
+   |
+help: the trait `JoinTo<User, _, _>` is not implemented for `Order`
+  --> tests/ui/join_without_relation.rs:7:1
+   |
+ 7 | pub struct Order { #[id] id: i64, user_id: i64 }
+   | ^^^^^^^^^^^^^^^^
+   = note: declare one with `#[column(references = ..)]`, or give the condition: `inner_join_on` / `left_join_on`
+   = help: the following other types implement trait `JoinOnto<J, P, D, R>`:
+             `(Src<E, 0>,)` implements `JoinOnto<J, At<0>, D, R>`
+             `(S0, Src<E, 1>)` implements `JoinOnto<J, At<1>, D, R>`
+             `(Src<E, 0>, S1)` implements `JoinOnto<J, At<0>, D, R>`
+             `(S0, S1, Src<E, 2>)` implements `JoinOnto<J, At<2>, D, R>`
+             `(S0, Src<E, 1>, S2)` implements `JoinOnto<J, At<1>, D, R>`
+             `(Src<E, 0>, S1, S2)` implements `JoinOnto<J, At<0>, D, R>`
+             `(S0, S1, S2, Src<E, 3>)` implements `JoinOnto<J, At<3>, D, R>`
+             `(S0, S1, Src<E, 2>, S3)` implements `JoinOnto<J, At<2>, D, R>`
+           and $N others
+   = note: required for `(Src<User, 0>,)` to implement `JoinOnto<Order, At<0>, _, _>`
+note: required by a bound in `PendingJoin::<(S0,), (R0,), J>::inner`
+  --> $WORKSPACE/crates/rupa-core/src/join.rs
+   |
+   |             pub fn inner<P, D, Rl>(self) -> JoinBuilder<($($S,)+ Src<J, $N>), ($($R,)+ J)>
+   |                    ----- required by a bound in this associated function
+   |             where
+   |                 ($($S,)+): JoinOnto<J, P, D, Rl>,
+   |                            ^^^^^^^^^^^^^^^^^^^^^ required by this bound in `PendingJoin::<(S0,), (R0,), J>::inner`
+...
+   | pending!(S0 R0 => 1);
+   | -------------------- in this macro invocation
+   = note: this error originates in the macro `pending` (in Nightly builds, run with -Z macro-backtrace for more info)

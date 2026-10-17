@@ -45,7 +45,8 @@ pub mod __macro_support {
     pub use crate::expr::{Expr, IntoExpr};
     pub use crate::expr::{ExprOps, IntoCondition};
     pub use crate::ir::{BinOp, DslFnDef, ExprNode, TableRef};
-    pub use crate::join::source_col;
+    pub use crate::ir::{ColumnRef, SourceId};
+    pub use crate::join::{Fwd, JoinTo, RefersTo, Rel, Rev, relation_on, source_col};
     pub use crate::query::Query;
     pub use crate::row::Row;
     pub use crate::value::Value;
@@ -69,7 +70,10 @@ pub use erased::{BoxAsyncExecutor, BoxAsyncTx, BoxExecutor, BoxTx, DynError};
 pub use error::{DecodeError, DslError, ResultError, RowError, TxError};
 pub use exec::{AsyncExecutor, Blocking, ExecError, Executor, Outcome};
 pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
-pub use join::{At, Has, JoinBuilder, JoinPart, OffsetRow, Source, Sources, Src, source_col};
+pub use join::{
+    At, Fwd, Has, JoinBuilder, JoinOnto, JoinPart, JoinTo, OffsetRow, PendingJoin, RefersTo, Rel,
+    Rev, Source, Sources, Src, source_col,
+};
 pub use pool::{AsyncPool, OwnedAsyncTx, OwnedTx, Pool, PoolStatus, Pooled, SingleConnection};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 pub use registry::{ConnectError, Database, Driver, Registry};

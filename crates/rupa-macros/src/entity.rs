@@ -4,8 +4,9 @@
 //! It grants no insert, update or delete surface; those are separate derives.
 
 use proc_macro2::TokenStream;
-use quote::{quote, quote_spanned};
-use syn::{DeriveInput, LitStr};
+use quote::{format_ident, quote, quote_spanned};
+use syn::spanned::Spanned;
+use syn::{DeriveInput, Ident, LitStr};
 
 use crate::model::{self, Kind, column_expr, fields_struct_ident, option_inner};
 
@@ -109,7 +110,15 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         quote!((#name, #message))
     });
 
+    let relations = fields.iter().filter_map(|f| {
+        f.references
+            .as_ref()
+            .map(|target| relation(&ms, &input, f, target))
+    });
+
     Ok(quote! {
+        #(#relations)*
+
         #[doc(hidden)]
         #[allow(non_camel_case_types, non_snake_case)]
         #vis struct #fields_ty {
@@ -154,4 +163,68 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
             }
         }
     })
+}
+
+/// A `#[column(references = Target)]` field: a type check, a marker type, the
+/// two `JoinTo` impls (this entity joined onto `Target`, and the reverse), and
+/// the relation accessor (`relation = name`, or the field name without `_id`).
+fn relation(
+    ms: &TokenStream,
+    input: &DeriveInput,
+    f: &model::Field,
+    target: &syn::Path,
+) -> TokenStream {
+    let (ident, vis) = (&input.ident, &input.vis);
+    let (ty, column) = (&f.ty, &f.column);
+    let name = f.relation.clone().unwrap_or_else(|| {
+        let base = f
+            .name
+            .strip_suffix("_id")
+            .filter(|b| !b.is_empty())
+            .unwrap_or(&f.name);
+        Ident::new(base, f.ident.span())
+    });
+    let marker = format_ident!("__RupaRel{}_{}", ident, name);
+    let doc = format!(
+        "The relation through `{}`, for `join::<..>().inner_via(..)`.",
+        f.name
+    );
+    let span = target.span();
+    quote_spanned! {span=>
+        #[doc(hidden)]
+        #[allow(non_camel_case_types)]
+        #vis struct #marker;
+
+        const _: () = {
+            fn check<F: #ms::RefersTo<<#target as #ms::Entity>::Id>>() {}
+            let _ = check::<#ty>;
+        };
+
+        impl #ms::JoinTo<#target, #ms::Fwd, #marker> for #ident {
+            fn on(new: #ms::SourceId, earlier: #ms::SourceId) -> #ms::ExprNode {
+                #ms::relation_on(
+                    #ms::ColumnRef::of(new, #column),
+                    earlier,
+                    <#target as #ms::Entity>::ID_COLUMNS,
+                )
+            }
+        }
+
+        impl #ms::JoinTo<#ident, #ms::Rev, #marker> for #target {
+            fn on(new: #ms::SourceId, earlier: #ms::SourceId) -> #ms::ExprNode {
+                #ms::relation_on(
+                    #ms::ColumnRef::of(earlier, #column),
+                    new,
+                    <#target as #ms::Entity>::ID_COLUMNS,
+                )
+            }
+        }
+
+        impl #ident {
+            #[doc = #doc]
+            #vis const fn #name() -> #ms::Rel<#marker> {
+                #ms::Rel::new()
+            }
+        }
+    }
 }

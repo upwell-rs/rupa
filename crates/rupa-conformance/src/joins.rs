@@ -319,3 +319,82 @@ pub async fn case_join_single_row_shapes_and_exists<E: AsyncExecutor>(e: &mut E)
         .unwrap();
     assert!(!reviewed);
 }
+
+/// `#[column(references = Item)]` on `Review::item_id`: joins in either
+/// direction without a condition, onto whichever source the relation fits.
+pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &mut E) {
+    seed(e).await;
+
+    // Review joined onto Item (`Review.item_id = Item.id`).
+    let rows = e
+        .run(
+            select::<Item>()
+                .join::<Review>()
+                .left()
+                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
+                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
+                .all(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        pairs(&rows),
+        [
+            (1, Some(10)),
+            (1, Some(11)),
+            (2, None),
+            (3, Some(12)),
+            (4, None)
+        ]
+    );
+
+    // The reverse: Item joined onto Review, naming the relation.
+    let rows = e
+        .run(
+            select::<Review>()
+                .join::<Item>()
+                .inner_via(Review::item())
+                .order_by(|(r, _)| r.col(col!(Review::id)).desc())
+                .all(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows,
+        [
+            (review(12), item(3)),
+            (review(11), item(1)),
+            (review(10), item(1)),
+        ]
+    );
+
+    // The relation can be to any earlier source, here the second.
+    let notes = [
+        NewNote {
+            title: "cherry".into(),
+            pinned: true,
+        },
+        NewNote {
+            title: "kiwi".into(),
+            pinned: false,
+        },
+    ];
+    e.run(insert::<Note>().values(&notes).affected())
+        .await
+        .unwrap();
+    let rows = e
+        .run(
+            select::<Note>()
+                .inner_join_on::<Item>(rupa::on!(Item::name == Note::title))
+                .join::<Review>()
+                .inner()
+                .all(),
+        )
+        .await
+        .unwrap();
+    let got: Vec<_> = rows
+        .iter()
+        .map(|(n, i, r)| (n.title.as_str(), i.id, r.id))
+        .collect();
+    assert_eq!(got, [("cherry", 3, 12)]);
+}

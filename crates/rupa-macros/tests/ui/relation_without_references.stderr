@@ -1,0 +1,5 @@
+error: `relation` names a `references` relation; add `references = Entity`
+ --> tests/ui/relation_without_references.rs:4:55
+  |
+4 | pub struct Order { #[id] id: i64, #[column(relation = user)] user_id: i64 }
+  |                                                       ^^^^
