@@ -2500,10 +2500,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rupa-driver-diesel"
-version = "0.1.0"
-
-[[package]]
 name = "rupa-driver-memory"
 version = "0.1.0"
 dependencies = [
