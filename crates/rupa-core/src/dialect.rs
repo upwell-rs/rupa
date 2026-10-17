@@ -13,9 +13,13 @@ use std::fmt::Debug;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Identifies a dialect at run time.
 pub enum DialectId {
+    /// PostgreSQL 13+.
     Postgres,
+    /// MySQL 8.0+.
     MySql,
+    /// SQLite 3.38+.
     Sqlite,
     /// The in-memory backend, which evaluates the IR instead of rendering SQL.
     Memory,
@@ -23,12 +27,22 @@ pub enum DialectId {
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// A feature some dialects lack. Code that needs one either bounds on
+/// [`Supports`] (checked at compile time) or checks
+/// [`Dialect::supports`] at run time.
 pub enum Capability {
+    /// Case-insensitive `ILIKE`.
     Ilike,
+    /// JSON path access (`->`, `->>`).
     JsonPath,
+    /// JSON containment (`@>`).
     JsonContainment,
+    /// `RETURNING` on insert, update and delete.
     Returning,
+    /// Savepoints, i.e. nested transactions.
     Savepoints,
+    /// Row-level security enforced by the database (`set_config` +
+    /// policies).
     NativeRls,
     /// `READ ONLY` transactions, enforced by the database.
     ReadOnlyTransactions,
@@ -36,12 +50,15 @@ pub enum Capability {
 
 /// A dialect, usable both as a generic parameter and as `&dyn Dialect`.
 pub trait Dialect: Debug + Send + Sync + 'static {
+    /// Which dialect this is.
     fn id(&self) -> DialectId;
+    /// Whether the dialect has `cap`.
     fn supports(&self, cap: Capability) -> bool;
 }
 
 /// Type-level counterpart of a [`Capability`] variant; see [`caps`].
 pub trait CapabilityMarker: 'static {
+    /// The capability this marker stands for.
     const CAP: Capability;
 }
 
@@ -71,6 +88,7 @@ pub mod caps {
     macro_rules! markers {
         ($($name:ident),*) => {$(
             #[derive(Debug, Clone, Copy)]
+            /// Type-level marker for the capability of the same name.
             pub struct $name;
             impl CapabilityMarker for $name {
                 const CAP: Capability = Capability::$name;
@@ -93,6 +111,7 @@ pub mod caps {
 macro_rules! dialect {
     ($ty:ident => $id:ident [$($cap:ident),* $(,)?]) => {
         impl $ty {
+            /// The capabilities this dialect supports.
             pub const CAPABILITIES: &'static [Capability] = &[$(Capability::$cap),*];
         }
         impl Dialect for $ty {
@@ -108,6 +127,7 @@ macro_rules! dialect {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// PostgreSQL 13+: the reference dialect, with every capability.
 pub struct Postgres;
 
 dialect!(Postgres => Postgres [
@@ -150,6 +170,7 @@ pub fn capabilities_of(id: DialectId) -> &'static [Capability] {
 pub struct DynDialect(DialectId);
 
 impl DynDialect {
+    /// The dialect `id`.
     pub const fn new(id: DialectId) -> Self {
         Self(id)
     }

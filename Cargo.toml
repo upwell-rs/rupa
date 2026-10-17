@@ -19,6 +19,10 @@ rupa-sql = { path = "crates/rupa-sql", version = "=0.1.0" }
 rupa-dsl-std = { path = "crates/rupa-dsl-std", version = "=0.1.0" }
 rupa-upwell = { path = "crates/rupa-upwell", version = "=0.1.0" }
 rupa-driver-tokio-postgres = { path = "crates/rupa-driver-tokio-postgres", version = "=0.1.0" }
+rupa-driver-postgres = { path = "crates/rupa-driver-postgres", version = "=0.1.0" }
+rupa-driver-rusqlite = { path = "crates/rupa-driver-rusqlite", version = "=0.1.0" }
+rupa-driver-mysql = { path = "crates/rupa-driver-mysql", version = "=0.1.0" }
+rupa-driver-memory = { path = "crates/rupa-driver-memory", version = "=0.1.0" }
 
 proc-macro2 = "1"
 quote = "1"
@@ -38,4 +42,7 @@ postgres-types = { version = "0.2", features = ["with-chrono-0_4", "with-serde_j
 bytes = "1"
 rusqlite = "0.40"
 mysql = { version = "28", default-features = false, features = ["default-rust", "chrono"] }
+r2d2 = "0.8"
+deadpool = { version = "0.13", default-features = false, features = ["managed"] }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 testcontainers-modules = { version = "0.15", features = ["postgres", "mysql"] }

@@ -8,49 +8,79 @@ use crate::error::DecodeError;
 /// Deliberately exhaustive so every renderer and driver must map new variants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SqlType {
+    /// `boolean`.
     Bool,
+    /// `smallint`.
     I16,
+    /// `integer`.
     I32,
+    /// `bigint`.
     I64,
+    /// `real`.
     F32,
+    /// `double precision`.
     F64,
+    /// `text`.
     Text,
+    /// `bytea` / `BLOB`.
     Bytes,
+    /// `uuid` (text in dialects without one).
     Uuid,
+    /// `date`.
     Date,
+    /// `time` (without time zone).
     Time,
+    /// `timestamp` (without time zone).
     Timestamp,
+    /// `timestamptz`: an instant, stored in UTC.
     TimestampTz,
+    /// `jsonb` / `JSON` / JSON text.
     Json,
 }
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
+/// A runtime value: a bound parameter, or a decoded column.
 pub enum Value {
     /// A typed null: drivers need a type for otherwise unannotated parameters.
     Null(SqlType),
+    /// A boolean.
     Bool(bool),
+    /// A 16-bit integer.
     I16(i16),
+    /// A 32-bit integer.
     I32(i32),
+    /// A 64-bit integer.
     I64(i64),
+    /// A 32-bit float.
     F32(f32),
+    /// A 64-bit float.
     F64(f64),
+    /// Text.
     Text(String),
+    /// Bytes.
     Bytes(Vec<u8>),
     #[cfg(feature = "uuid")]
+    /// A UUID.
     Uuid(uuid::Uuid),
     #[cfg(feature = "chrono")]
+    /// A calendar date.
     Date(chrono::NaiveDate),
     #[cfg(feature = "chrono")]
+    /// A time of day.
     Time(chrono::NaiveTime),
     #[cfg(feature = "chrono")]
+    /// A date and time without a time zone.
     Timestamp(chrono::NaiveDateTime),
     #[cfg(feature = "chrono")]
+    /// An instant in UTC.
     TimestampTz(chrono::DateTime<chrono::Utc>),
+    /// A JSON document.
     Json(serde_json::Value),
 }
 
 impl Value {
+    /// Whether this is a (typed) `NULL`.
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null(_))
     }
@@ -68,9 +98,13 @@ pub trait ScalarColumn: Sized + 'static {
     /// The non-nullable type underneath: `i64` for both `i64` and `Option<i64>`.
     /// Comparisons accept values of the base type.
     type Base: ScalarColumn;
+    /// The SQL type values are bound and decoded as.
     const SQL_TYPE: SqlType;
+    /// Whether the type admits `NULL` (`Option<T>`).
     const NULLABLE: bool = false;
+    /// The value to bind.
     fn to_value(&self) -> Value;
+    /// Decodes a column value.
     fn from_value(v: Value) -> Result<Self, DecodeError>;
 }
 

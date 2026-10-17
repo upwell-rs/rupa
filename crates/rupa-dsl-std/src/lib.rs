@@ -11,6 +11,8 @@
 //! Every function takes and returns expressions; arguments that carry data
 //! are bound parameters.
 
+#![warn(missing_docs)]
+
 use rupa_core::ir::ExprNode;
 use rupa_core::sem;
 use rupa_core::{Dialect, DialectId, DslError, Expr, ExprOps, SqlType, Value};

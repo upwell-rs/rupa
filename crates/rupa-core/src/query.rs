@@ -19,6 +19,7 @@ use crate::value::{ScalarColumn, SqlType};
 /// What the executor should expect back.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Expect {
+    /// Any number of rows.
     Many,
     /// Zero or one row; more is [`ResultError::TooManyRows`].
     AtMostOne,
@@ -43,6 +44,8 @@ impl Expect {
     }
 }
 
+/// A built statement plus the result type `R` it yields. Building one
+/// never does IO; run it on an executor.
 pub struct Query<R> {
     statement: Statement,
     expect: Expect,
@@ -74,14 +77,17 @@ impl<R> Query<R> {
         }
     }
 
+    /// The statement, for executors and renderers.
     pub fn statement(&self) -> &Statement {
         &self.statement
     }
 
+    /// The statement, by value.
     pub fn into_statement(self) -> Statement {
         self.statement
     }
 
+    /// The result shape `R` needs.
     pub fn expect(&self) -> Expect {
         self.expect
     }
@@ -96,7 +102,9 @@ impl<R: QueryResult> Query<R> {
 
 /// What an executor produced for a statement.
 pub enum Output<'a> {
+    /// Rows of a row-returning statement.
     Rows(&'a mut dyn RowCursor),
+    /// The affected-row count of a row-modifying statement.
     Affected(u64),
 }
 
@@ -106,6 +114,7 @@ pub enum Output<'a> {
     note = "queries return `T`, `Option<T>` or `Vec<T>` (with `T: FromRow`), `u64` or `bool`"
 )]
 pub trait QueryResult: Sized {
+    /// Shapes executor output into `Self`.
     fn from_output(output: Output<'_>) -> Result<Self, ResultError>;
 }
 
@@ -115,7 +124,9 @@ pub trait QueryResult: Sized {
     note = "selects return `T`, `Option<T>` or `Vec<T>` (with `T: FromRow`)"
 )]
 pub trait RowsResult: QueryResult {
+    /// The decoded row type.
     type Item: FromRow;
+    /// The result shape this type needs.
     const EXPECT: Expect;
 }
 

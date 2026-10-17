@@ -1,16 +1,24 @@
 //! Sans-IO core of RUPA: values, the query IR, the typed builder, and the
 //! entity, row and dialect traits. Nothing here touches a connection.
 
+#![warn(missing_docs)]
+
 pub mod builder;
 pub mod capability;
 pub mod column;
+pub mod config;
 pub mod dialect;
+/// Entities: tables, their ids and row decoding.
 pub mod entity;
+pub mod erased;
+/// Error types shared by the core and drivers.
 pub mod error;
 pub mod exec;
 pub mod expr;
 pub mod ir;
+pub mod pool;
 pub mod query;
+pub mod registry;
 pub mod repo;
 pub mod row;
 pub mod security;
@@ -48,25 +56,29 @@ pub mod __macro_support {
 pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
 pub use column::{Column, ColumnKind, ColumnMeta, Json, Scalar};
+pub use config::{DbConfig, PoolConfig};
 pub use dialect::{
     Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, MySql, Postgres, Sqlite,
     Supports,
 };
 pub use entity::{Entity, FromRow, IdValues};
+pub use erased::{BoxAsyncExecutor, BoxAsyncTx, BoxExecutor, BoxTx, DynError};
 pub use error::{DecodeError, DslError, ResultError, RowError, TxError};
-pub use exec::{
-    AsyncExecutor, Blocking, BoxAsyncExecutor, BoxExecutor, DynError, ExecError, Executor, Outcome,
-};
+pub use exec::{AsyncExecutor, Blocking, ExecError, Executor, Outcome};
 pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
+pub use pool::{AsyncPool, OwnedAsyncTx, OwnedTx, Pool, PoolStatus, Pooled, SingleConnection};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
+pub use registry::{ConnectError, Database, Driver, Registry};
 pub use repo::{Acquire, AcquireAsync, Repo, Shared, SharedAsync};
 pub use row::{Row, RowCursor};
 pub use security::{AsyncSecureTransactional, SecureTransactional, SecureTx, SecurityContext};
 pub use tx::{
-    AsyncTransaction, AsyncTransactional, IsolationLevel, Transaction, Transactional, TxOptions,
+    AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxConnection, IsolationLevel, Transaction,
+    Transactional, Tx, TxConnection, TxOptions,
 };
 pub use value::{ScalarColumn, SqlType, Value};
 
+/// The names most code needs: `use rupa_core::prelude::*`.
 pub mod prelude {
     pub use crate::col;
     pub use crate::{

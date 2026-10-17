@@ -47,6 +47,7 @@ pub struct Keyed<I>(pub I);
     note = "give the patch struct an `#[id]` field, or use `.apply(&value).filter(..)` to update the rows a filter matches"
 )]
 pub trait RowKey {
+    /// The values of the key columns, in `Entity::ID_COLUMNS` order.
     fn key_values(&self) -> Vec<Value>;
 }
 
@@ -66,6 +67,7 @@ pub trait Updatable<E: Entity> {
     /// [`NoKey`] when it must be combined with a filter.
     type Key;
 
+    /// The row this value targets, or [`NoKey`].
     fn key(&self) -> Self::Key;
 
     /// Columns to set. Fields a patch leaves as `None` are omitted.
@@ -78,6 +80,7 @@ pub trait Updatable<E: Entity> {
     note = "derive `Deletable` on `{E}` to allow it"
 )]
 pub trait Deletable<E: Entity> {
+    /// The id values of the row to delete.
     fn delete_key(&self) -> Vec<Value>;
 }
 

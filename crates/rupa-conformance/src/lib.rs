@@ -5,6 +5,7 @@
 //! Cases are written once, against [`AsyncExecutor`]. Sync drivers run them
 //! through [`Blocking`], which still calls the driver's own `Executor::execute`.
 
+pub mod database;
 pub mod fixture;
 
 use std::fmt::Debug;
@@ -17,6 +18,7 @@ use rupa::core::tx::{AsyncTransaction, AsyncTransactional, IsolationLevel, TxOpt
 use rupa::core::{Capability, DialectId, DslError, ResultError, Value};
 use rupa::prelude::*;
 
+pub use database::{DatabaseHarness, run_database, run_pool_cases, run_script};
 pub use fixture::{
     Item, MYSQL_DDL, NewNote, Note, NotePatch, POSTGRES_DDL, SQLITE_ATTACH, SQLITE_DDL, SetPinned,
     items,

@@ -9,6 +9,8 @@
 //! DSL calls are lowered here, with the target dialect, so a statement stays
 //! dialect-free until this point.
 
+#![warn(missing_docs)]
+
 use std::fmt;
 
 use rupa_core::ir::{Statement, TxStatement};
@@ -22,12 +24,15 @@ mod writer;
 /// SQL text and its parameters, in placeholder order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rendered {
+    /// The SQL text, with the dialect's placeholders (`$1`, `?`).
     pub sql: String,
+    /// The values to bind, in placeholder order.
     pub params: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
+/// Why a statement could not be rendered.
 pub enum RenderError {
     /// No renderer exists yet for this dialect.
     UnsupportedDialect(DialectId),

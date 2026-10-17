@@ -43,7 +43,8 @@ pub trait UserRepository: Send + Sync {
     async fn create(&self, user: &NewUser) -> Result<User, rupa::DynError>;
 }
 
-let users: Arc<dyn UserRepository> = Arc::new(Repo::shared_async(executor));
+let db = rupa::connect(&DbConfig::new("postgres://app@localhost/app")).await?;   // a pool
+let users: Arc<dyn UserRepository> = Arc::new(Repo::new(db));
 ```
 
 See [`crates/rupa/examples/tour.rs`](crates/rupa/examples/tour.rs) for a
@@ -51,15 +52,51 @@ runnable tour (`cargo run -p rupa --example tour`, no database needed).
 
 ## Backends
 
-| backend | crate | sync/async |
-|---|---|---|
-| Postgres | `rupa-driver-postgres`, `rupa-driver-tokio-postgres` | sync, async |
-| SQLite (3.38+) | `rupa-driver-rusqlite` | sync |
-| MySQL (8.0+) | rendering verified; driver (sqlx) planned | — |
-| In memory | `rupa-driver-memory` | sync, async |
+Enable drivers with cargo features of `rupa`; each one is registered in
+`rupa::registry()`, so a configuration can pick it at run time.
+
+| backend | feature | driver | sync/async | pool |
+|---|---|---|---|---|
+| Postgres | `postgres` | `rupa-driver-tokio-postgres` | async | deadpool |
+| Postgres | `postgres-sync` | `rupa-driver-postgres` | sync | r2d2 |
+| SQLite (3.38+) | `sqlite` | `rupa-driver-rusqlite` | sync | r2d2 |
+| MySQL (8.0+) | `mysql` | `rupa-driver-mysql` (sqlx planned) | sync | r2d2 |
+| In memory | `memory` | `rupa-driver-memory` | sync, async | one shared connection |
 
 Repositories with `async` methods also run on sync executors without an
 async runtime.
+
+## Connecting from configuration
+
+A `DbConfig` holds the shared settings plus the driver's typed options.
+It is serde-friendly, so it can live in your configuration file:
+
+```toml
+[database]
+url = "sqlite://data/app.db"   # the scheme picks the driver...
+driver = "sqlite"              # ...or name it: postgres, postgres-sync, sqlite, mysql, memory
+busy_timeout = "2s"            # options of that driver, checked against its type
+journal_mode = "wal"
+
+[database.pool]
+max_size = 8
+acquire_timeout = "5s"
+```
+
+```rust
+let db: rupa::Database = rupa::connect(&config.database).await?;
+let mut tx = db.begin().await?;                  // owns its connection: 'static
+Repo::new(&mut tx).rename(id, "x").await?;
+tx.commit().await?;
+```
+
+`Database` is a cheaply cloneable, type-erased pool. Each driver's pool
+(`SqlitePool`, `PgPool`, ..) can also be used directly, statically typed. See
+[`docs/design/connections.md`](docs/design/connections.md).
+
+## Benchmarks
+
+`cargo bench -p rupa-bench`; see [`docs/benchmarks.md`](docs/benchmarks.md).
 
 ## Status
 
@@ -67,9 +104,9 @@ Pre-1.0 and under active development. The design is documented milestone by
 milestone in [`docs/design`](docs/design).
 
 - **Done:** entities, queries and repositories, transactions with savepoints,
-  DSL functions, Postgres/MySQL/SQLite rendering, and native row-level
-  security.
-- **Next:** the Upwell dependency-injection integration (`rupa-upwell`) and
-  the remaining drivers.
+  DSL functions, Postgres/MySQL/SQLite rendering and drivers, native
+  row-level security, connection pools, and configuration-driven drivers.
+- **Next:** the Upwell dependency-injection integration (`rupa-upwell`),
+  rendered-SQL caching, and async drivers on sqlx.
 
 Requires Rust 1.99. Licensed under MIT OR Apache-2.0.

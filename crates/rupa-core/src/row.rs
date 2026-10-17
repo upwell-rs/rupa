@@ -7,9 +7,12 @@ use crate::value::{SqlType, Value};
 /// One result row, accessed by position. `ty` is the expected SQL type,
 /// taken from the projection; drivers use it to pick a native decoder.
 pub trait Row {
+    /// The number of columns.
     fn len(&self) -> usize;
+    /// Column `index`, decoded as `ty`.
     fn get(&self, index: usize, ty: SqlType) -> Result<Value, RowError>;
 
+    /// Whether the row has no columns.
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -17,6 +20,7 @@ pub trait Row {
 
 /// A lending iterator over result rows.
 pub trait RowCursor {
+    /// Advances to the next row; `None` after the last one.
     fn next_row(&mut self) -> Option<Result<&dyn Row, RowError>>;
 }
 
@@ -53,6 +57,7 @@ pub struct ValueRows {
 }
 
 impl ValueRows {
+    /// A cursor over `rows`.
     pub fn new(rows: Vec<Vec<Value>>) -> Self {
         Self {
             rows: rows.into_iter(),

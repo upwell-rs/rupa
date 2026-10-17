@@ -1,7 +1,9 @@
 //! Runs the shared conformance suite against a real Postgres in Docker.
 
+use rupa::core::tx::TxConnection;
+use rupa::{DbConfig, DriverConfig, PostgresOptions, Registry};
 use rupa_conformance::{Blocking, Harness, POSTGRES_DDL};
-use rupa_driver_postgres::PgExecutor;
+use rupa_driver_postgres::{PgDriver, PgExecutor};
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::SyncRunner;
 
@@ -38,4 +40,11 @@ fn conformance() {
     let mut h = Pg(Blocking(PgExecutor::new(client)));
     pollster::block_on(rupa_conformance::run(&mut h));
     pollster::block_on(rupa_conformance::run_transactions(&mut h));
+
+    // Again through the registry: an r2d2 pool behind a type-erased `Database`.
+    let config = DbConfig::new(&url)
+        .driver(DriverConfig::PostgresSync(PostgresOptions::default()))
+        .max_connections(3);
+    let db = pollster::block_on(Registry::new().with(PgDriver).connect(&config)).expect("pool");
+    pollster::block_on(rupa_conformance::run_database(&db, POSTGRES_DDL));
 }

@@ -26,6 +26,7 @@ note: required by a bound in `rupa_core::Column::<E, T, rupa_core::Json>::json`
   |
   | impl<E, T: JsonColumn> Column<E, T, Json> {
   |            ^^^^^^^^^^ required by this bound in `Column::<E, T, Json>::json`
+  |     /// A handle for a JSON column named `name`.
   |     pub const fn json(name: &'static str) -> Self {
   |                  ---- required by a bound in this associated function
 
@@ -58,5 +59,6 @@ note: required by a bound in `rupa_core::Column::<E, T, rupa_core::Json>::json`
   |
   | impl<E, T: JsonColumn> Column<E, T, Json> {
   |            ^^^^^^^^^^ required by this bound in `Column::<E, T, Json>::json`
+  |     /// A handle for a JSON column named `name`.
   |     pub const fn json(name: &'static str) -> Self {
   |                  ---- required by a bound in this associated function

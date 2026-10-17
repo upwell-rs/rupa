@@ -15,6 +15,8 @@
 //!
 //! Tables must be registered (the moral equivalent of a migration) before use.
 
+#![warn(missing_docs)]
+
 mod eval;
 
 use std::collections::HashMap;
@@ -22,28 +24,44 @@ use std::fmt;
 use std::future::Future;
 
 use rupa_core::column::ColumnMeta;
+use rupa_core::config::{DbConfig, DriverConfig};
 use rupa_core::dialect::Memory;
+use rupa_core::erased::BoxFuture;
 use rupa_core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
-use rupa_core::ir::{ColumnRef, Delete, FromClause, Insert, Select, Statement, TableRef, Update};
+use rupa_core::ir::{
+    ColumnRef, Delete, FromClause, Insert, Select, Statement, TableRef, TxStatement, Update,
+};
+use rupa_core::registry::{ConnectError, Database, Driver};
 use rupa_core::row::ValueRows;
-use rupa_core::tx::{AsyncTransaction, AsyncTransactional, Transaction, Transactional, TxOptions};
+use rupa_core::tx::{AsyncTx, AsyncTxConnection, Tx, TxConnection};
 use rupa_core::{DslError, Entity, Expect, ResultError, SqlType, TxError, Value};
 
 use eval::{Scope, eval, keeps, sort_cmp};
 
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
+/// Everything that can go wrong evaluating a statement in memory.
 pub enum MemoryError {
+    /// The table was never registered.
     NoSuchTable(TableRef),
+    /// The table has no such column.
     NoSuchColumn(&'static str),
+    /// An insert or update would duplicate a primary key.
     DuplicateKey(TableRef),
+    /// `NULL` in a `NOT NULL` column.
     NotNull(&'static str),
+    /// A value has the wrong type for an operation.
     Type(String),
+    /// The statement uses something the backend can't evaluate (raw SQL,
+    /// a DSL function without `eval`, ..).
     Unsupported(String),
+    /// A DSL function failed.
     Dsl(DslError),
+    /// The rows did not fit the query's result type.
     Result(ResultError),
     /// A write inside a read-only transaction.
     ReadOnly,
+    /// The transaction API was misused.
     Tx(TxError),
 }
 
@@ -69,6 +87,12 @@ impl std::error::Error for MemoryError {}
 impl From<ResultError> for MemoryError {
     fn from(e: ResultError) -> Self {
         MemoryError::Result(e)
+    }
+}
+
+impl From<TxError> for MemoryError {
+    fn from(e: TxError) -> Self {
+        MemoryError::Tx(e)
     }
 }
 
@@ -156,9 +180,12 @@ pub struct MemoryDb {
     dialect: Memory,
     /// Table states to restore on rollback, one per open transaction level.
     snapshots: Vec<HashMap<TableRef, Table>>,
+    /// Whether the open transaction is read-only.
+    read_only: bool,
 }
 
 impl MemoryDb {
+    /// An empty database: register tables before use.
     pub fn new() -> Self {
         Self::default()
     }
@@ -210,6 +237,13 @@ impl MemoryDb {
     }
 
     fn run_statement(&mut self, statement: &Statement) -> Result<Outcome, MemoryError> {
+        let writes = matches!(
+            statement,
+            Statement::Insert(_) | Statement::Update(_) | Statement::Delete(_) | Statement::Raw(_)
+        );
+        if writes && self.read_only {
+            return Err(MemoryError::ReadOnly);
+        }
         match statement {
             Statement::Select(s) => {
                 let (table, rows) = self.select_rows(s)?;
@@ -434,6 +468,7 @@ impl Executor for MemoryDb {
 pub struct AsyncMemoryDb(MemoryDb);
 
 impl AsyncMemoryDb {
+    /// An empty database: register tables before use.
     pub fn new() -> Self {
         Self::default()
     }
@@ -444,14 +479,17 @@ impl AsyncMemoryDb {
         self
     }
 
+    /// The sync database underneath.
     pub fn inner(&self) -> &MemoryDb {
         &self.0
     }
 
+    /// The sync database underneath, mutably.
     pub fn inner_mut(&mut self) -> &mut MemoryDb {
         &mut self.0
     }
 
+    /// The sync database underneath, by value.
     pub fn into_inner(self) -> MemoryDb {
         self.0
     }
@@ -493,184 +531,164 @@ impl AsyncExecutor for AsyncMemoryDb {
 
 /// A transaction (or, nested, a savepoint) on a [`MemoryDb`]. Rolled back
 /// when dropped without `commit`.
-#[derive(Debug)]
-pub struct MemoryTx<'t> {
-    db: &'t mut MemoryDb,
-    /// Number of snapshots on the stack while this transaction is open.
-    level: usize,
-    read_only: bool,
-    done: bool,
-}
+pub type MemoryTx<'t> = Tx<&'t mut MemoryDb>;
 
-impl<'t> MemoryTx<'t> {
-    fn open(db: &'t mut MemoryDb, read_only: bool) -> Self {
-        db.snapshots.push(db.tables.clone());
-        let level = db.snapshots.len();
-        MemoryTx {
-            db,
-            level,
-            read_only,
-            done: false,
+/// A transaction (or, nested, a savepoint) on an [`AsyncMemoryDb`]. Rolled
+/// back when dropped without `commit` (immediately: nothing to await).
+pub type AsyncMemoryTx<'t> = AsyncTx<&'t mut AsyncMemoryDb>;
+
+impl MemoryDb {
+    /// Applies a transaction-control statement to the snapshot stack.
+    ///
+    /// The backend is single-threaded, so every isolation level behaves as
+    /// serializable; read-only is enforced.
+    fn control_now(&mut self, statement: TxStatement) {
+        match statement {
+            TxStatement::Begin(options) => {
+                self.read_only = options.read_only;
+                self.snapshots.push(self.tables.clone());
+            }
+            TxStatement::Savepoint(_) => self.snapshots.push(self.tables.clone()),
+            TxStatement::Commit | TxStatement::ReleaseSavepoint(_) => {
+                self.snapshots.pop();
+            }
+            TxStatement::Rollback | TxStatement::RollbackToSavepoint(_) => {
+                if let Some(snapshot) = self.snapshots.pop() {
+                    self.tables = snapshot;
+                }
+            }
         }
-    }
-
-    fn nested(&mut self, options: TxOptions) -> Result<MemoryTx<'_>, MemoryError> {
-        if !options.is_default() {
-            return Err(MemoryError::Tx(TxError::OptionsOnNested));
-        }
-        Ok(MemoryTx::open(&mut *self.db, self.read_only))
-    }
-
-    fn finish(&mut self, commit: bool) {
-        debug_assert_eq!(
-            self.db.snapshots.len(),
-            self.level,
-            "transactions end innermost first"
-        );
-        let snapshot = self
-            .db
-            .snapshots
-            .pop()
-            .expect("open transaction has a snapshot");
-        if !commit {
-            self.db.tables = snapshot;
-        }
-        self.done = true;
-    }
-
-    fn run(&mut self, statement: &Statement) -> Result<Outcome, MemoryError> {
-        let writes = matches!(
-            statement,
-            Statement::Insert(_) | Statement::Update(_) | Statement::Delete(_) | Statement::Raw(_)
-        );
-        if writes && self.read_only {
-            return Err(MemoryError::ReadOnly);
-        }
-        self.db.run_statement(statement)
-    }
-}
-
-impl Drop for MemoryTx<'_> {
-    fn drop(&mut self) {
-        if !self.done {
-            self.finish(false);
+        if self.snapshots.is_empty() {
+            self.read_only = false;
         }
     }
 }
 
-impl Executor for MemoryTx<'_> {
-    type Dialect = Memory;
-    type Error = MemoryError;
-
-    fn dialect(&self) -> &Memory {
-        &self.db.dialect
-    }
-
-    fn execute(&mut self, statement: &Statement, _expect: Expect) -> Result<Outcome, MemoryError> {
-        self.run(statement)
-    }
-}
-
-impl Transaction for MemoryTx<'_> {
-    fn commit(mut self) -> Result<(), MemoryError> {
-        self.finish(true);
+impl TxConnection for MemoryDb {
+    fn control(&mut self, statement: TxStatement) -> Result<(), MemoryError> {
+        self.control_now(statement);
         Ok(())
     }
 
-    fn rollback(mut self) -> Result<(), MemoryError> {
-        self.finish(false);
+    fn defer_rollback(&mut self, depth: u32) {
+        // Nothing can fail in memory: roll back right away.
+        self.control_now(rupa_core::tx::rollback_to(depth));
+    }
+
+    fn is_dirty(&self) -> bool {
+        false
+    }
+
+    fn clean(&mut self) -> Result<(), MemoryError> {
         Ok(())
     }
 }
 
-impl Transactional for MemoryTx<'_> {
-    type Tx<'s>
-        = MemoryTx<'s>
-    where
-        Self: 's;
-
-    fn begin_with(&mut self, options: TxOptions) -> Result<MemoryTx<'_>, MemoryError> {
-        self.nested(options)
-    }
-}
-
-impl Transactional for MemoryDb {
-    type Tx<'t>
-        = MemoryTx<'t>
-    where
-        Self: 't;
-
-    /// The memory backend is single-threaded, so every isolation level
-    /// behaves as serializable; read-only is enforced.
-    fn begin_with(&mut self, options: TxOptions) -> Result<MemoryTx<'_>, MemoryError> {
-        Ok(MemoryTx::open(self, options.read_only))
-    }
-}
-
-/// [`MemoryTx`] as an async transaction, for [`AsyncMemoryDb`].
-#[derive(Debug)]
-pub struct AsyncMemoryTx<'t>(MemoryTx<'t>);
-
-impl AsyncExecutor for AsyncMemoryTx<'_> {
-    type Dialect = Memory;
-    type Error = MemoryError;
-
-    fn dialect(&self) -> &Memory {
-        &self.0.db.dialect
-    }
-
-    fn execute(
+impl AsyncTxConnection for AsyncMemoryDb {
+    fn control(
         &mut self,
-        statement: &Statement,
-        _expect: Expect,
-    ) -> impl Future<Output = Result<Outcome, MemoryError>> + Send {
-        std::future::ready(self.0.run(statement))
+        statement: TxStatement,
+    ) -> impl Future<Output = Result<(), MemoryError>> + Send {
+        std::future::ready(TxConnection::control(&mut self.0, statement))
+    }
+
+    fn defer_rollback(&mut self, depth: u32) {
+        TxConnection::defer_rollback(&mut self.0, depth);
+    }
+
+    fn is_dirty(&self) -> bool {
+        false
+    }
+
+    fn clean(&mut self) -> impl Future<Output = Result<(), MemoryError>> + Send {
+        std::future::ready(Ok(()))
     }
 }
 
-impl AsyncTransaction for AsyncMemoryTx<'_> {
-    fn commit(self) -> impl Future<Output = Result<(), MemoryError>> + Send {
-        std::future::ready(Transaction::commit(self.0))
-    }
-
-    fn rollback(self) -> impl Future<Output = Result<(), MemoryError>> + Send {
-        std::future::ready(Transaction::rollback(self.0))
-    }
-}
-
-impl AsyncTransactional for AsyncMemoryTx<'_> {
-    type Tx<'s>
-        = AsyncMemoryTx<'s>
-    where
-        Self: 's;
-
-    fn begin_with(
-        &mut self,
-        options: TxOptions,
-    ) -> impl Future<Output = Result<AsyncMemoryTx<'_>, MemoryError>> + Send {
-        std::future::ready(self.0.nested(options).map(AsyncMemoryTx))
-    }
-}
-
-impl AsyncTransactional for AsyncMemoryDb {
-    type Tx<'t>
-        = AsyncMemoryTx<'t>
-    where
-        Self: 't;
-
-    fn begin_with(
-        &mut self,
-        options: TxOptions,
-    ) -> impl Future<Output = Result<AsyncMemoryTx<'_>, MemoryError>> + Send {
-        std::future::ready(Ok(AsyncMemoryTx(MemoryTx::open(
-            &mut self.0,
-            options.read_only,
-        ))))
-    }
-}
-
-impl From<MemoryError> for rupa_core::exec::DynError {
+impl From<MemoryError> for rupa_core::DynError {
     fn from(e: MemoryError) -> Self {
-        rupa_core::exec::DynError::new(e)
+        rupa_core::DynError::new(e)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Registry
+// ---------------------------------------------------------------------------
+
+type SetupFn = dyn Fn(&mut MemoryDb) + Send + Sync;
+
+/// The registry entry for the memory backend: name `memory`, scheme
+/// `memory` (`memory:` is a complete URL).
+///
+/// Each `connect` creates a fresh, empty database served as a single shared
+/// connection ([`Database::single`]); pool settings are ignored. Tables must
+/// be registered before use, so give the driver a [`setup`](Self::setup)
+/// function:
+///
+/// ```ignore
+/// let registry = Registry::new().with(MemoryDriver::new().setup(|db| {
+///     db.register::<User>();
+/// }));
+/// ```
+#[derive(Clone, Default)]
+pub struct MemoryDriver {
+    setup: Option<std::sync::Arc<SetupFn>>,
+}
+
+impl MemoryDriver {
+    /// A driver whose databases start without tables.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Runs `f` on every new database, e.g. to register tables or seed rows.
+    pub fn setup(mut self, f: impl Fn(&mut MemoryDb) + Send + Sync + 'static) -> Self {
+        self.setup = Some(std::sync::Arc::new(f));
+        self
+    }
+}
+
+impl fmt::Debug for MemoryDriver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MemoryDriver")
+            .field("setup", &self.setup.is_some())
+            .finish()
+    }
+}
+
+impl Driver for MemoryDriver {
+    fn name(&self) -> &'static str {
+        "memory"
+    }
+
+    fn dialect(&self) -> rupa_core::DialectId {
+        rupa_core::DialectId::Memory
+    }
+
+    fn schemes(&self) -> &'static [&'static str] {
+        &["memory"]
+    }
+
+    fn connect<'a>(
+        &'a self,
+        config: &'a DbConfig,
+    ) -> BoxFuture<'a, Result<Database, ConnectError>> {
+        let database = match &config.driver {
+            DriverConfig::Auto | DriverConfig::Memory => {
+                let mut db = MemoryDb::new();
+                if let Some(setup) = &self.setup {
+                    setup(&mut db);
+                }
+                Ok(Database::single(db.into_async()))
+            }
+            other => Err(ConnectError::InvalidOption {
+                key: "driver".into(),
+                message: format!(
+                    "the memory driver was given options for `{}`",
+                    other.name().unwrap_or("auto")
+                ),
+            }),
+        };
+        Box::pin(std::future::ready(database))
     }
 }

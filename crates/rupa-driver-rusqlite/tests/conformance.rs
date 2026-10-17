@@ -1,5 +1,6 @@
 //! The shared conformance suite on a real SQLite (in memory; no Docker).
 
+use rupa::core::tx::TxConnection;
 use rupa_conformance::{Blocking, Harness, SQLITE_ATTACH, SQLITE_DDL};
 use rupa_driver_rusqlite::SqliteExecutor;
 

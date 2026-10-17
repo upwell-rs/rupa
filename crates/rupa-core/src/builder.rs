@@ -29,6 +29,7 @@ fn count_param(n: u64) -> ExprNode {
 // SELECT
 // ---------------------------------------------------------------------------
 
+/// Starts a select of `E` rows (every column, in `E::columns()` order).
 pub fn select<E: Entity>() -> SelectBuilder<E> {
     SelectBuilder {
         select: Select {
@@ -47,6 +48,8 @@ pub fn select<E: Entity>() -> SelectBuilder<E> {
 }
 
 #[derive(Debug, Clone)]
+/// A select being built; finish with [`all`](Self::all),
+/// [`optional`](Self::optional), [`one`](Self::one) or `exists`.
 pub struct SelectBuilder<E> {
     select: Select,
     _e: PhantomData<fn() -> E>,
@@ -59,16 +62,19 @@ impl<E: Entity> SelectBuilder<E> {
         self
     }
 
+    /// Adds a sort key; repeated calls sort by each in turn.
     pub fn order_by(mut self, order: OrderBy) -> Self {
         self.select.order_by.push(order);
         self
     }
 
+    /// Returns at most `n` rows.
     pub fn limit(mut self, n: u64) -> Self {
         self.select.limit = Some(count_param(n));
         self
     }
 
+    /// Skips the first `n` rows.
     pub fn offset(mut self, n: u64) -> Self {
         self.select.offset = Some(count_param(n));
         self
@@ -80,14 +86,19 @@ impl<E: Entity> SelectBuilder<E> {
         Query::new(Statement::Select(self.select), R::EXPECT)
     }
 
+    /// Every matching row.
     pub fn all(self) -> Query<Vec<E>> {
         self.build()
     }
 
+    /// At most one row; more is [`ResultError::TooManyRows`](crate::ResultError::TooManyRows).
     pub fn optional(self) -> Query<Option<E>> {
         self.build()
     }
 
+    /// Exactly one row; none is
+    /// [`ResultError::NotFound`](crate::ResultError::NotFound), more is
+    /// [`ResultError::TooManyRows`](crate::ResultError::TooManyRows).
     pub fn one(self) -> Query<E> {
         self.build()
     }
@@ -147,15 +158,19 @@ pub fn insert<E: Entity>() -> InsertBuilder<E> {
 }
 
 #[derive(Debug, Clone, Copy)]
+/// An insert into `E` without rows yet; add them with
+/// [`value`](Self::value) or [`values`](Self::values).
 pub struct InsertBuilder<E> {
     _e: PhantomData<fn() -> E>,
 }
 
 impl<E: Entity> InsertBuilder<E> {
+    /// Inserts `value`.
     pub fn value<V: Insertable<E>>(self, value: &V) -> InsertRows<E, V> {
         InsertRows::new().value(value)
     }
 
+    /// Inserts every value, as one multi-row statement.
     pub fn values<'a, V: Insertable<E> + 'a>(
         self,
         values: impl IntoIterator<Item = &'a V>,
@@ -185,6 +200,7 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
         }
     }
 
+    /// Adds a row.
     pub fn value(mut self, value: &V) -> Self {
         let pairs = value.insert_values();
         if self.insert.rows.is_empty() {
@@ -204,6 +220,7 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
         self
     }
 
+    /// Adds rows.
     pub fn values<'a>(self, values: impl IntoIterator<Item = &'a V>) -> Self
     where
         V: 'a,
@@ -211,10 +228,12 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
         values.into_iter().fold(self, Self::value)
     }
 
+    /// Finishes as an affected-row result (`u64` or `bool`).
     pub fn build<R: AffectedResult>(self) -> Query<R> {
         Query::new(Statement::Insert(self.insert), Expect::Affected)
     }
 
+    /// Finishes, returning the number of inserted rows.
     pub fn affected(self) -> Query<u64> {
         self.build()
     }
@@ -231,10 +250,12 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
         Query::new(Statement::Insert(self.insert), R::EXPECT)
     }
 
+    /// Returns the one inserted row (see [`returning`](Self::returning)).
     pub fn returning_one(self) -> Query<E> {
         self.returning()
     }
 
+    /// Returns every inserted row (see [`returning`](Self::returning)).
     pub fn returning_all(self) -> Query<Vec<E>> {
         self.returning()
     }
@@ -244,6 +265,8 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
 // UPDATE
 // ---------------------------------------------------------------------------
 
+/// Starts an update of `E` rows; set columns with `one`, `apply`, `set`
+/// or `set_expr`, and restrict it with `filter`.
 pub fn update<E: Entity>() -> UpdateBuilder<E> {
     UpdateBuilder {
         update: Update {
@@ -256,6 +279,7 @@ pub fn update<E: Entity>() -> UpdateBuilder<E> {
 }
 
 #[derive(Debug, Clone)]
+/// An update being built.
 pub struct UpdateBuilder<E> {
     update: Update,
     _e: PhantomData<fn() -> E>,
@@ -316,15 +340,19 @@ impl<E: Entity> UpdateBuilder<E> {
         self
     }
 
+    /// Adds a condition; repeated calls are ANDed. Without one, every row is
+    /// updated.
     pub fn filter(mut self, cond: impl IntoExpr<bool>) -> Self {
         and_filter(&mut self.update.filter, cond.into_node());
         self
     }
 
+    /// Finishes as an affected-row result (`u64` or `bool`).
     pub fn build<R: AffectedResult>(self) -> Query<R> {
         Query::new(Statement::Update(self.update), Expect::Affected)
     }
 
+    /// Finishes, returning the number of matched rows.
     pub fn affected(self) -> Query<u64> {
         self.build()
     }
@@ -346,6 +374,7 @@ pub fn delete<E: Entity + Deletable<E>>() -> DeleteBuilder<E> {
 }
 
 #[derive(Debug, Clone)]
+/// A delete being built.
 pub struct DeleteBuilder<E> {
     delete: Delete,
     _e: PhantomData<fn() -> E>,
@@ -361,6 +390,7 @@ impl<E: Entity + Deletable<E>> DeleteBuilder<E> {
         self
     }
 
+    /// Deletes the row with id `id`.
     pub fn by_id(mut self, id: &E::Id) -> Self {
         and_filter(
             &mut self.delete.filter,
@@ -369,15 +399,19 @@ impl<E: Entity + Deletable<E>> DeleteBuilder<E> {
         self
     }
 
+    /// Adds a condition; repeated calls are ANDed. Without one, every row is
+    /// deleted.
     pub fn filter(mut self, cond: impl IntoExpr<bool>) -> Self {
         and_filter(&mut self.delete.filter, cond.into_node());
         self
     }
 
+    /// Finishes as an affected-row result (`u64` or `bool`).
     pub fn build<R: AffectedResult>(self) -> Query<R> {
         Query::new(Statement::Delete(self.delete), Expect::Affected)
     }
 
+    /// Finishes, returning the number of deleted rows.
     pub fn affected(self) -> Query<u64> {
         self.build()
     }
@@ -394,21 +428,25 @@ pub fn raw() -> RawBuilder {
 }
 
 #[derive(Debug, Clone, Default)]
+/// Raw SQL being built from static fragments and bound values.
 pub struct RawBuilder {
     raw: RawSql,
 }
 
 impl RawBuilder {
+    /// Appends a static SQL fragment.
     pub fn sql(mut self, fragment: &'static str) -> Self {
         self.raw.parts.push(RawPart::Sql(fragment));
         self
     }
 
+    /// Appends a bound parameter.
     pub fn bind<T: ScalarColumn>(mut self, value: T) -> Self {
         self.raw.parts.push(RawPart::Param(value.to_value()));
         self
     }
 
+    /// Appends a bound parameter, as an untyped [`Value`].
     pub fn bind_value(mut self, value: Value) -> Self {
         self.raw.parts.push(RawPart::Param(value));
         self
@@ -426,10 +464,12 @@ impl RawBuilder {
         }
     }
 
+    /// Finishes as a row-returning query.
     pub fn rows<R: RowsResult>(self) -> Query<R> {
         Query::new(Statement::Raw(self.raw), R::EXPECT)
     }
 
+    /// Finishes as a row-modifying query.
     pub fn execute<R: AffectedResult>(self) -> Query<R> {
         Query::new(Statement::Raw(self.raw), Expect::Affected)
     }

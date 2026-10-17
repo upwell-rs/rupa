@@ -18,7 +18,8 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 
-use crate::dialect::{Supports, caps};
+use crate::dialect::{Capability, Dialect, Supports, caps};
+use crate::error::TxError;
 use crate::exec::{AsyncExecutor, Executor, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
@@ -57,6 +58,7 @@ pub fn is_valid_key(s: &str) -> bool {
 }
 
 impl SecurityContext {
+    /// An empty context in the `app` namespace.
     pub fn new() -> Self {
         Self {
             namespace: "app".into(),
@@ -71,6 +73,7 @@ impl SecurityContext {
         self
     }
 
+    /// Sets `key` (read by policies as `current_setting('<namespace>.<key>')`).
     pub fn set(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.entries.insert(key.into(), value.into());
         self
@@ -82,10 +85,12 @@ impl SecurityContext {
         self
     }
 
+    /// The value set for `key`.
     pub fn get(&self, key: &str) -> Option<&str> {
         self.entries.get(key).map(String::as_str)
     }
 
+    /// The role the transaction switches to, if any.
     pub fn get_role(&self) -> Option<&str> {
         self.role.as_deref()
     }
@@ -108,6 +113,7 @@ impl SecurityContext {
             .map(String::as_str)
     }
 
+    /// Whether the context sets nothing (applying it is a no-op).
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty() && self.role.is_none()
     }
@@ -130,6 +136,7 @@ impl<T> SecureTx<T> {
         &self.context
     }
 
+    /// The transaction, without its context.
     pub fn inner(&mut self) -> &mut T {
         &mut self.tx
     }
@@ -214,6 +221,11 @@ impl<T: AsyncTransactional> AsyncTransactional for SecureTx<T> {
 /// transactional executor, but only callable where the dialect has native
 /// row-level security: elsewhere it does not compile.
 pub trait SecureTransactional: Transactional {
+    /// Opens a transaction with `context` applied: one step, so the
+    /// transaction and its context cannot drift apart. Only compiles for
+    /// dialects with native row-level security; see
+    /// [`try_begin_with_security`](Self::try_begin_with_security) for erased
+    /// executors.
     fn begin_with_security(
         &mut self,
         options: TxOptions,
@@ -229,12 +241,61 @@ pub trait SecureTransactional: Transactional {
         }
         Ok(SecureTx { tx, context })
     }
+
+    /// [`begin_with_security`](Self::begin_with_security), checked at run
+    /// time instead: for executors whose dialect is only known at run time
+    /// ([`BoxExecutor`](crate::erased::BoxExecutor)). Fails with
+    /// [`TxError::Unsupported`] unless the dialect has native row-level
+    /// security.
+    fn try_begin_with_security(
+        &mut self,
+        options: TxOptions,
+        context: SecurityContext,
+    ) -> Result<SecureTx<Self::Tx<'_>>, Self::Error>
+    where
+        Self::Error: From<TxError>,
+    {
+        check_native_rls(self.dialect())?;
+        let mut tx = self.begin_with(options)?;
+        if !context.is_empty() {
+            tx.execute(&Statement::ApplySecurity(context.clone()), Expect::Affected)?;
+        }
+        Ok(SecureTx { tx, context })
+    }
 }
 
 impl<E: Transactional + ?Sized> SecureTransactional for E {}
 
+/// `Ok` if `dialect` enforces row-level security natively.
+pub fn check_native_rls(dialect: &dyn Dialect) -> Result<(), TxError> {
+    if dialect.supports(Capability::NativeRls) {
+        Ok(())
+    } else {
+        Err(TxError::Unsupported {
+            dialect: dialect.id(),
+            capability: Capability::NativeRls,
+        })
+    }
+}
+
+impl<T> SecureTx<T> {
+    /// Wraps a transaction on which `context` has already been applied.
+    /// Prefer `begin_with_security`, which applies it; this is for pools
+    /// and adapters that open the transaction themselves.
+    pub fn from_parts(tx: T, context: SecurityContext) -> Self {
+        Self { tx, context }
+    }
+
+    /// The transaction, without its context.
+    pub fn into_inner(self) -> T {
+        self.tx
+    }
+}
+
 /// Async counterpart of [`SecureTransactional`].
 pub trait AsyncSecureTransactional: AsyncTransactional {
+    /// Opens a transaction with `context` applied; see
+    /// [`SecureTransactional::begin_with_security`].
     fn begin_with_security(
         &mut self,
         options: TxOptions,
@@ -244,17 +305,43 @@ pub trait AsyncSecureTransactional: AsyncTransactional {
         Self::Dialect: Supports<caps::NativeRls>,
     {
         async move {
-            let mut tx = self.begin_with(options).await?;
-            if !context.is_empty() {
-                tx.execute(&Statement::ApplySecurity(context.clone()), Expect::Affected)
-                    .await?;
-            }
-            Ok(SecureTx { tx, context })
+            let tx = self.begin_with(options).await?;
+            apply_security(tx, context).await
+        }
+    }
+
+    /// Async counterpart of
+    /// [`SecureTransactional::try_begin_with_security`]: checked at run time.
+    fn try_begin_with_security(
+        &mut self,
+        options: TxOptions,
+        context: SecurityContext,
+    ) -> impl Future<Output = Result<SecureTx<Self::Tx<'_>>, Self::Error>> + Send
+    where
+        Self::Error: From<TxError>,
+    {
+        async move {
+            check_native_rls(self.dialect())?;
+            let tx = self.begin_with(options).await?;
+            apply_security(tx, context).await
         }
     }
 }
 
 impl<E: AsyncTransactional + ?Sized> AsyncSecureTransactional for E {}
+
+/// Applies `context` inside the freshly opened `tx`. On failure `tx` is
+/// dropped, which rolls it back.
+pub async fn apply_security<T: AsyncExecutor>(
+    mut tx: T,
+    context: SecurityContext,
+) -> Result<SecureTx<T>, T::Error> {
+    if !context.is_empty() {
+        tx.execute(&Statement::ApplySecurity(context.clone()), Expect::Affected)
+            .await?;
+    }
+    Ok(SecureTx { tx, context })
+}
 
 #[cfg(test)]
 mod tests {

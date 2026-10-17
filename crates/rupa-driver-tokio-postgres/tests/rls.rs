@@ -4,8 +4,9 @@
 use rupa::core::exec::AsyncExecutor;
 use rupa::core::tx::{AsyncTransaction, AsyncTransactional, TxOptions};
 use rupa::prelude::*;
+use rupa::{AsyncPool, Database, DbConfig};
 use rupa::{AsyncSecureTransactional, SecurityContext};
-use rupa_driver_tokio_postgres::PgExecutor;
+use rupa_driver_tokio_postgres::{PgExecutor, PgPool};
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
@@ -192,4 +193,24 @@ async fn native_row_level_security() {
         4,
         "the connection is usable afterwards"
     );
+
+    // Pools open owned secure transactions: statically gated on `PgPool`...
+    let pool = PgPool::connect(&DbConfig::new(&url).max_connections(2))
+        .await
+        .unwrap();
+    let mut tx = pool
+        .begin_with_security(TxOptions::default(), tenant(1))
+        .await
+        .unwrap();
+    assert_eq!(titles(&mut tx).await, ["a1", "a2"]);
+    tx.commit().await.unwrap();
+
+    // ...and checked at run time on a type-erased `Database`.
+    let erased = Database::new(pool);
+    let mut tx = erased
+        .try_begin_with_security(TxOptions::default(), tenant(2))
+        .await
+        .unwrap();
+    assert_eq!(titles(&mut tx).await, ["b1", "b2"]);
+    tx.rollback().await.unwrap();
 }

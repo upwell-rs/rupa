@@ -1,0 +1,34 @@
+[package]
+name = "rupa-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+description = "Criterion benchmarks for RUPA (not published)"
+
+[dependencies]
+rupa = { path = "../rupa", features = ["sqlite", "memory", "postgres"] }
+rupa-driver-memory = { path = "../rupa-driver-memory" }
+rupa-driver-rusqlite = { path = "../rupa-driver-rusqlite", features = ["pool"] }
+rupa-driver-tokio-postgres = { path = "../rupa-driver-tokio-postgres", features = ["pool"] }
+serde.workspace = true
+serde_json.workspace = true
+pollster.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "build_render"
+harness = false
+
+[[bench]]
+name = "execute"
+harness = false
+
+[[bench]]
+name = "postgres"
+harness = false

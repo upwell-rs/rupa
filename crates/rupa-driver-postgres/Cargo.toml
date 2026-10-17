@@ -7,13 +7,19 @@ repository.workspace = true
 license.workspace = true
 description = "Synchronous RUPA executor on the postgres crate"
 
+[features]
+# `PgPool` (on r2d2) and the registry driver `PgDriver`.
+pool = ["dep:r2d2"]
+
 [dependencies]
 rupa-core.workspace = true
 rupa-sql.workspace = true
 rupa-driver-tokio-postgres.workspace = true
+r2d2 = { workspace = true, optional = true }
 postgres.workspace = true
 
 [dev-dependencies]
+rupa-driver-postgres = { path = ".", features = ["pool"] }
 rupa-conformance = { path = "../rupa-conformance" }
 rupa = { path = "../rupa" }
 pollster.workspace = true

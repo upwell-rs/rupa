@@ -5,8 +5,10 @@
 //!
 //! - **`&self`** (the default for shared use, e.g. `Arc<dyn Trait>` in DI):
 //!   `S` is a connection *source*. It implements [`Acquire`] (sync) or
-//!   [`AcquireAsync`], and hands out a connection per call: a pool (later),
-//!   or one executor behind a lock ([`Shared`], [`SharedAsync`]).
+//!   [`AcquireAsync`], and hands out a connection per call: a pool (every
+//!   [`Pool`](crate::pool::Pool) / [`AsyncPool`](crate::pool::AsyncPool), or a
+//!   [`Database`](crate::registry::Database)), or one executor behind a lock
+//!   ([`Shared`], [`SharedAsync`]).
 //! - **`&mut self`**: `S` is the executor itself, e.g. `Repo::new(&mut tx)`
 //!   inside a transaction.
 
@@ -26,18 +28,22 @@ pub struct Repo<S> {
 }
 
 impl<S> Repo<S> {
+    /// A repository running its queries through `source`.
     pub const fn new(source: S) -> Self {
         Self { source }
     }
 
+    /// The connection source (or executor).
     pub fn source(&self) -> &S {
         &self.source
     }
 
+    /// The connection source (or executor), mutably.
     pub fn source_mut(&mut self) -> &mut S {
         &mut self.source
     }
 
+    /// The connection source (or executor), by value.
     pub fn into_inner(self) -> S {
         self.source
     }
@@ -59,23 +65,31 @@ impl<E> Repo<SharedAsync<E>> {
 
 /// A source of sync connections, used through `&self`.
 pub trait Acquire: Send + Sync {
+    /// The connections' dialect.
     type Dialect: Dialect;
+    /// The connections' (and the source's) error type.
     type Error: ExecError;
+    /// A checked-out connection; returned to the source when dropped.
     type Conn<'a>: Executor<Dialect = Self::Dialect, Error = Self::Error>
     where
         Self: 'a;
 
+    /// Checks a connection out.
     fn acquire(&self) -> Result<Self::Conn<'_>, Self::Error>;
 }
 
 /// A source of async connections, used through `&self`.
 pub trait AcquireAsync: Send + Sync {
+    /// The connections' dialect.
     type Dialect: Dialect;
+    /// The connections' (and the source's) error type.
     type Error: ExecError;
+    /// A checked-out connection; returned to the source when dropped.
     type Conn<'a>: AsyncExecutor<Dialect = Self::Dialect, Error = Self::Error>
     where
         Self: 'a;
 
+    /// Checks a connection out.
     fn acquire(&self) -> impl Future<Output = Result<Self::Conn<'_>, Self::Error>> + Send;
 }
 
@@ -88,10 +102,12 @@ pub trait AcquireAsync: Send + Sync {
 pub struct Shared<E>(Mutex<E>);
 
 impl<E> Shared<E> {
+    /// Shares `executor`.
     pub fn new(executor: E) -> Self {
         Self(Mutex::new(executor))
     }
 
+    /// The executor, once no longer shared.
     pub fn into_inner(self) -> E {
         self.0.into_inner().unwrap_or_else(PoisonError::into_inner)
     }
@@ -205,10 +221,12 @@ where
 pub struct SharedAsync<E>(futures_util::lock::Mutex<E>);
 
 impl<E> SharedAsync<E> {
+    /// Shares `executor`.
     pub fn new(executor: E) -> Self {
         Self(futures_util::lock::Mutex::new(executor))
     }
 
+    /// The executor, once no longer shared.
     pub fn into_inner(self) -> E {
         self.0.into_inner()
     }

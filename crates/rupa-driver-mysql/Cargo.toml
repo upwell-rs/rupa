@@ -1,0 +1,28 @@
+[package]
+name = "rupa-driver-mysql"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Synchronous RUPA executor on the mysql crate (MySQL 8.0+)"
+
+[features]
+# `MySqlPool` (on r2d2) and the registry driver `MySqlDriver`.
+pool = ["dep:r2d2"]
+
+[dependencies]
+rupa-core.workspace = true
+rupa-sql.workspace = true
+mysql.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+r2d2 = { workspace = true, optional = true }
+
+[dev-dependencies]
+rupa-driver-mysql = { path = ".", features = ["pool"] }
+rupa-conformance = { path = "../rupa-conformance" }
+rupa = { path = "../rupa" }
+pollster.workspace = true
+testcontainers-modules = { workspace = true, features = ["blocking"] }

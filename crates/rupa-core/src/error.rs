@@ -1,16 +1,19 @@
 use std::fmt;
 
-use crate::dialect::DialectId;
+use crate::dialect::{Capability, DialectId};
 use crate::value::{SqlType, Value};
 
 /// A value could not be decoded into the requested Rust type.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DecodeError {
+    /// The column being decoded, when known.
     pub column: Option<&'static str>,
+    /// What went wrong.
     pub message: String,
 }
 
 impl DecodeError {
+    /// An error with `message` and no column yet.
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             column: None,
@@ -18,10 +21,12 @@ impl DecodeError {
         }
     }
 
+    /// `got` is not a value of the `expected` type.
     pub fn type_mismatch(expected: SqlType, got: &Value) -> Self {
         Self::new(format!("expected {expected:?}, got {got:?}"))
     }
 
+    /// Attributes the error to `column`, unless it already names one.
     pub fn in_column(mut self, column: &'static str) -> Self {
         self.column.get_or_insert(column);
         self
@@ -42,7 +47,14 @@ impl std::error::Error for DecodeError {}
 /// A driver could not produce a value from a row.
 #[derive(Debug, Clone, PartialEq)]
 pub enum RowError {
-    IndexOutOfRange { index: usize, len: usize },
+    /// The row has fewer columns than the query projected.
+    IndexOutOfRange {
+        /// The requested column.
+        index: usize,
+        /// The row's width.
+        len: usize,
+    },
+    /// The driver could not read the value.
     Driver(String),
 }
 
@@ -71,7 +83,9 @@ pub enum ResultError {
     TooManyRows,
     /// The executor produced rows where a count was expected, or vice versa.
     ShapeMismatch,
+    /// A column could not be read.
     Row(RowError),
+    /// A column could not be decoded into its field type.
     Decode(DecodeError),
 }
 
@@ -106,19 +120,28 @@ impl std::error::Error for ResultError {}
 /// Errors raised by a DSL function's lowering or evaluation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DslError {
+    /// The function has no lowering for the dialect.
     Unsupported {
+        /// The function's name.
         function: &'static str,
+        /// The dialect it was rendered for.
         dialect: DialectId,
     },
+    /// The function was called with the wrong number of arguments.
     Arity {
+        /// The function's name.
         function: &'static str,
+        /// The number of arguments it takes.
         expected: usize,
+        /// The number it was given.
         got: usize,
     },
+    /// Any other failure.
     Other(String),
 }
 
 impl DslError {
+    /// `function` has no lowering for `dialect`.
     pub fn unsupported(function: &'static str, dialect: DialectId) -> Self {
         DslError::Unsupported { function, dialect }
     }
@@ -151,6 +174,14 @@ pub enum TxError {
     /// Isolation level and read-only can only be set on a top-level
     /// transaction; nested transactions are savepoints.
     OptionsOnNested,
+    /// The dialect lacks a capability the transaction needs, e.g.
+    /// `NativeRls` for `try_begin_with_security`.
+    Unsupported {
+        /// The executor's dialect.
+        dialect: DialectId,
+        /// The missing capability.
+        capability: Capability,
+    },
 }
 
 impl fmt::Display for TxError {
@@ -159,6 +190,10 @@ impl fmt::Display for TxError {
             TxError::OptionsOnNested => f.write_str(
                 "transaction options (isolation, read-only) cannot be set on a nested transaction",
             ),
+            TxError::Unsupported {
+                dialect,
+                capability,
+            } => write!(f, "dialect {dialect:?} does not support {capability:?}"),
         }
     }
 }

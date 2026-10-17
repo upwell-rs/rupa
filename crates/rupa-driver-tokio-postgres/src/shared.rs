@@ -1,6 +1,8 @@
-//! Value and row conversion plus the error type, shared with the sync driver
-//! (`postgres::Row` and `postgres::Error` are re-exports of tokio-postgres').
+//! Value and row conversion, the statement cache, and the error type, shared
+//! with the sync driver (`postgres::Row`, `postgres::Statement` and
+//! `postgres::Error` are re-exports of tokio-postgres').
 
+use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::fmt;
 
@@ -11,13 +13,20 @@ use rupa_core::row::RowCursor;
 use rupa_core::{ResultError, RowError, SqlType, TxError, Value};
 use rupa_sql::RenderError;
 
+/// Everything that can go wrong running a statement on Postgres.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum PgError {
+    /// The statement could not be rendered as Postgres SQL.
     Render(RenderError),
+    /// Postgres (or the connection) reported an error.
     Db(tokio_postgres::Error),
+    /// The rows did not fit the query's result type.
     Result(ResultError),
+    /// The transaction API was misused.
     Tx(TxError),
+    /// No pooled connection could be obtained (e.g. a timeout).
+    Pool(Box<dyn StdError + Send + Sync>),
 }
 
 impl fmt::Display for PgError {
@@ -27,6 +36,7 @@ impl fmt::Display for PgError {
             PgError::Db(e) => e.fmt(f),
             PgError::Result(e) => e.fmt(f),
             PgError::Tx(e) => e.fmt(f),
+            PgError::Pool(e) => write!(f, "connection pool: {e}"),
         }
     }
 }
@@ -38,6 +48,7 @@ impl StdError for PgError {
             PgError::Db(e) => Some(e),
             PgError::Result(e) => Some(e),
             PgError::Tx(e) => Some(e),
+            PgError::Pool(e) => Some(&**e),
         }
     }
 }
@@ -51,6 +62,12 @@ impl From<RenderError> for PgError {
 impl From<tokio_postgres::Error> for PgError {
     fn from(e: tokio_postgres::Error) -> Self {
         PgError::Db(e)
+    }
+}
+
+impl From<TxError> for PgError {
+    fn from(e: TxError) -> Self {
+        PgError::Tx(e)
     }
 }
 
@@ -211,8 +228,69 @@ impl RowCursor for PgRows {
     }
 }
 
-impl From<PgError> for rupa_core::exec::DynError {
+impl From<PgError> for rupa_core::DynError {
     fn from(e: PgError) -> Self {
-        rupa_core::exec::DynError::new(e)
+        rupa_core::DynError::new(e)
+    }
+}
+
+/// Prepared statements kept per connection.
+pub const STATEMENT_CACHE_CAPACITY: usize = 256;
+
+/// Prepared statements by SQL text, per connection: each distinct query is
+/// prepared once instead of on every call (which costs a round trip).
+///
+/// When full, the least recently used statement is evicted. Callers evict a
+/// statement whose execution failed, since it may be stale (e.g. its table
+/// was dropped and recreated with other column types).
+#[derive(Debug, Default)]
+pub struct StatementCache {
+    statements: HashMap<String, (tokio_postgres::Statement, u64)>,
+    clock: u64,
+}
+
+impl StatementCache {
+    /// The cached statement for `sql`, marking it used.
+    pub fn get(&mut self, sql: &str) -> Option<tokio_postgres::Statement> {
+        self.clock += 1;
+        let (statement, used) = self.statements.get_mut(sql)?;
+        *used = self.clock;
+        Some(statement.clone())
+    }
+
+    /// Caches `statement` for `sql`.
+    pub fn insert(&mut self, sql: &str, statement: tokio_postgres::Statement) {
+        if self.statements.len() >= STATEMENT_CACHE_CAPACITY
+            && let Some(oldest) = self
+                .statements
+                .iter()
+                .min_by_key(|(_, (_, used))| *used)
+                .map(|(k, _)| k.clone())
+        {
+            self.statements.remove(&oldest);
+        }
+        self.clock += 1;
+        self.statements
+            .insert(sql.to_owned(), (statement, self.clock));
+    }
+
+    /// Forgets the statement for `sql`.
+    pub fn evict(&mut self, sql: &str) {
+        self.statements.remove(sql);
+    }
+
+    /// Forgets every statement (e.g. after `DISCARD ALL`).
+    pub fn clear(&mut self) {
+        self.statements.clear();
+    }
+
+    /// The number of cached statements.
+    pub fn len(&self) -> usize {
+        self.statements.len()
+    }
+
+    /// Whether nothing is cached.
+    pub fn is_empty(&self) -> bool {
+        self.statements.is_empty()
     }
 }

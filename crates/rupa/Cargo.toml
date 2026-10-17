@@ -9,6 +9,23 @@ description = "Rust Unified Persistence API: explicit, attribute-driven reposito
 
 [features]
 nightly = ["rupa-core/nightly"]
+
+# Drivers. Each enabled driver is registered in `rupa::registry()`, so a
+# `DbConfig` URL can select it at run time; its crate is re-exported under
+# `rupa::drivers`.
+# Async Postgres (tokio-postgres + deadpool); serves `postgres:` URLs.
+postgres = ["dep:rupa-driver-tokio-postgres", "rupa-driver-tokio-postgres/pool"]
+# Sync Postgres (postgres + r2d2); select with `driver = "postgres"`.
+postgres-sync = ["dep:rupa-driver-postgres", "rupa-driver-postgres/pool"]
+# SQLite (rusqlite + r2d2, SQLite compiled in); serves `sqlite:` URLs.
+sqlite = ["dep:rupa-driver-rusqlite", "rupa-driver-rusqlite/pool"]
+# MySQL 8 (mysql + r2d2); serves `mysql:` URLs.
+mysql = ["dep:rupa-driver-mysql", "rupa-driver-mysql/pool"]
+# The in-memory backend; serves `memory:` URLs (tests, prototypes).
+memory = ["dep:rupa-driver-memory"]
+# Every driver.
+full = ["postgres", "postgres-sync", "sqlite", "mysql", "memory"]
+
 # DI integrations. Each is one optional dep + one feature; never default.
 upwell = ["dep:rupa-upwell"]
 # Sync methods of async repositories block with tokio's `block_in_place`
@@ -21,6 +38,11 @@ rupa-macros.workspace = true
 rupa-sql.workspace = true
 rupa-dsl-std.workspace = true
 rupa-upwell = { workspace = true, optional = true }
+rupa-driver-tokio-postgres = { workspace = true, optional = true }
+rupa-driver-postgres = { workspace = true, optional = true }
+rupa-driver-rusqlite = { workspace = true, optional = true }
+rupa-driver-mysql = { workspace = true, optional = true }
+rupa-driver-memory = { workspace = true, optional = true }
 pollster.workspace = true
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 

@@ -1,6 +1,7 @@
 //! Native row-level security with the sync driver.
 
 use rupa::core::exec::Executor;
+use rupa::core::tx::TxConnection;
 use rupa::core::tx::{Transaction, TxOptions};
 use rupa::prelude::*;
 use rupa::{SecureTransactional, SecurityContext};

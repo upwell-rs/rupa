@@ -13,6 +13,8 @@ use crate::column::{Column, IsJson, Json, Scalar};
 use crate::ir::{BinOp, ColumnRef, DslCall, DslFnDef, ExprNode, OrderBy, PathSeg, UnOp};
 use crate::value::{ScalarColumn, SqlType};
 
+/// A typed expression: an IR node that evaluates to `T`. Built from
+/// columns, bound values and operators; it never contains SQL text.
 pub struct Expr<T> {
     node: ExprNode,
     _t: PhantomData<fn() -> T>,
@@ -40,10 +42,12 @@ impl<T> Expr<T> {
         }
     }
 
+    /// The untyped IR node.
     pub fn node(&self) -> &ExprNode {
         &self.node
     }
 
+    /// The untyped IR node, by value.
     pub fn into_node(self) -> ExprNode {
         self.node
     }
@@ -75,6 +79,8 @@ impl<T> Expr<T> {
     label = "expected a `{T}` value, column or expression"
 )]
 pub trait IntoExpr<T> {
+    /// The IR node: a column, an expression, or the value bound as a
+    /// parameter.
     fn into_node(self) -> ExprNode;
 }
 
@@ -176,29 +182,38 @@ fn binary(op: BinOp, lhs: ExprNode, rhs: ExprNode) -> Expr<bool> {
     note = "only scalar columns and expressions support comparisons; reach into a JSON column with a path (`prefs.theme` / `.path(\"theme\")`)"
 )]
 pub trait ExprOps: Sized {
+    /// The value type; comparisons accept its base type (`T` for `Option<T>`).
     type Ty: ScalarColumn;
 
+    /// The IR node of this operand.
     fn into_expr_node(self) -> ExprNode;
 
+    /// `self = rhs`.
     fn eq(self, rhs: impl IntoExpr<Base<Self::Ty>>) -> Expr<bool> {
         binary(BinOp::Eq, self.into_expr_node(), rhs.into_node())
     }
+    /// `self <> rhs`.
     fn ne(self, rhs: impl IntoExpr<Base<Self::Ty>>) -> Expr<bool> {
         binary(BinOp::Ne, self.into_expr_node(), rhs.into_node())
     }
+    /// `self < rhs`.
     fn lt(self, rhs: impl IntoExpr<Base<Self::Ty>>) -> Expr<bool> {
         binary(BinOp::Lt, self.into_expr_node(), rhs.into_node())
     }
+    /// `self <= rhs`.
     fn le(self, rhs: impl IntoExpr<Base<Self::Ty>>) -> Expr<bool> {
         binary(BinOp::Le, self.into_expr_node(), rhs.into_node())
     }
+    /// `self > rhs`.
     fn gt(self, rhs: impl IntoExpr<Base<Self::Ty>>) -> Expr<bool> {
         binary(BinOp::Gt, self.into_expr_node(), rhs.into_node())
     }
+    /// `self >= rhs`.
     fn ge(self, rhs: impl IntoExpr<Base<Self::Ty>>) -> Expr<bool> {
         binary(BinOp::Ge, self.into_expr_node(), rhs.into_node())
     }
 
+    /// `self LIKE pattern` (case-sensitive, `\` escapes, on every dialect).
     fn like(self, pattern: impl IntoExpr<String>) -> Expr<bool>
     where
         Self::Ty: ScalarColumn<Base = String>,
@@ -206,6 +221,7 @@ pub trait ExprOps: Sized {
         binary(BinOp::Like, self.into_expr_node(), pattern.into_node())
     }
 
+    /// `self IN (items..)`. An empty list matches nothing.
     fn in_<I>(self, items: I) -> Expr<bool>
     where
         I: IntoIterator,
@@ -214,6 +230,7 @@ pub trait ExprOps: Sized {
         in_list(self.into_expr_node(), items, false)
     }
 
+    /// `self NOT IN (items..)`. An empty list matches everything.
     fn not_in<I>(self, items: I) -> Expr<bool>
     where
         I: IntoIterator,
@@ -222,12 +239,14 @@ pub trait ExprOps: Sized {
         in_list(self.into_expr_node(), items, true)
     }
 
+    /// `self IS NULL`.
     fn is_null(self) -> Expr<bool> {
         Expr::from_node(ExprNode::Unary(
             UnOp::IsNull,
             Box::new(self.into_expr_node()),
         ))
     }
+    /// `self IS NOT NULL`.
     fn is_not_null(self) -> Expr<bool> {
         Expr::from_node(ExprNode::Unary(
             UnOp::IsNotNull,
@@ -235,12 +254,14 @@ pub trait ExprOps: Sized {
         ))
     }
 
+    /// Ascending order (`NULL`s last).
     fn asc(self) -> OrderBy {
         OrderBy {
             expr: self.into_expr_node(),
             direction: crate::ir::Direction::Asc,
         }
     }
+    /// Descending order (`NULL`s first).
     fn desc(self) -> OrderBy {
         OrderBy {
             expr: self.into_expr_node(),
@@ -277,9 +298,11 @@ impl<E, T: ScalarColumn> ExprOps for Column<E, T, Scalar> {
 }
 
 impl<T: ScalarColumn<Base = bool>> Expr<T> {
+    /// `self AND rhs`.
     pub fn and(self, rhs: impl IntoExpr<bool>) -> Expr<bool> {
         binary(BinOp::And, self.node, rhs.into_node())
     }
+    /// `self OR rhs`.
     pub fn or(self, rhs: impl IntoExpr<bool>) -> Expr<bool> {
         binary(BinOp::Or, self.node, rhs.into_node())
     }
@@ -319,6 +342,7 @@ impl<E, T> Column<E, T, Json> {
         ))
     }
 
+    /// SQL `NOT NULL` test (JSON `null` is not SQL `NULL`).
     pub fn is_not_null(self) -> Expr<bool> {
         Expr::from_node(ExprNode::Unary(
             UnOp::IsNotNull,
@@ -336,11 +360,13 @@ pub struct JsonPath {
 }
 
 impl JsonPath {
+    /// Descends into object key `key`.
     pub fn key(mut self, key: &'static str) -> Self {
         self.path.push(PathSeg::Key(key));
         self
     }
 
+    /// Descends into array element `index`.
     pub fn index(mut self, index: u32) -> Self {
         self.path.push(PathSeg::Index(index));
         self
@@ -413,6 +439,7 @@ impl JsonPath {
     note = "conditions are comparisons, `&&`/`||`/`!` of conditions, or boolean columns"
 )]
 pub trait IntoCondition {
+    /// The condition as a boolean expression.
     fn into_condition(self) -> Expr<bool>;
 }
 
