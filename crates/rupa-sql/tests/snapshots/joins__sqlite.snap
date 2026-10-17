@@ -1,0 +1,24 @@
+---
+source: crates/rupa-sql/tests/joins.rs
+expression: cases(&Sqlite)
+---
+-- select
+SELECT "t0"."id", "t1"."id", "t2"."name" FROM "app"."users" AS "t0" INNER JOIN "orders" AS "t1" ON "t1"."user_id" = "t0"."id" AND "t1"."total" > ? LEFT JOIN "app"."users" AS "t2" ON "t2"."id" = "t0"."manager_id" WHERE "t0"."prefs" ->> '$."theme"' = ? ORDER BY "t2"."name" ASC NULLS LAST LIMIT ?
+  1 = I64(5)
+  2 = Text("dark")
+  3 = I64(10)
+
+-- exists
+SELECT EXISTS (SELECT 1 FROM "app"."users" AS "t0" INNER JOIN "orders" AS "t1" ON "t1"."user_id" = "t0"."id" AND "t1"."total" > ? LEFT JOIN "app"."users" AS "t2" ON "t2"."id" = "t0"."manager_id" WHERE "t0"."prefs" ->> '$."theme"' = ? ORDER BY "t2"."name" ASC NULLS LAST LIMIT ?)
+  1 = I64(5)
+  2 = Text("dark")
+  3 = I64(10)
+
+-- single table stays unqualified
+SELECT "id" FROM "app"."users"
+
+-- unknown source in a single-table select
+error: UnknownSource(SourceId(1))
+
+-- unknown source in an update filter
+error: UnknownSource(SourceId(1))

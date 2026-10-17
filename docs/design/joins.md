@@ -1,6 +1,8 @@
 # Joins
 
-Status: **design draft** (2026-10-18), on branch `joins`. Nothing built yet.
+Status: **in progress** (2026-10-18), on branch `joins`. Step 1 of the build
+order is done: the IR, rendering (aliases `t0`, `t1`, ..), render-cache
+shapes, and nested-loop joins in the memory backend.
 
 The spec listed joins as a non-goal, but asked to keep the IR "join-ready".
 That non-goal is now lifted. Lazy loading, the identity map and automatic

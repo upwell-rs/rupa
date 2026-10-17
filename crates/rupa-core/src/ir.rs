@@ -7,7 +7,8 @@
 //! - DSL function calls stay un-lowered ([`ExprNode::Dsl`]) until rendering, so a
 //!   statement can be rendered for any dialect or evaluated by the memory backend.
 //! - Column references name their source by [`SourceId`], not by table, and
-//!   projections are positional, so joins can be added as new `FromClause` variants.
+//!   projections are positional. Joins number their sources in order
+//!   ([`FromClause::Join`]).
 
 use std::fmt;
 
@@ -58,33 +59,89 @@ impl TableRef {
     }
 }
 
-/// Index of a row source within a statement. Always `SourceId(0)` until joins exist.
+/// Index of a row source within a statement: the base table is `SourceId(0)`,
+/// the n-th join `SourceId(n)`. Statements without joins only use `SourceId(0)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SourceId(pub u16);
 
-/// Deliberately exhaustive: adding joins must break every renderer's match.
+/// Deliberately exhaustive: a new kind of row source must break every
+/// renderer's match.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FromClause {
     /// A single table.
     Table(TableRef),
+    /// A base table (`SourceId(0)`) joined with further tables, which are
+    /// numbered `SourceId(1)`, `SourceId(2)`, .. in order.
+    Join {
+        /// The first source.
+        base: TableRef,
+        /// The joined sources, in order.
+        joins: Vec<Join>,
+    },
+}
+
+impl FromClause {
+    /// The number of row sources.
+    pub fn source_count(&self) -> usize {
+        match self {
+            FromClause::Table(_) => 1,
+            FromClause::Join { joins, .. } => 1 + joins.len(),
+        }
+    }
+
+    /// The table of source `id`, if it exists.
+    pub fn source(&self, id: SourceId) -> Option<TableRef> {
+        match (self, id.0) {
+            (FromClause::Table(t), 0) | (FromClause::Join { base: t, .. }, 0) => Some(*t),
+            (FromClause::Table(_), _) => None,
+            (FromClause::Join { joins, .. }, n) => joins.get(usize::from(n) - 1).map(|j| j.table),
+        }
+    }
+}
+
+/// Deliberately exhaustive, like [`FromClause`]: `RIGHT`/`FULL` would need
+/// capabilities (MySQL has no `FULL JOIN`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JoinKind {
+    /// `INNER JOIN`: only rows with a match.
+    Inner,
+    /// `LEFT JOIN`: every row of the earlier sources; the joined source's
+    /// columns are `NULL` where nothing matches.
+    Left,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// One joined source.
+pub struct Join {
+    /// Inner or left.
+    pub kind: JoinKind,
+    /// The joined table.
+    pub table: TableRef,
+    /// The join condition. It may refer to this source and every earlier one.
+    pub on: ExprNode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// A column of one of the statement's row sources.
 pub struct ColumnRef {
-    /// Which source (always the first, until joins exist).
+    /// Which source.
     pub source: SourceId,
     /// The column name.
     pub name: &'static str,
 }
 
 impl ColumnRef {
-    /// A column of the statement's (only) table.
+    /// A column of the statement's first (or only) table.
     pub const fn new(name: &'static str) -> Self {
         Self {
             source: SourceId(0),
             name,
         }
+    }
+
+    /// A column of source `source`.
+    pub const fn of(source: SourceId, name: &'static str) -> Self {
+        Self { source, name }
     }
 }
 

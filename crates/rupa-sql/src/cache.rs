@@ -395,6 +395,9 @@ mod tag {
     pub const DSL: u64 = 29;
     pub const KEY: u64 = 30;
     pub const INDEX: u64 = 31;
+    /// Starts a join's sources; a single table starts with its schema token
+    /// (`NONE`/`SOME`) instead, so the two never share a shape.
+    pub const JOIN: u64 = 40;
 }
 
 const CAPABILITIES: [Capability; 7] = [
@@ -517,6 +520,16 @@ impl<'a, 'b> Shape<'a, 'b> {
     fn select(&mut self, s: &'a Select) {
         match &s.from {
             FromClause::Table(t) => self.table(*t),
+            FromClause::Join { base, joins } => {
+                self.push(tag::JOIN);
+                self.table(*base);
+                self.len(joins.len());
+                for join in joins {
+                    self.push(join.kind as u64);
+                    self.table(join.table);
+                    self.expr(&join.on);
+                }
+            }
         }
         self.columns(&s.projection);
         self.opt_expr(s.filter.as_ref());
@@ -658,6 +671,11 @@ fn lower_statement(statement: &Statement, dialect: &dyn Dialect) -> Result<State
     let lower_opt = |e: &mut Option<ExprNode>| e.as_mut().map_or(Ok(()), lower);
     match &mut statement {
         Statement::Select(s) | Statement::Exists(s) => {
+            if let FromClause::Join { joins, .. } = &mut s.from {
+                for join in joins {
+                    lower(&mut join.on)?;
+                }
+            }
             lower_opt(&mut s.filter)?;
             lower_opt(&mut s.limit)?;
             lower_opt(&mut s.offset)?;

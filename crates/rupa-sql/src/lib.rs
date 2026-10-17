@@ -17,7 +17,7 @@
 
 use std::fmt;
 
-use rupa_core::ir::{Statement, TxStatement};
+use rupa_core::ir::{SourceId, Statement, TxStatement};
 use rupa_core::{Dialect, DialectId, DslError, Query, Value};
 
 pub mod cache;
@@ -59,6 +59,11 @@ pub enum RenderError {
     InvalidJsonKey(&'static str),
     /// DSL lowering nested deeper than the renderer allows (likely a lowering cycle).
     TooDeep,
+    /// A column names a row source the statement doesn't have (e.g. a joined
+    /// source in an `UPDATE` filter).
+    UnknownSource(SourceId),
+    /// More joined sources than a `SourceId` can number.
+    TooManySources,
 }
 
 impl From<DslError> for RenderError {
@@ -79,6 +84,14 @@ impl fmt::Display for RenderError {
             RenderError::InvalidToken(t) => write!(f, "invalid operator or function name `{t}`"),
             RenderError::InvalidJsonKey(k) => write!(f, "invalid JSON path key {k:?}"),
             RenderError::TooDeep => f.write_str("expression nesting too deep"),
+            RenderError::UnknownSource(id) => {
+                write!(
+                    f,
+                    "column refers to row source {} the statement doesn't have",
+                    id.0
+                )
+            }
+            RenderError::TooManySources => f.write_str("too many joined sources"),
         }
     }
 }
