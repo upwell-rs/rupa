@@ -1,0 +1,33 @@
+# cargo-nextest configuration: `cargo nextest run --workspace --features rupa/full`.
+#
+# Nextest runs every test in its own process, all binaries in parallel. Each
+# Docker-backed test starts one database container (testcontainers), so those
+# tests share a group that caps how many containers run at once. Doctests are
+# not run by nextest: `cargo test --doc --workspace --features rupa/full`.
+
+[test-groups]
+# Tests that start a Postgres or MySQL container.
+docker = { max-threads = 2 }
+
+[profile.default]
+# Report tests slower than 60 s; Docker tests get longer below.
+slow-timeout = { period = "60s" }
+
+[[profile.default.overrides]]
+# One test per binary, one container per test. Add new Docker-backed test
+# binaries here.
+filter = """
+binary_id(rupa-driver-mysql::conformance)
+| binary_id(/^rupa-driver-(tokio-)?postgres::(conformance|repository|rls)$/)
+| binary_id(/^rupa-driver-sqlx::(mysql|postgres)$/)
+"""
+test-group = "docker"
+# Pulling an image the first time can take a while.
+slow-timeout = { period = "120s", terminate-after = 5 }
+
+[profile.ci]
+# Keep going after a failure, so one run reports every failing test.
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"

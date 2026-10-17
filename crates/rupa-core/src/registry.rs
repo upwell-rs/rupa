@@ -257,18 +257,31 @@ impl Registry {
         self.drivers.iter().map(|d| &**d)
     }
 
-    /// The driver `config` selects: by name if it names one (see
-    /// [`DriverConfig::name`](crate::config::DriverConfig::name)), otherwise
-    /// the first registered driver for its URL scheme.
+    /// The driver `config` selects:
+    ///
+    /// - by name if it names one (see
+    ///   [`DriverConfig::name`](crate::config::DriverConfig::name));
+    /// - if that driver isn't registered but the name is one rupa knows, the
+    ///   first registered driver for the same database and URL scheme (see
+    ///   [`DriverConfig::dialect`](crate::config::DriverConfig::dialect));
+    /// - otherwise the first registered driver for its URL scheme.
     pub fn resolve(&self, config: &DbConfig) -> Result<&dyn Driver, ConnectError> {
         let scheme = config.scheme();
         if let Some(name) = config.driver.name() {
-            let driver = self.drivers().find(|d| d.name() == name).ok_or_else(|| {
-                ConnectError::UnknownDriver {
+            let accepts_scheme =
+                |d: &dyn Driver| scheme.as_deref().is_none_or(|s| d.schemes().contains(&s));
+            let driver = self
+                .drivers()
+                .find(|d| d.name() == name)
+                .or_else(|| {
+                    let dialect = config.driver.dialect()?;
+                    self.drivers()
+                        .find(|d| d.dialect() == dialect && accepts_scheme(*d))
+                })
+                .ok_or_else(|| ConnectError::UnknownDriver {
                     name: name.to_owned(),
                     available: self.available(),
-                }
-            })?;
+                })?;
             if let Some(scheme) = &scheme
                 && !driver.schemes().contains(&scheme.as_str())
             {

@@ -23,8 +23,26 @@ sqlite = ["dep:rupa-driver-rusqlite", "rupa-driver-rusqlite/pool"]
 mysql = ["dep:rupa-driver-mysql", "rupa-driver-mysql/pool"]
 # The in-memory backend; serves `memory:` URLs (tests, prototypes).
 memory = ["dep:rupa-driver-memory"]
+# Async drivers on sqlx (+ deadpool). Each serves its scheme when the driver
+# above isn't enabled, or when selected with `driver = "sqlx-.."`.
+sqlx-postgres = ["dep:rupa-driver-sqlx", "rupa-driver-sqlx/postgres", "rupa-driver-sqlx/pool"]
+sqlx-mysql = ["dep:rupa-driver-sqlx", "rupa-driver-sqlx/mysql", "rupa-driver-sqlx/pool"]
+# SQLite compiled in, run on sqlx's per-connection worker threads.
+sqlx-sqlite = ["dep:rupa-driver-sqlx", "rupa-driver-sqlx/sqlite", "rupa-driver-sqlx/pool"]
+# TLS for the sqlx drivers (configured in the URL).
+sqlx-tls-rustls = ["rupa-driver-sqlx?/tls-rustls"]
+sqlx-tls-native-tls = ["rupa-driver-sqlx?/tls-native-tls"]
 # Every driver.
-full = ["postgres", "postgres-sync", "sqlite", "mysql", "memory"]
+full = [
+    "postgres",
+    "postgres-sync",
+    "sqlite",
+    "mysql",
+    "memory",
+    "sqlx-postgres",
+    "sqlx-mysql",
+    "sqlx-sqlite",
+]
 
 # DI integrations. Each is one optional dep + one feature; never default.
 upwell = ["dep:rupa-upwell"]
@@ -43,6 +61,7 @@ rupa-driver-postgres = { workspace = true, optional = true }
 rupa-driver-rusqlite = { workspace = true, optional = true }
 rupa-driver-mysql = { workspace = true, optional = true }
 rupa-driver-memory = { workspace = true, optional = true }
+rupa-driver-sqlx = { workspace = true, optional = true }
 pollster.workspace = true
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 
@@ -52,3 +71,4 @@ serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 pollster.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }

@@ -60,8 +60,17 @@ Enable drivers with cargo features of `rupa`; each one is registered in
 | Postgres | `postgres` | `rupa-driver-tokio-postgres` | async | deadpool |
 | Postgres | `postgres-sync` | `rupa-driver-postgres` | sync | r2d2 |
 | SQLite (3.38+) | `sqlite` | `rupa-driver-rusqlite` | sync | r2d2 |
-| MySQL (8.0+) | `mysql` | `rupa-driver-mysql` (sqlx planned) | sync | r2d2 |
+| MySQL (8.0+) | `mysql` | `rupa-driver-mysql` | sync | r2d2 |
+| Postgres | `sqlx-postgres` | `rupa-driver-sqlx` | async | deadpool |
+| MySQL (8.0+) | `sqlx-mysql` | `rupa-driver-sqlx` | async | deadpool |
+| SQLite (3.38+) | `sqlx-sqlite` | `rupa-driver-sqlx` | async (worker thread per connection) | deadpool |
 | In memory | `memory` | `rupa-driver-memory` | sync, async | one shared connection |
+
+When two drivers serve a URL scheme, the one listed first wins unless the
+configuration names a driver (`driver = "sqlx-mysql"`). A configuration that
+names a driver that isn't compiled in is served by another one for the same
+database. TLS for the sqlx drivers: `sqlx-tls-rustls` or
+`sqlx-tls-native-tls`.
 
 Repositories with `async` methods also run on sync executors without an
 async runtime.
@@ -74,7 +83,7 @@ It is serde-friendly, so it can live in your configuration file:
 ```toml
 [database]
 url = "sqlite://data/app.db"   # the scheme picks the driver...
-driver = "sqlite"              # ...or name it: postgres, postgres-sync, sqlite, mysql, memory
+driver = "sqlite"              # ...or name it: postgres, postgres-sync, sqlite, mysql, memory, sqlx-*
 busy_timeout = "2s"            # options of that driver, checked against its type
 journal_mode = "wal"
 
@@ -94,6 +103,17 @@ tx.commit().await?;
 (`SqlitePool`, `PgPool`, ..) can also be used directly, statically typed. See
 [`docs/design/connections.md`](docs/design/connections.md).
 
+## Tests
+
+```sh
+cargo nextest run --workspace --features rupa/full   # needs Docker for Postgres and MySQL
+cargo test --doc --workspace --features rupa/full     # doctests (nextest skips them)
+```
+
+Postgres and MySQL suites start their own containers with testcontainers;
+[`.config/nextest.toml`](.config/nextest.toml) runs at most two of them at
+once. Plain `cargo test` works too, running one test binary at a time.
+
 ## Benchmarks
 
 `cargo bench -p rupa-bench`; see [`docs/benchmarks.md`](docs/benchmarks.md).
@@ -104,10 +124,10 @@ Pre-1.0 and under active development. The design is documented milestone by
 milestone in [`docs/design`](docs/design).
 
 - **Done:** entities, queries and repositories, transactions with savepoints,
-  DSL functions, Postgres/MySQL/SQLite rendering and drivers, native
+  DSL functions, Postgres/MySQL/SQLite rendering and drivers (sync, and
+  async on sqlx), native
   row-level security, connection pools, configuration-driven drivers, and
   caching of rendered SQL and prepared statements.
-- **Next:** the Upwell dependency-injection integration (`rupa-upwell`) and
-  async drivers on sqlx.
+- **Next:** the Upwell dependency-injection integration (`rupa-upwell`).
 
 Requires Rust 1.99. Licensed under MIT OR Apache-2.0.

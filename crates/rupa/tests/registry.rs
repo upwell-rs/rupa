@@ -5,7 +5,10 @@
     feature = "memory",
     feature = "postgres",
     feature = "postgres-sync",
-    feature = "mysql"
+    feature = "mysql",
+    feature = "sqlx-postgres",
+    feature = "sqlx-mysql",
+    feature = "sqlx-sqlite"
 ))]
 
 use rupa::core::{Dialect, DialectId};
@@ -17,7 +20,16 @@ fn the_registry_is_built_once() {
     let names: Vec<_> = rupa::registry().drivers().map(|d| d.name()).collect();
     assert_eq!(
         names,
-        ["postgres", "postgres-sync", "sqlite", "mysql", "memory"]
+        [
+            "postgres",
+            "sqlx-postgres",
+            "postgres-sync",
+            "sqlite",
+            "sqlx-sqlite",
+            "mysql",
+            "sqlx-mysql",
+            "memory"
+        ]
     );
 }
 
@@ -39,6 +51,20 @@ fn schemes_and_names_resolve() {
     assert_eq!(resolve(DbConfig::new("sqlite::memory:")), "sqlite");
     assert_eq!(resolve(DbConfig::new("mysql://h/db")), "mysql");
     assert_eq!(resolve(DbConfig::new("memory:")), "memory");
+    assert_eq!(
+        resolve(DbConfig::new("mysql://h/db").driver(DriverConfig::SqlxMySql(Default::default()))),
+        "sqlx-mysql"
+    );
+}
+
+#[test]
+fn connect_with_sqlx_sqlite() {
+    let config = DbConfig::new("sqlite::memory:")
+        .driver(DriverConfig::SqlxSqlite(rupa::SqliteOptions::default()));
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let db = runtime.block_on(rupa::connect(&config)).unwrap();
+    assert_eq!(db.dialect().id(), DialectId::Sqlite);
+    assert_eq!(db.status().max_size, 1, "one in-memory database");
 }
 
 #[test]

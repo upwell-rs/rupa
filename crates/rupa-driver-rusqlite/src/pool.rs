@@ -18,11 +18,11 @@
 //! Postgres), `journal_mode` and `statement_cache_size`.
 
 use std::fmt;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rupa_core::config::{DbConfig, PoolConfig, SqliteOptions};
+pub use rupa_core::config::{OpenMode, SqliteTarget};
 use rupa_core::erased::{BoxFuture, DynError};
 use rupa_core::exec::Blocking;
 use rupa_core::pool::{OwnedTx, Pool, PoolStatus, Pooled};
@@ -38,65 +38,6 @@ pub type SqliteConn = Pooled<r2d2::PooledConnection<SqliteManager>>;
 
 /// A transaction that owns its pooled connection (see [`Pool::begin`]).
 pub type SqlitePoolTx = OwnedTx<SqliteConn>;
-
-/// The database a `sqlite:` URL names.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum SqliteTarget {
-    /// A private in-memory database.
-    Memory,
-    /// A database file.
-    File {
-        /// Its path.
-        path: PathBuf,
-        /// How to open it.
-        mode: OpenMode,
-    },
-}
-
-/// How a database file is opened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum OpenMode {
-    /// Read-only.
-    ReadOnly,
-    /// Read-write; the file must exist.
-    ReadWrite,
-    /// Read-write, created if missing.
-    #[default]
-    ReadWriteCreate,
-}
-
-impl SqliteTarget {
-    /// Parses a `sqlite:` URL; see the [module docs](self).
-    pub fn parse(url: &str) -> Result<Self, String> {
-        let rest = url
-            .get(..7)
-            .filter(|s| s.eq_ignore_ascii_case("sqlite:"))
-            .map(|_| &url[7..])
-            .ok_or_else(|| format!("`{url}` is not a sqlite: URL"))?;
-        let rest = rest.strip_prefix("//").unwrap_or(rest);
-        let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
-        if path == ":memory:" {
-            return Ok(SqliteTarget::Memory);
-        }
-        if path.is_empty() {
-            return Err("missing database path (use `sqlite::memory:` for memory)".into());
-        }
-        let mut mode = OpenMode::default();
-        for pair in query.split('&').filter(|p| !p.is_empty()) {
-            mode = match pair {
-                "mode=ro" => OpenMode::ReadOnly,
-                "mode=rw" => OpenMode::ReadWrite,
-                "mode=rwc" => OpenMode::ReadWriteCreate,
-                other => return Err(format!("unsupported URL parameter `{other}`")),
-            };
-        }
-        Ok(SqliteTarget::File {
-            path: PathBuf::from(path),
-            mode,
-        })
-    }
-}
 
 type InitFn = dyn Fn(&mut rusqlite::Connection) -> rusqlite::Result<()> + Send + Sync;
 
@@ -364,6 +305,7 @@ impl Driver for SqliteDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn urls() {

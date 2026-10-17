@@ -200,7 +200,9 @@ This is the `Arc<dyn ..>` the Upwell executor component will provide.
 
 - **MySQL driver** (`rupa-driver-mysql`), promoted from the test-only
   executor. It is sync, on the `mysql` crate, and sets `CLIENT_FOUND_ROWS`
-  itself. sqlx (milestone 11) remains the async plan.
+  itself.
+- **sqlx drivers** (`rupa-driver-sqlx`): async Postgres, MySQL and SQLite;
+  see [`sqlx.md`](sqlx.md).
 - **Prepared-statement caching** (half of prep item 4):
   - both Postgres drivers keep a per-connection LRU of prepared statements
     (`StatementCache`, 256 entries). A cached query is one round trip instead

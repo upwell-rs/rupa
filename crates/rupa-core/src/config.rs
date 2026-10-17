@@ -33,6 +33,9 @@
 //! | `postgres-sync` | [`DriverConfig::PostgresSync`] | [`PostgresOptions`] | `postgres-sync` |
 //! | `sqlite` | [`DriverConfig::Sqlite`] | [`SqliteOptions`] | `sqlite` |
 //! | `mysql` | [`DriverConfig::MySql`] | [`MySqlOptions`] | `mysql` |
+//! | `sqlx-postgres` | [`DriverConfig::SqlxPostgres`] | [`PostgresOptions`] | `sqlx-postgres` |
+//! | `sqlx-sqlite` | [`DriverConfig::SqlxSqlite`] | [`SqliteOptions`] | `sqlx-sqlite` |
+//! | `sqlx-mysql` | [`DriverConfig::SqlxMySql`] | [`MySqlOptions`] | `sqlx-mysql` |
 //! | `memory` | [`DriverConfig::Memory`] | none | `memory` |
 //! | anything else | [`DriverConfig::Other`] | any keys, as strings | a third-party driver |
 //!
@@ -45,6 +48,12 @@
 //!   (`postgres:` → `postgres`, `sqlite:` → `sqlite`, `mysql:` → `mysql`), so
 //!   the options are still checked against the right type.
 //!
+//! A tag names a database's options and its preferred driver, not a hard
+//! requirement: if that driver isn't compiled in, the registry uses another
+//! one for the same database and URL scheme (so `driver = "sqlite"` works in
+//! a build with only `sqlx-sqlite`). Every driver for a database passes the
+//! same conformance suite and stores values the same way.
+//!
 //! Unknown keys are an error for every known driver.
 
 use std::collections::BTreeMap;
@@ -56,6 +65,7 @@ use serde::de::{self, Deserializer};
 use serde::ser::{SerializeMap, Serializer};
 use serde::{Deserialize, Serialize};
 
+use crate::DialectId;
 use crate::registry::ConnectError;
 
 // ---------------------------------------------------------------------------
@@ -192,6 +202,12 @@ pub enum DriverConfig {
     Sqlite(SqliteOptions),
     /// MySQL (`mysql`).
     MySql(MySqlOptions),
+    /// Async Postgres on sqlx.
+    SqlxPostgres(PostgresOptions),
+    /// Async SQLite on sqlx.
+    SqlxSqlite(SqliteOptions),
+    /// Async MySQL on sqlx.
+    SqlxMySql(MySqlOptions),
     /// The in-memory backend.
     Memory,
     /// A driver rupa doesn't know, with untyped options (read them with
@@ -214,8 +230,25 @@ impl DriverConfig {
             DriverConfig::PostgresSync(_) => "postgres-sync",
             DriverConfig::Sqlite(_) => "sqlite",
             DriverConfig::MySql(_) => "mysql",
+            DriverConfig::SqlxPostgres(_) => "sqlx-postgres",
+            DriverConfig::SqlxSqlite(_) => "sqlx-sqlite",
+            DriverConfig::SqlxMySql(_) => "sqlx-mysql",
             DriverConfig::Memory => "memory",
             DriverConfig::Other { name, .. } => name,
+        })
+    }
+
+    /// The database a known driver connects to; `None` for
+    /// [`Auto`](Self::Auto) and [`Other`](Self::Other).
+    pub fn dialect(&self) -> Option<DialectId> {
+        Some(match self {
+            DriverConfig::Auto | DriverConfig::Other { .. } => return None,
+            DriverConfig::Postgres(_)
+            | DriverConfig::PostgresSync(_)
+            | DriverConfig::SqlxPostgres(_) => DialectId::Postgres,
+            DriverConfig::Sqlite(_) | DriverConfig::SqlxSqlite(_) => DialectId::Sqlite,
+            DriverConfig::MySql(_) | DriverConfig::SqlxMySql(_) => DialectId::MySql,
+            DriverConfig::Memory => DialectId::Memory,
         })
     }
 
@@ -247,6 +280,9 @@ impl DriverConfig {
             "postgres-sync" => DriverConfig::PostgresSync(typed(name, options)?),
             "sqlite" => DriverConfig::Sqlite(typed(name, options)?),
             "mysql" => DriverConfig::MySql(typed(name, options)?),
+            "sqlx-postgres" => DriverConfig::SqlxPostgres(typed(name, options)?),
+            "sqlx-sqlite" => DriverConfig::SqlxSqlite(typed(name, options)?),
+            "sqlx-mysql" => DriverConfig::SqlxMySql(typed(name, options)?),
             "memory" => match options.keys().next() {
                 None => DriverConfig::Memory,
                 Some(key) => return Err(format!("the memory driver has no option `{key}`")),
@@ -268,9 +304,11 @@ impl DriverConfig {
     pub fn options(&self) -> serde_json::Map<String, serde_json::Value> {
         let value = match self {
             DriverConfig::Auto | DriverConfig::Memory => return serde_json::Map::new(),
-            DriverConfig::Postgres(o) | DriverConfig::PostgresSync(o) => serde_json::to_value(o),
-            DriverConfig::Sqlite(o) => serde_json::to_value(o),
-            DriverConfig::MySql(o) => serde_json::to_value(o),
+            DriverConfig::Postgres(o)
+            | DriverConfig::PostgresSync(o)
+            | DriverConfig::SqlxPostgres(o) => serde_json::to_value(o),
+            DriverConfig::Sqlite(o) | DriverConfig::SqlxSqlite(o) => serde_json::to_value(o),
+            DriverConfig::MySql(o) | DriverConfig::SqlxMySql(o) => serde_json::to_value(o),
             DriverConfig::Other { options, .. } => serde_json::to_value(options),
         };
         match value {
@@ -279,12 +317,14 @@ impl DriverConfig {
         }
     }
 
-    /// Postgres options, for the Postgres drivers: the configured ones, or
-    /// the defaults for [`Auto`](Self::Auto).
+    /// Postgres options, for the Postgres drivers: the configured ones (of
+    /// any Postgres variant), or the defaults for [`Auto`](Self::Auto).
     pub fn postgres(&self) -> Result<PostgresOptions, ConnectError> {
         match self {
             DriverConfig::Auto => Ok(PostgresOptions::default()),
-            DriverConfig::Postgres(o) | DriverConfig::PostgresSync(o) => Ok(o.clone()),
+            DriverConfig::Postgres(o)
+            | DriverConfig::PostgresSync(o)
+            | DriverConfig::SqlxPostgres(o) => Ok(o.clone()),
             other => Err(other.mismatch("postgres")),
         }
     }
@@ -293,7 +333,7 @@ impl DriverConfig {
     pub fn sqlite(&self) -> Result<SqliteOptions, ConnectError> {
         match self {
             DriverConfig::Auto => Ok(SqliteOptions::default()),
-            DriverConfig::Sqlite(o) => Ok(o.clone()),
+            DriverConfig::Sqlite(o) | DriverConfig::SqlxSqlite(o) => Ok(o.clone()),
             other => Err(other.mismatch("sqlite")),
         }
     }
@@ -302,7 +342,7 @@ impl DriverConfig {
     pub fn mysql(&self) -> Result<MySqlOptions, ConnectError> {
         match self {
             DriverConfig::Auto => Ok(MySqlOptions::default()),
-            DriverConfig::MySql(o) => Ok(o.clone()),
+            DriverConfig::MySql(o) | DriverConfig::SqlxMySql(o) => Ok(o.clone()),
             other => Err(other.mismatch("mysql")),
         }
     }
@@ -378,6 +418,73 @@ impl Default for SqliteOptions {
             journal_mode: None,
             statement_cache_size: None,
         }
+    }
+}
+
+/// The database a `sqlite:` URL names, as every SQLite driver reads it:
+///
+/// | URL | database |
+/// |---|---|
+/// | `sqlite::memory:`, `sqlite://:memory:` | a private in-memory database (pools keep exactly one connection) |
+/// | `sqlite://data/app.db`, `sqlite:data/app.db` | a file, relative to the working directory |
+/// | `sqlite:///var/lib/app.db`, `sqlite://C:/data/app.db` | an absolute path |
+///
+/// A `?mode=` query parameter sets how a file is opened: `rwc` (read-write,
+/// create if missing; the default), `rw`, or `ro`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SqliteTarget {
+    /// A private in-memory database.
+    Memory,
+    /// A database file.
+    File {
+        /// Its path.
+        path: std::path::PathBuf,
+        /// How to open it.
+        mode: OpenMode,
+    },
+}
+
+/// How a database file is opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OpenMode {
+    /// Read-only.
+    ReadOnly,
+    /// Read-write; the file must exist.
+    ReadWrite,
+    /// Read-write, created if missing.
+    #[default]
+    ReadWriteCreate,
+}
+
+impl SqliteTarget {
+    /// Parses a `sqlite:` URL; see the [type docs](Self).
+    pub fn parse(url: &str) -> Result<Self, String> {
+        let rest = url
+            .get(..7)
+            .filter(|s| s.eq_ignore_ascii_case("sqlite:"))
+            .map(|_| &url[7..])
+            .ok_or_else(|| format!("`{url}` is not a sqlite: URL"))?;
+        let rest = rest.strip_prefix("//").unwrap_or(rest);
+        let (path, query) = rest.split_once('?').unwrap_or((rest, ""));
+        if path == ":memory:" {
+            return Ok(SqliteTarget::Memory);
+        }
+        if path.is_empty() {
+            return Err("missing database path (use `sqlite::memory:` for memory)".into());
+        }
+        let mut mode = OpenMode::default();
+        for pair in query.split('&').filter(|p| !p.is_empty()) {
+            mode = match pair {
+                "mode=ro" => OpenMode::ReadOnly,
+                "mode=rw" => OpenMode::ReadWrite,
+                "mode=rwc" => OpenMode::ReadWriteCreate,
+                other => return Err(format!("unsupported URL parameter `{other}`")),
+            };
+        }
+        Ok(SqliteTarget::File {
+            path: std::path::PathBuf::from(path),
+            mode,
+        })
     }
 }
 

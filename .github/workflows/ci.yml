@@ -38,7 +38,7 @@ jobs:
       # Each driver feature must build on its own (and none at all).
       - run: |
           cargo check -p rupa
-          for f in postgres postgres-sync sqlite mysql memory full; do
+          for f in postgres postgres-sync sqlite mysql memory sqlx-postgres sqlx-mysql sqlx-sqlite full; do
             echo "::group::rupa/$f"
             cargo check -p rupa --features "$f"
             echo "::endgroup::"
@@ -57,12 +57,16 @@ jobs:
         with:
           toolchain: ${{ matrix.toolchain }}
       - uses: Swatinem/rust-cache@v2
-      # Includes the Docker-backed suites (Postgres, MySQL) and in-process SQLite.
+      - uses: taiki-e/install-action@nextest
+      # Includes the Docker-backed suites (Postgres, MySQL) and in-process
+      # SQLite; .config/nextest.toml caps how many containers run at once.
       # trybuild snapshots are pinned to MSRV diagnostics; nightly wording drifts.
       - if: matrix.toolchain == '1.99'
-        run: cargo test --workspace --features rupa/full
+        run: cargo nextest run --profile ci --workspace --features rupa/full
       - if: matrix.toolchain == 'nightly'
-        run: cargo test --workspace --features rupa/full,rupa/nightly -- --skip ui
+        run: cargo nextest run --profile ci --workspace --features rupa/full,rupa/nightly -E 'not test(ui)'
+      # nextest doesn't run doctests.
+      - run: cargo test --doc --workspace --features rupa/full
 
   upwell:
     name: upwell integration

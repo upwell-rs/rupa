@@ -6,7 +6,8 @@
 //! # Connecting from configuration
 //!
 //! Enable the drivers you need (`postgres`, `postgres-sync`, `sqlite`,
-//! `mysql`, `memory`, or `full`) and connect with a [`DbConfig`]:
+//! `mysql`, `memory`, the sqlx-based `sqlx-postgres`, `sqlx-mysql` and
+//! `sqlx-sqlite`, or `full`) and connect with a [`DbConfig`]:
 //!
 //! ```ignore
 //! let db: rupa::Database = rupa::connect(&DbConfig::new("sqlite://app.db")).await?;
@@ -14,7 +15,7 @@
 //! ```
 //!
 //! [`registry()`] lists the drivers compiled in, in the order they are
-//! tried for a URL scheme (async drivers first). See
+//! tried for a URL scheme. See
 //! [`rupa_core::registry`] for the details and [`rupa_core::config`] for the
 //! configuration format.
 
@@ -72,6 +73,12 @@ pub mod drivers {
     pub use rupa_driver_postgres as postgres_sync;
     #[cfg(feature = "sqlite")]
     pub use rupa_driver_rusqlite as sqlite;
+    #[cfg(any(
+        feature = "sqlx-postgres",
+        feature = "sqlx-mysql",
+        feature = "sqlx-sqlite"
+    ))]
+    pub use rupa_driver_sqlx as sqlx;
     #[cfg(feature = "postgres")]
     pub use rupa_driver_tokio_postgres as postgres;
 }
@@ -81,8 +88,11 @@ pub mod drivers {
 /// structs, so this is one small allocation, once).
 ///
 /// Drivers are tried for a URL scheme in this order: `postgres` (async),
-/// `postgres-sync`, `sqlite`, `mysql`, `memory`; a config that names its
-/// driver (`driver = "postgres-sync"`) skips the scheme lookup.
+/// `sqlx-postgres`, `postgres-sync`, `sqlite`, `sqlx-sqlite`, `mysql`,
+/// `sqlx-mysql`, `memory`. A config that names its driver
+/// (`driver = "sqlx-mysql"`) skips the scheme lookup; if the named driver
+/// isn't enabled, another one for the same database serves it (see
+/// [`Registry::resolve`]).
 ///
 /// The memory driver registered here creates databases without tables. To
 /// register tables, or to add third-party drivers, start from a clone
@@ -95,12 +105,18 @@ pub fn registry() -> &'static Registry {
         let mut registry = Registry::new();
         #[cfg(feature = "postgres")]
         registry.register(rupa_driver_tokio_postgres::PgDriver);
+        #[cfg(feature = "sqlx-postgres")]
+        registry.register(rupa_driver_sqlx::postgres::PgDriver::new());
         #[cfg(feature = "postgres-sync")]
         registry.register(rupa_driver_postgres::PgDriver);
         #[cfg(feature = "sqlite")]
         registry.register(rupa_driver_rusqlite::SqliteDriver);
+        #[cfg(feature = "sqlx-sqlite")]
+        registry.register(rupa_driver_sqlx::sqlite::SqliteDriver::new());
         #[cfg(feature = "mysql")]
         registry.register(rupa_driver_mysql::MySqlDriver);
+        #[cfg(feature = "sqlx-mysql")]
+        registry.register(rupa_driver_sqlx::mysql::MySqlDriver::new());
         #[cfg(feature = "memory")]
         registry.register(rupa_driver_memory::MemoryDriver::new());
         registry
