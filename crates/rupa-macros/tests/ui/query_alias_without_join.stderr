@@ -1,0 +1,5 @@
+error: an alias names a source of a join; this query has no joins
+ --> tests/ui/query_alias_without_join.rs:6:26
+  |
+6 | #[query(entity = User as e, filter = manager_id is_null)]
+  |                          ^

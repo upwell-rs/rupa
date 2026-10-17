@@ -1,0 +1,5 @@
+error: `User` is only joined under an alias; write `e::id` or `m::id`
+ --> tests/ui/query_alias_hides_entity.rs:6:60
+  |
+6 | #[query(entity = User as e, left_join = User as m on User::id == m::manager_id)]
+  |                                                            ^^

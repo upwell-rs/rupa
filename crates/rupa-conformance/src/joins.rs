@@ -511,3 +511,64 @@ pub async fn case_join_query_attribute<E: AsyncExecutor>(e: &mut E) {
         ]
     );
 }
+
+#[rupa::query(
+    entity = Item as a,
+    left_join = Item as b on b::qty > a::qty && !(b::label is_null),
+    order_by = a::id,
+    order_by = b::id,
+)]
+fn more_stock() -> Vec<(Item, Option<Item>)>;
+
+/// A self-join into a struct: fields pinned to their source.
+#[derive(Debug, PartialEq, rupa::Joined)]
+pub struct StockPair {
+    #[from(Item::name, source = 0)]
+    name: String,
+    #[from(Item::name, source = 1)]
+    more: Option<String>,
+}
+
+#[rupa::query(
+    entity = Item,
+    left_join = Item as b on b::qty > Item::qty && !(b::label is_null),
+    order_by = Item::id,
+    order_by = b::id,
+)]
+fn stock_pairs() -> Vec<StockPair>;
+
+/// The self-join of `case_join_self_left_join_decodes_none`, through aliases.
+pub async fn case_join_self_join_aliases<E: AsyncExecutor>(e: &mut E) {
+    seed(e).await;
+    let rows = e.run(more_stock()).await.unwrap();
+    let ids: Vec<_> = rows
+        .iter()
+        .map(|(a, b)| (a.id, b.as_ref().map(|b| b.id)))
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            (1, Some(3)),
+            (2, None),
+            (3, None),
+            (4, Some(1)),
+            (4, Some(3))
+        ]
+    );
+
+    let pairs = e.run(stock_pairs()).await.unwrap();
+    let pair = |name: &str, more: Option<&str>| StockPair {
+        name: name.into(),
+        more: more.map(Into::into),
+    };
+    assert_eq!(
+        pairs,
+        [
+            pair("apple", Some("cherry")),
+            pair("banana", None),
+            pair("cherry", None),
+            pair("date", Some("apple")),
+            pair("date", Some("cherry")),
+        ]
+    );
+}

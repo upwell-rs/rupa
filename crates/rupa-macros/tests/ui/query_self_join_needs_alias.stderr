@@ -1,0 +1,5 @@
+error: `User` is a source more than once; give the joins aliases (`left_join = User as name ..`) and write `name::id`
+ --> tests/ui/query_self_join_needs_alias.rs:6:35
+  |
+6 | #[query(left_join = User on User::id == User::manager_id)]
+  |                                   ^^

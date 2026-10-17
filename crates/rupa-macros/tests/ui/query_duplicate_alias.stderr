@@ -1,0 +1,5 @@
+error: alias `m` is used twice, or is also an entity's name
+ --> tests/ui/query_duplicate_alias.rs:6:49
+  |
+6 | #[query(entity = User as m, left_join = User as m on m::id == m::manager_id)]
+  |                                                 ^

@@ -1,7 +1,7 @@
 # Joins
 
-Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 to 6 of
-the build order are done:
+Status: **built** (2026-10-18), on branch `joins`. All seven steps of the
+build order are done:
 
 1. the IR, rendering (aliases `t0`, `t1`, ..), render-cache shapes, and
    nested-loop joins in the memory backend;
@@ -9,7 +9,8 @@ the build order are done:
 3. `on!`;
 4. declared relations and inferred joins (`join::<J>().inner()`);
 5. `#[derive(Joined)]` merged entities;
-6. joins in `#[query]` (and so in repositories).
+6. joins in `#[query]` (and so in repositories);
+7. self-joins: aliases in `#[query]`, pinned sources in `Joined`.
 
 They are covered by join conformance cases on every backend.
 
@@ -312,8 +313,11 @@ let lines: Vec<OrderLine> = select::<Order>()
   - Whether a field is "an `Option`" is decided from the field type as
     written. A type alias for `Option` counts as plain, which is the
     conservative choice.
-- **Self-joins.** With the same entity twice, `#[from(..)]` is ambiguous. That
-  needs source aliases (see `#[query]` phase 3), so it waits until then.
+- **Self-joins (step 7).** With the same entity twice, finding a field's
+  source by type is ambiguous (E0283). So such fields name their source
+  position: `#[from(User::name, source = 1)]`, `#[flatten(source = 1)]`. The
+  struct is generic over the join, so it can't use a query's aliases;
+  positions are what it has.
 - **In repositories.** `#[query]` can return `Vec<OrderLine>` the same way it
   returns tuples.
 
@@ -352,8 +356,20 @@ fn with_orders(&self) -> Result<Vec<(User, Option<Order>)>, Error>;
   bounds.
 - **Not combinable:** joins with `sql`, or with `get` / `insert` / `update` /
   `delete`.
-- **Self-joins** need aliases (`left_join = User as manager on ..`). They are
-  probably phase 3.
+- **Self-joins (step 7): aliases.** For example:
+  `entity = User as employee, left_join = User as manager on manager::id == employee::manager_id`.
+  - The macro knows the whole source list, so a qualified field resolves to
+    a tuple position (`sources.1.col(..)`). `alias::field` names an aliased
+    source, and `Entity::field` names the one source of that entity without
+    an alias.
+  - An entity that is several unaliased sources is an error asking for
+    aliases. An entity that is only joined under aliases is an error listing
+    them.
+  - Aliases must be unique, and must not be an entity's name.
+  - An entity spelled differently from its join (`crate::User` against
+    `User`) falls back to the lookup by type.
+  - `on!` has no aliases, because it doesn't know the sources. A self-join
+    built with the builder uses the closure handles.
 
 ## Memory backend
 

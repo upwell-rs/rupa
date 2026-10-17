@@ -176,3 +176,45 @@ fn queries_with_joins() {
         )
     );
 }
+
+// Self-joins: aliases in `#[query]`, pinned sources in `Joined`.
+
+#[query(
+    entity = User as employee,
+    left_join = User as manager on manager::id == employee::manager_id,
+    filter = manager::manager_id is_null,
+    order_by = employee::id,
+)]
+fn with_managers() -> Vec<(User, Option<User>)>;
+
+/// Unaliased, `User` is the one source not given an alias.
+#[query(inner_join = User as manager on manager::id == User::manager_id)]
+fn managed() -> Vec<(User, User)>;
+
+#[derive(Debug, PartialEq, Joined)]
+pub struct Reporting {
+    #[from(User::id, source = 0)]
+    employee: i64,
+    #[from(User::id, source = 1)]
+    manager: Option<i64>,
+}
+
+#[query(entity = User, left_join = User as boss on boss::id == User::manager_id)]
+fn reporting() -> Vec<Reporting>;
+
+#[test]
+fn self_joins() {
+    assert_eq!(
+        from(&with_managers()),
+        concat!(
+            r#"FROM "users" AS "t0" LEFT JOIN "users" AS "t1" ON "t1"."id" = "t0"."manager_id" "#,
+            r#"WHERE "t1"."manager_id" IS NULL ORDER BY "t0"."id" ASC"#,
+        )
+    );
+    assert!(from(&managed()).ends_with(r#"ON "t1"."id" = "t0"."manager_id""#));
+    assert!(
+        sql(&reporting()).starts_with(r#"SELECT "t0"."id", "t1"."id" FROM"#),
+        "{}",
+        sql(&reporting())
+    );
+}

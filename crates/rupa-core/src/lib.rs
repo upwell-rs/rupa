@@ -48,8 +48,8 @@ pub mod __macro_support {
     pub use crate::ir::{BinOp, DslFnDef, ExprNode, TableRef};
     pub use crate::ir::{ColumnRef, SourceId};
     pub use crate::join::{
-        Admits, Fwd, JoinPart, JoinTo, Joined, Opt, PartOf, Plain, RefersTo, Rel, Rev, relation_on,
-        source_col,
+        Admits, At, Fwd, JoinPart, JoinTo, Joined, Opt, PartOf, Plain, RefersTo, Rel, Rev,
+        relation_on, source_col,
     };
     pub use crate::query::Query;
     pub use crate::row::Row;
