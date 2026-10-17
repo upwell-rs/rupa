@@ -555,3 +555,32 @@ pub mod __private {
         str_eq(a, b)
     }
 }
+
+/// Reads a column into a field of type `F`: the column's own type `T`, or
+/// `Option<T>`, where `NULL` is `None` (a column of a left-joined entity).
+/// Used by `#[derive(Joined)]`.
+#[diagnostic::on_unimplemented(
+    message = "this field can't hold the column `{Self}`",
+    note = "a `#[from(..)]` field has its column's type, or an `Option` of it"
+)]
+pub trait ReadAs<F> {
+    /// Reads and decodes position `index` of `row`.
+    fn read_as(&self, row: &dyn Row, index: usize) -> Result<F, ResultError>;
+}
+
+impl<E, T, K> ReadAs<T> for Column<E, T, K> {
+    fn read_as(&self, row: &dyn Row, index: usize) -> Result<T, ResultError> {
+        self.read(row, index)
+    }
+}
+
+impl<E, T, K> ReadAs<Option<T>> for Column<E, T, K> {
+    fn read_as(&self, row: &dyn Row, index: usize) -> Result<Option<T>, ResultError> {
+        match row.get(index, self.sql_type)? {
+            Value::Null(_) => Ok(None),
+            v => (self.decode)(v)
+                .map(Some)
+                .map_err(|e| e.in_column(self.name).into()),
+        }
+    }
+}

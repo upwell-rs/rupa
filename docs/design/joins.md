@@ -1,13 +1,14 @@
 # Joins
 
-Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 to 4 of
+Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 to 5 of
 the build order are done:
 
 1. the IR, rendering (aliases `t0`, `t1`, ..), render-cache shapes, and
    nested-loop joins in the memory backend;
 2. `Src` handles, the join builder for up to 10 sources, and tuple decoding;
 3. `on!`;
-4. declared relations and inferred joins (`join::<J>().inner()`).
+4. declared relations and inferred joins (`join::<J>().inner()`);
+5. `#[derive(Joined)]` merged entities.
 
 They are covered by join conformance cases on every backend.
 
@@ -291,12 +292,25 @@ let lines: Vec<OrderLine> = select::<Order>()
 - **Every field says where it comes from.** It uses `#[from(Entity::field)]`,
   or `#[flatten]` for a whole entity, which is decoded with `JoinPart` as an
   `Option` when left-joined. There is no matching by field name (hard rule 1).
-- **Checked against the query.** `.into::<V>()` requires
-  `V: Joined<Sources>`, which holds only if every entity `V` names is one of
-  the query's sources. Each source position records whether it is inner- or
-  left-joined, as `Inner<E>` or `Left<E>`. A field from a left-joined entity
-  must be `Option<_>`. For example, `coupon: String` above would fail to
-  compile.
+- **Checked against the query.** The derive generates
+  `impl<R, ..> Joined<R, M> for OrderLine`. Its bounds require each field's
+  entity to be a part of the join's row type `R`
+  (`R: PartOf<Coupon, At<P>, Left>`), and a left-joined part admits only
+  `Option` fields (`Left: Admits<Opt>`). The row type already records the
+  join kind: a left-joined entity appears as `Option<Coupon>`. So
+  `coupon: String` above fails to compile with "a field from a left-joined
+  entity must be an `Option`".
+- **As built (step 5).**
+  - `.into::<V>()` takes only `V`. The markers `M` are inferred on
+    `.all()` / `.optional()` / `.one()` / `.build::<Res, _>()`, which avoids
+    the partial-turbofish problem of step 4.
+  - Decoding is the derive's own `FromRow` impl, reading fields in order by
+    position. A `#[from]` field reads through `ReadAs<F>`: the column's type
+    `T`, or `Option<T>` (`NULL` is `None`). A `#[flatten]` field decodes as
+    a `JoinPart` (`E`, or `Option<E>`).
+  - Whether a field is "an `Option`" is decided from the field type as
+    written. A type alias for `Option` counts as plain, which is the
+    conservative choice.
 - **Self-joins.** With the same entity twice, `#[from(..)]` is ambiguous. That
   needs source aliases (see `#[query]` phase 3), so it waits until then.
 - **In repositories.** `#[query]` can return `Vec<OrderLine>` the same way it

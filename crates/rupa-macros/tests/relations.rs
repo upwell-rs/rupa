@@ -99,3 +99,31 @@ fn a_self_reference_needs_its_relation_and_direction() {
         .all();
     assert!(from(&q).ends_with(r#"ON "t1"."id" = "t0"."manager_id""#));
 }
+
+#[derive(Debug, PartialEq, Joined)]
+pub struct LineView {
+    #[from(Line::id)]
+    line: i64,
+    #[from(User::id)]
+    customer: i64,
+    #[flatten]
+    order: Order,
+}
+
+#[test]
+fn a_joined_struct_selects_only_its_columns() {
+    let q = select::<Line>()
+        .join::<Order>()
+        .inner()
+        .join::<User>()
+        .inner_via(Order::user())
+        .into::<LineView>()
+        .all();
+    let sql = sql(&q);
+    assert!(
+        sql.starts_with(
+            r#"SELECT "t0"."id", "t2"."id", "t1"."id", "t1"."user_id", "t1"."reviewer" FROM "lines" AS "t0""#
+        ),
+        "{sql}"
+    );
+}

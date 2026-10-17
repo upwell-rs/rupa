@@ -398,3 +398,84 @@ pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &mut E) {
         .collect();
     assert_eq!(got, [("cherry", 3, 12)]);
 }
+
+/// One merged row per item and review, instead of a tuple.
+#[derive(Debug, PartialEq, rupa::Joined)]
+pub struct ItemReview {
+    #[from(Item::name)]
+    item: String,
+    #[from(Item::meta)]
+    meta: crate::fixture::Meta,
+    /// Left-joined, so an `Option` even though `stars` is `NOT NULL`.
+    #[from(Review::stars)]
+    stars: Option<i32>,
+    /// A nullable column of a left-joined entity: `NULL` either way.
+    #[from(Review::comment)]
+    comment: Option<String>,
+    #[flatten]
+    review: Option<Review>,
+}
+
+/// Inner-joined fields can be plain.
+#[derive(Debug, PartialEq, rupa::Joined)]
+pub struct Reviewed {
+    #[flatten]
+    item: Item,
+    #[from(Review::stars)]
+    stars: i32,
+}
+
+pub async fn case_join_into_merged_struct<E: AsyncExecutor>(e: &mut E) {
+    seed(e).await;
+    let rows = e
+        .run(
+            select::<Item>()
+                .join::<Review>()
+                .left()
+                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
+                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
+                .into::<ItemReview>()
+                .all(),
+        )
+        .await
+        .unwrap();
+    let expected = |id: i64, r: Option<i64>| {
+        let (item, review) = (item(id), r.map(review));
+        ItemReview {
+            item: item.name,
+            meta: item.meta,
+            stars: review.as_ref().map(|r| r.stars),
+            comment: review.as_ref().and_then(|r| r.comment.clone()),
+            review,
+        }
+    };
+    assert_eq!(
+        rows,
+        [
+            expected(1, Some(10)),
+            expected(1, Some(11)),
+            expected(2, None),
+            expected(3, Some(12)),
+            expected(4, None),
+        ]
+    );
+
+    let one = e
+        .run(
+            select::<Item>()
+                .join::<Review>()
+                .inner()
+                .filter(rupa::on!(Review::id == 12))
+                .into::<Reviewed>()
+                .one(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        one,
+        Reviewed {
+            item: item(3),
+            stars: 4
+        }
+    );
+}

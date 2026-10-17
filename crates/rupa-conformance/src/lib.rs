@@ -77,6 +77,7 @@ pub async fn run<H: Harness>(h: &mut H) {
         joins:
         case_join_on_macro,
         case_join_declared_relations,
+        case_join_into_merged_struct,
         case_join_inner,
         case_join_left,
         case_join_filter_and_order_on_joined_columns,

@@ -1,0 +1,5 @@
+error: name the entity and its field: `#[from(Entity::field)]`
+ --> tests/ui/joined_field_attributes.rs:4:26
+  |
+4 | pub struct View { #[from(name)] name: String, total: i64 }
+  |                          ^^^^

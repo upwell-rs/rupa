@@ -13,6 +13,7 @@ mod capability;
 mod dsl;
 mod dsl_fn;
 mod entity;
+mod joined;
 mod model;
 mod on;
 mod query;
@@ -138,6 +139,31 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
             out
         })
         .into()
+}
+
+/// A struct that joined rows decode into, with fields from several entities.
+///
+/// ```ignore
+/// #[derive(Joined)]
+/// struct OrderLine {
+///     #[from(Order::id)] order_id: i64,
+///     #[from(Coupon::code)] coupon: Option<String>, // left-joined: an Option
+///     #[flatten] user: User,                         // a whole entity
+/// }
+///
+/// let lines: Vec<OrderLine> = select::<Order>()
+///     .join::<User>().inner()
+///     .join::<Coupon>().left()
+///     .into::<OrderLine>()
+///     .all()
+///     .run(&mut db)?;
+/// ```
+///
+/// Every field says where it comes from; nothing is matched by name. Only
+/// these columns are selected. It is read-only: not an `Entity`.
+#[proc_macro_derive(Joined, attributes(from, flatten, rupa))]
+pub fn derive_joined(input: TokenStream) -> TokenStream {
+    run(input, joined::derive)
 }
 
 /// A join condition: `on!(Order::user_id == User::id)`.

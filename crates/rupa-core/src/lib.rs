@@ -37,6 +37,7 @@ pub mod __macro_support {
     pub use crate::__private::*;
     pub use crate::builder::{delete, get, insert, raw, select, update};
     pub use crate::capability::{Deletable, Gettable, Insertable, Keyed, NoKey, Updatable, key_of};
+    pub use crate::column::ReadAs;
     pub use crate::column::{Column, ColumnMeta, Json, Scalar};
     pub use crate::dialect::{Capability, CapabilityMarker, Dialect, DslAvailable, Supports, caps};
     pub use crate::entity::{Entity, FromRow, IdValues};
@@ -46,7 +47,10 @@ pub mod __macro_support {
     pub use crate::expr::{ExprOps, IntoCondition};
     pub use crate::ir::{BinOp, DslFnDef, ExprNode, TableRef};
     pub use crate::ir::{ColumnRef, SourceId};
-    pub use crate::join::{Fwd, JoinTo, RefersTo, Rel, Rev, relation_on, source_col};
+    pub use crate::join::{
+        Admits, Fwd, JoinPart, JoinTo, Joined, Opt, PartOf, Plain, RefersTo, Rel, Rev, relation_on,
+        source_col,
+    };
     pub use crate::query::Query;
     pub use crate::row::Row;
     pub use crate::value::Value;
@@ -59,7 +63,7 @@ pub mod __macro_support {
 
 pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
-pub use column::{Column, ColumnKind, ColumnMeta, Json, Scalar};
+pub use column::{Column, ColumnKind, ColumnMeta, Json, ReadAs, Scalar};
 pub use config::{DbConfig, PoolConfig};
 pub use dialect::{
     Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, MySql, Postgres, Sqlite,
@@ -71,8 +75,9 @@ pub use error::{DecodeError, DslError, ResultError, RowError, TxError};
 pub use exec::{AsyncExecutor, Blocking, ExecError, Executor, Outcome};
 pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
 pub use join::{
-    At, Fwd, Has, JoinBuilder, JoinOnto, JoinPart, JoinTo, OffsetRow, PendingJoin, RefersTo, Rel,
-    Rev, Source, Sources, Src, source_col,
+    Admits, At, Fwd, Has, Inner, IntoJoined, JoinBuilder, JoinOnto, JoinPart, JoinTo, Joined, Left,
+    OffsetRow, Opt, PartOf, PendingJoin, Plain, RefersTo, Rel, Rev, Source, Sources, Src,
+    source_col,
 };
 pub use pool::{AsyncPool, OwnedAsyncTx, OwnedTx, Pool, PoolStatus, Pooled, SingleConnection};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
