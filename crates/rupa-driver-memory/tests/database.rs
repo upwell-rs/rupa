@@ -2,12 +2,14 @@
 //! registry like any other driver.
 
 use rupa::{DbConfig, Driver, Registry};
-use rupa_conformance::{Item, Note};
+use rupa_conformance::{Item, Note, Review};
 use rupa_driver_memory::MemoryDriver;
 
 fn registry() -> Registry {
     Registry::new().with(MemoryDriver::new().setup(|db| {
-        db.register::<Item>().register::<Note>();
+        db.register::<Item>()
+            .register::<Note>()
+            .register::<Review>();
     }))
 }
 

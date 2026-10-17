@@ -70,6 +70,17 @@ pub struct SetPinned {
     pub pinned: Option<bool>,
 }
 
+/// A review of an [`Item`], for joins.
+#[derive(Debug, Clone, PartialEq, Entity, Insertable)]
+#[entity(table = "reviews", schema = "conformance")]
+pub struct Review {
+    #[id]
+    pub id: i64,
+    pub item_id: i64,
+    pub stars: i32,
+    pub comment: Option<String>,
+}
+
 /// Postgres schema for the conformance entities. Drops and recreates.
 pub const POSTGRES_DDL: &str = r#"
 DROP SCHEMA IF EXISTS conformance CASCADE;
@@ -89,6 +100,12 @@ CREATE TABLE conformance.notes (
     title   text NOT NULL,
     body    text,
     pinned  boolean NOT NULL
+);
+CREATE TABLE conformance.reviews (
+    id      bigint PRIMARY KEY,
+    item_id bigint NOT NULL,
+    stars   integer NOT NULL,
+    comment text
 );
 "#;
 
@@ -113,6 +130,12 @@ CREATE TABLE conformance.notes (
     body    TEXT,
     pinned  BOOLEAN NOT NULL
 );
+CREATE TABLE conformance.reviews (
+    id      BIGINT PRIMARY KEY,
+    item_id BIGINT NOT NULL,
+    stars   INT NOT NULL,
+    comment TEXT
+);
 "#;
 
 /// Attaches the `conformance` schema; run once per SQLite connection.
@@ -122,6 +145,7 @@ pub const SQLITE_ATTACH: &str = "ATTACH DATABASE ':memory:' AS conformance;";
 pub const SQLITE_DDL: &str = r#"
 DROP TABLE IF EXISTS conformance.items;
 DROP TABLE IF EXISTS conformance.notes;
+DROP TABLE IF EXISTS conformance.reviews;
 CREATE TABLE conformance.items (
     id      INTEGER PRIMARY KEY,
     name    TEXT NOT NULL,
@@ -137,6 +161,12 @@ CREATE TABLE conformance.notes (
     title   TEXT NOT NULL,
     body    TEXT,
     pinned  INTEGER NOT NULL
+);
+CREATE TABLE conformance.reviews (
+    id      INTEGER PRIMARY KEY,
+    item_id INTEGER NOT NULL,
+    stars   INTEGER NOT NULL,
+    comment TEXT
 );
 "#;
 
@@ -194,5 +224,20 @@ pub fn items() -> Vec<Item> {
             meta: meta(-1, false, &[], None),
             extra: None,
         },
+    ]
+}
+
+/// The seed rows of the join cases: items 1 and 3 have reviews, 2 and 4 none.
+pub fn reviews() -> Vec<Review> {
+    let review = |id, item_id, stars, comment: Option<&str>| Review {
+        id,
+        item_id,
+        stars,
+        comment: comment.map(Into::into),
+    };
+    vec![
+        review(10, 1, 5, Some("great")),
+        review(11, 1, 2, None),
+        review(12, 3, 4, Some("ok")),
     ]
 }

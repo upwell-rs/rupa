@@ -13,14 +13,14 @@ use crate::ir::{
 use crate::query::{AffectedResult, Expect, Query, RowsResult};
 use crate::value::{ScalarColumn, Value};
 
-fn and_filter(filter: &mut Option<ExprNode>, cond: ExprNode) {
+pub(crate) fn and_filter(filter: &mut Option<ExprNode>, cond: ExprNode) {
     *filter = Some(match filter.take() {
         None => cond,
         Some(prev) => ExprNode::Binary(BinOp::And, Box::new(prev), Box::new(cond)),
     });
 }
 
-fn count_param(n: u64) -> ExprNode {
+pub(crate) fn count_param(n: u64) -> ExprNode {
     // SQL LIMIT/OFFSET are signed 64-bit; anything larger means "no bound".
     ExprNode::Param(Value::I64(i64::try_from(n).unwrap_or(i64::MAX)))
 }
@@ -51,7 +51,7 @@ pub fn select<E: Entity>() -> SelectBuilder<E> {
 /// A select being built; finish with [`all`](Self::all),
 /// [`optional`](Self::optional), [`one`](Self::one) or `exists`.
 pub struct SelectBuilder<E> {
-    select: Select,
+    pub(crate) select: Select,
     _e: PhantomData<fn() -> E>,
 }
 

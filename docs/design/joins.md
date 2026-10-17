@@ -1,8 +1,13 @@
 # Joins
 
-Status: **in progress** (2026-10-18), on branch `joins`. Step 1 of the build
-order is done: the IR, rendering (aliases `t0`, `t1`, ..), render-cache
-shapes, and nested-loop joins in the memory backend.
+Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 and 2 of
+the build order are done:
+
+- the IR, rendering (aliases `t0`, `t1`, ..), render-cache shapes, and
+  nested-loop joins in the memory backend;
+- `Src` handles, the join builder for up to 10 sources, and tuple decoding.
+
+They are covered by join conformance cases on every backend.
 
 The spec listed joins as a non-goal, but asked to keep the IR "join-ready".
 That non-goal is now lifted. Lazy loading, the identity map and automatic
@@ -116,6 +121,22 @@ let rows: Vec<(User, Option<Order>)> = select::<User>()
   would mean giving `Expr` an entity parameter, which breaks the DSL and
   `#[dsl::function]` signatures. That stays a separate decision.
 
+As built (step 2):
+
+- **Sources live on the column.** `Column` carries a `SourceId`, which is 0
+  by default. `Src::col` returns the same handle re-pointed at its source, so
+  every existing operator (`eq`, `like`, JSON paths, `asc`, ..) works on
+  joined columns unchanged.
+- **Plain columns mean the first source.** A column used in a join closure
+  without going through a handle refers to the first source. That is
+  intended for filters added before the join, and it is still valid after
+  one. It is also a known footgun: `col!(Order::total)` written without
+  `o.col(..)` is source 0, and the database then rejects `t0.total`. So the
+  mistake fails loudly, but only at run time.
+- **Closures return `Expr<bool>`,** not `impl IntoExpr<bool>`. With a generic
+  return type the turbofish would have to be `::<Order, _>`. With `Expr<bool>`
+  it is just `::<Order>`.
+
 ### `on!` for the common case
 
 For simple conditions there is a shorter form. It expands to the closure
@@ -162,6 +183,13 @@ struct Order {
   This is resolved through the type system, using the index-marker trick. It
   compiles when exactly one relation fits, and it is a compile error when none
   or several do.
+
+  **Open (naming):** Rust has no overloading, so `inner_join::<Order>()` with
+  no condition can't share a name with `inner_join::<Order>(on)`, the closure
+  form that step 2 built. The proposal is to give the inferred form the short
+  name, since it's the one that saves work, and rename the closure form to
+  `inner_join_on` / `left_join_on`. Then `on!` reads
+  `.inner_join_on::<Order>(on!(..))`. To decide before step 4.
 - **Several relations.** When there is more than one relation to the same
   entity, as with `user_id` and `reviewed_by` above, the join names the one it
   wants: `.inner_join_via(Order::reviewer())`. Each relation gets a generated

@@ -4,11 +4,11 @@ use fixtures::{Prefs, User};
 use rupa_core::dialect::{
     Capability, DialectId, DynDialect, Postgres, Supports, capabilities_of, caps,
 };
-use rupa_core::ir::{BinOp, ColumnRef, ExprNode, FromClause, Statement};
+use rupa_core::ir::{BinOp, ColumnRef, ExprNode, FromClause, SourceId, Statement};
 use rupa_core::prelude::*;
 use rupa_core::query::Output;
 use rupa_core::row::ValueRows;
-use rupa_core::{ColumnKind, Dialect, Expect, ResultError, SqlType, Value};
+use rupa_core::{ColumnKind, Dialect, Expect, ResultError, SqlType, Src, Value};
 
 fn rows(rows: Vec<Vec<Value>>) -> ValueRows {
     ValueRows::new(rows)
@@ -268,4 +268,90 @@ fn static_and_runtime_capabilities_agree() {
 #[test]
 fn ui() {
     trybuild::TestCases::new().compile_fail("tests/ui/*.rs");
+}
+
+// --- joins ------------------------------------------------------------------
+
+#[test]
+fn join_numbers_sources_and_qualifies_columns() {
+    let q = select::<User>()
+        .filter(User::ACTIVE.eq(true))
+        .left_join::<User>(|a, b| b.col(User::ID).eq(a.col(User::ID)))
+        .filter(|_, b| b.col(User::EMAIL).eq("x"))
+        .all();
+    let Statement::Select(s) = q.statement() else {
+        panic!()
+    };
+    let FromClause::Join { base, joins } = &s.from else {
+        panic!("a join")
+    };
+    assert_eq!(*base, User::TABLE);
+    assert_eq!(joins.len(), 1);
+    assert_eq!(joins[0].kind, rupa_core::ir::JoinKind::Left);
+    // Both sources' columns, in order, each naming its source.
+    assert_eq!(s.projection.len(), 2 * User::columns().len());
+    assert_eq!(s.projection[0], ColumnRef::new("id"));
+    assert_eq!(
+        s.projection[User::columns().len()],
+        ColumnRef::of(SourceId(1), "id")
+    );
+    // The filter before the join (plain columns) is on source 0.
+    let Some(ExprNode::Binary(BinOp::And, first, second)) = &s.filter else {
+        panic!("two ANDed filters")
+    };
+    assert_eq!(
+        **first,
+        ExprNode::Binary(
+            BinOp::Eq,
+            Box::new(ExprNode::Column(ColumnRef::new("active"))),
+            Box::new(ExprNode::Param(Value::Bool(true)))
+        )
+    );
+    assert!(matches!(&**second, ExprNode::Binary(BinOp::Eq, l, _)
+        if **l == ExprNode::Column(ColumnRef::of(SourceId(1), "email"))));
+}
+
+#[test]
+fn joined_rows_decode_into_tuples_with_none_for_unmatched() {
+    let q = select::<User>()
+        .left_join::<User>(|a, b| b.col(User::ID).eq(a.col(User::ID)))
+        .all();
+    let user = User::sample();
+    let width = User::columns().len();
+    let unmatched: Vec<Value> = User::columns()
+        .iter()
+        .map(|c| Value::Null(c.sql_type))
+        .collect();
+    let matched = [user.to_values(), user.to_values()].concat();
+    let missing = [user.to_values(), unmatched].concat();
+    assert_eq!(missing.len(), 2 * width);
+    let got = decode(&q, rows(vec![matched, missing])).unwrap();
+    assert_eq!(
+        got,
+        [(user.clone(), Some(user.clone())), (user.clone(), None)]
+    );
+}
+
+#[test]
+fn up_to_ten_sources() {
+    let on = |n: i64| move |a: Src<User, 0>| a.col(User::ID).eq(n);
+    let q = select::<User>()
+        .inner_join::<User>(|a, _| on(1)(a))
+        .inner_join::<User>(|a, _, _| on(2)(a))
+        .inner_join::<User>(|a, _, _, _| on(3)(a))
+        .inner_join::<User>(|a, _, _, _, _| on(4)(a))
+        .inner_join::<User>(|a, _, _, _, _, _| on(5)(a))
+        .inner_join::<User>(|a, _, _, _, _, _, _| on(6)(a))
+        .inner_join::<User>(|a, _, _, _, _, _, _, _| on(7)(a))
+        .inner_join::<User>(|a, _, _, _, _, _, _, _, _| on(8)(a))
+        .left_join::<User>(|a, _, _, _, _, _, _, _, _, j| on(9)(a).and(j.col(User::ACTIVE)))
+        .filter(|_, _, _, _, _, _, _, _, _, j| j.col(User::ID).eq(1))
+        .all();
+    let Statement::Select(s) = q.statement() else {
+        panic!()
+    };
+    assert_eq!(s.from.source_count(), 10);
+    assert_eq!(s.projection.len(), 10 * User::columns().len());
+    type Ten = (User, User, User, User, User, User, User, User, User, Option<User>);
+    let _: &Query<Vec<Ten>> = &q;
 }

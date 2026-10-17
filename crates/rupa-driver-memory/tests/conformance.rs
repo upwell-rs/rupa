@@ -1,4 +1,4 @@
-use rupa_conformance::{Blocking, Harness, Item, Note};
+use rupa_conformance::{Blocking, Harness, Item, Note, Review};
 use rupa_driver_memory::{AsyncMemoryDb, MemoryDb};
 
 struct AsyncMemory(AsyncMemoryDb);
@@ -8,7 +8,10 @@ impl Harness for AsyncMemory {
 
     async fn reset(&mut self) {
         self.0 = AsyncMemoryDb::new();
-        self.0.register::<Item>().register::<Note>();
+        self.0
+            .register::<Item>()
+            .register::<Note>()
+            .register::<Review>();
     }
 
     fn exec(&mut self) -> &mut AsyncMemoryDb {
@@ -23,7 +26,11 @@ impl Harness for SyncMemory {
 
     async fn reset(&mut self) {
         self.0 = Blocking(MemoryDb::new());
-        self.0.0.register::<Item>().register::<Note>();
+        self.0
+            .0
+            .register::<Item>()
+            .register::<Note>()
+            .register::<Review>();
     }
 
     fn exec(&mut self) -> &mut Blocking<MemoryDb> {

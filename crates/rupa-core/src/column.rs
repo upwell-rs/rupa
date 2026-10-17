@@ -17,7 +17,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::error::{DecodeError, ResultError};
-use crate::ir::ColumnRef;
+use crate::ir::{ColumnRef, SourceId};
 use crate::row::Row;
 use crate::value::{ScalarColumn, SqlType, Value};
 
@@ -193,8 +193,12 @@ pub const fn column_meta<T, C: Codec<T>>(field: &'static str, name: &'static str
 }
 
 /// Typed handle to column `T` of entity `E`, with kind `K` ([`Scalar`] or [`Json`]).
+///
+/// A handle refers to the statement's first row source unless it came from a
+/// join's source handle ([`Src::col`](crate::join::Src::col)).
 pub struct Column<E, T, K> {
     name: &'static str,
+    source: SourceId,
     sql_type: SqlType,
     nullable: bool,
     encode: fn(&T) -> Value,
@@ -213,6 +217,7 @@ impl<E, T, K> fmt::Debug for Column<E, T, K> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Column")
             .field("name", &self.name)
+            .field("source", &self.source.0)
             .field("sql_type", &self.sql_type)
             .finish()
     }
@@ -222,6 +227,7 @@ impl<E, T, K> Column<E, T, K> {
     const fn with_codec<C: Codec<T, Kind = K>>(name: &'static str) -> Self {
         Self {
             name,
+            source: SourceId(0),
             sql_type: C::SQL_TYPE,
             nullable: C::NULLABLE,
             encode: C::encode,
@@ -240,9 +246,21 @@ impl<E, T, K> Column<E, T, K> {
         self.sql_type
     }
 
+    /// The row source this handle refers to.
+    pub const fn source(&self) -> SourceId {
+        self.source
+    }
+
+    /// The same column, of row source `source`. Join source handles do this
+    /// and check the entity; see [`Src::col`](crate::join::Src::col).
+    pub const fn of_source(mut self, source: SourceId) -> Self {
+        self.source = source;
+        self
+    }
+
     /// The column as an IR reference.
     pub const fn column_ref(&self) -> ColumnRef {
-        ColumnRef::new(self.name)
+        ColumnRef::of(self.source, self.name)
     }
 
     /// Encodes a field value exactly as the entity stores it.
