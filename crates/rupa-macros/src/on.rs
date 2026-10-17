@@ -11,12 +11,11 @@
 use std::collections::BTreeSet;
 
 use proc_macro2::{Span, TokenStream};
-use quote::quote;
 use syn::Ident;
 use syn::parse::{ParseStream, Parser};
 
 use crate::dsl::parse_expr;
-use crate::query::{Ctx, Fields};
+use crate::query::{Ctx, Fields, condition_closure};
 
 pub fn on(input: TokenStream, ms: TokenStream) -> syn::Result<TokenStream> {
     let expr = (|input: ParseStream| {
@@ -36,13 +35,5 @@ pub fn on(input: TokenStream, ms: TokenStream) -> syn::Result<TokenStream> {
         used: BTreeSet::new(),
     };
     let cond = ctx.cond(&expr)?;
-    Ok(quote! {
-        |#sources| -> #ms::Expr<bool> {
-            let _ = &#sources;
-            // `$name` clones its variable, which may be `Copy`.
-            #[allow(clippy::clone_on_copy)]
-            let condition = #cond;
-            condition
-        }
-    })
+    Ok(condition_closure(&ms, &sources, &cond))
 }

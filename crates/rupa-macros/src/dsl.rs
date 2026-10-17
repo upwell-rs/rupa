@@ -88,7 +88,7 @@ mod bp {
 }
 
 /// `in` is a Rust keyword, so words are read with `Ident::parse_any`.
-fn peek_keyword(input: ParseStream, word: &str) -> bool {
+pub fn peek_keyword(input: ParseStream, word: &str) -> bool {
     input.fork().call(Ident::parse_any).is_ok_and(|i| i == word)
 }
 

@@ -127,3 +127,52 @@ fn a_joined_struct_selects_only_its_columns() {
         "{sql}"
     );
 }
+
+// `#[query]` with joins.
+
+#[query(
+    left_join = Order on Order::user_id == User::id && Order::id > $min,
+    filter = User::manager_id is_null,
+    order_by = Order::id desc,
+    limit = 10,
+)]
+fn with_orders(min: i64) -> Vec<(User, Option<Order>)>;
+
+#[query(inner_join = Order via Order::reviewer, inner_join = Line, order_by = Line::id)]
+fn reviewed_lines() -> Vec<(User, Order, Line)>;
+
+#[query(entity = Line, inner_join = Order, inner_join = User via Order::user)]
+fn line_views() -> Vec<LineView>;
+
+#[query(entity = User, inner_join = Order via Order::user, filter = Order::id == $id)]
+fn has_order(id: i64) -> bool;
+
+#[test]
+fn queries_with_joins() {
+    assert_eq!(
+        from(&with_orders(5)),
+        concat!(
+            r#"FROM "users" AS "t0" LEFT JOIN "orders" AS "t1" ON "t1"."user_id" = "t0"."id" AND "t1"."id" > $1 "#,
+            r#"WHERE "t0"."manager_id" IS NULL ORDER BY "t1"."id" DESC LIMIT $2"#,
+        )
+    );
+    assert_eq!(
+        from(&reviewed_lines()),
+        concat!(
+            r#"FROM "users" AS "t0" INNER JOIN "orders" AS "t1" ON "t1"."reviewer" = "t0"."id" "#,
+            r#"INNER JOIN "lines" AS "t2" ON "t2"."order_id" = "t1"."id" ORDER BY "t2"."id" ASC"#,
+        )
+    );
+    assert!(
+        sql(&line_views()).starts_with(r#"SELECT "t0"."id", "t2"."id", "t1"."id""#),
+        "{}",
+        sql(&line_views())
+    );
+    assert_eq!(
+        sql(&has_order(3)),
+        concat!(
+            r#"SELECT EXISTS (SELECT 1 FROM "users" AS "t0" INNER JOIN "orders" AS "t1" "#,
+            r#"ON "t1"."user_id" = "t0"."id" WHERE "t1"."id" = $1)"#,
+        )
+    );
+}

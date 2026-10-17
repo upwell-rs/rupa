@@ -7,7 +7,16 @@
 //! #[query(filter = <expr>, order_by = field [asc|desc], .., limit = n|$p, offset = n|$p)]
 //! #[query(sql = "SELECT .. WHERE email = $email")]
 //! #[query(entity = Type, filter = ..)]        // when R does not name the entity (bool)
+//! #[query(left_join = Order on Order::user_id == User::id, filter = User::active)]
+//! #[query(inner_join = Order, inner_join = Line via Line::order)]  // declared relations
 //! ```
+//!
+//! Joins (`inner_join` / `left_join`, repeatable, in order) take a condition
+//! (`on <expr>`), a relation (`via Entity::relation`), or neither: then the one
+//! declared relation to an earlier source. With joins, every field is written
+//! `Entity::field`, and the result is a tuple (`Vec<(User, Option<Order>)>`,
+//! whose first element is the first source) or a `#[derive(Joined)]` struct
+//! (which needs `entity = First`).
 //!
 //! Result types: `Vec<T>`, `Option<T>`, `T` (rows of entity `T`), `bool`
 //! (whether any row matches; needs `entity`). Raw SQL also takes `u64` and
@@ -17,6 +26,7 @@ use std::collections::BTreeSet;
 
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, quote_spanned};
+use syn::ext::IdentExt;
 use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::{FnArg, Ident, LitInt, LitStr, Pat, ReturnType, Token, Type};
@@ -30,8 +40,32 @@ pub enum Count {
 }
 
 pub struct OrderKey {
+    /// `Entity` of `Entity::field`, in joins.
+    entity: Option<syn::Path>,
     field: Ident,
     desc: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum JoinKind {
+    Inner,
+    Left,
+}
+
+/// How a join finds its condition.
+pub enum JoinOn {
+    /// `on <expr>`
+    Expr(Expr),
+    /// `via Entity::relation`: a declared relation, by accessor.
+    Via(syn::Path),
+    /// Neither: the one declared relation to an earlier source.
+    Inferred,
+}
+
+pub struct JoinSpec {
+    kind: JoinKind,
+    entity: syn::Path,
+    on: JoinOn,
 }
 
 /// A CRUD operation declared with a flag: `#[query(get)]`, `#[query(insert)]` ..
@@ -53,6 +87,7 @@ pub struct QueryAttr {
     pub offset: Option<Count>,
     pub sql: Option<LitStr>,
     pub entity: Option<Type>,
+    pub joins: Vec<JoinSpec>,
     /// Span of the whole attribute, for errors about combinations.
     pub span: Option<Span>,
 }
@@ -112,13 +147,35 @@ impl Parse for QueryAttr {
                 continue;
             }
             input.parse::<Token![=]>()?;
-            if name != "order_by" && !seen.insert(name.clone()) {
+            let repeatable = matches!(name.as_str(), "order_by" | "inner_join" | "left_join");
+            if !repeatable && !seen.insert(name.clone()) {
                 return Err(syn::Error::new(key.span(), format!("`{name}` given twice")));
             }
             match name.as_str() {
                 "filter" => attr.filter = Some(dsl::parse_expr(input)?),
+                "inner_join" | "left_join" => {
+                    let kind = if name == "inner_join" {
+                        JoinKind::Inner
+                    } else {
+                        JoinKind::Left
+                    };
+                    let entity = input.call(syn::Path::parse_mod_style)?;
+                    let on = if dsl::peek_keyword(input, "on") {
+                        input.call(Ident::parse_any)?;
+                        JoinOn::Expr(dsl::parse_expr(input)?)
+                    } else if dsl::peek_keyword(input, "via") {
+                        input.call(Ident::parse_any)?;
+                        JoinOn::Via(input.call(syn::Path::parse_mod_style)?)
+                    } else {
+                        JoinOn::Inferred
+                    };
+                    attr.joins.push(JoinSpec { kind, entity, on });
+                }
                 "order_by" => {
-                    let field: Ident = input.parse()?;
+                    let mut path = input.call(syn::Path::parse_mod_style)?;
+                    let field = path.segments.pop().expect("a path").into_value().ident;
+                    path.segments.pop_punct();
+                    let entity = (!path.segments.is_empty()).then_some(path);
                     let desc = if input.peek(Ident) && !input.peek2(Token![=]) {
                         let dir: Ident = input.parse()?;
                         match dir.to_string().as_str() {
@@ -134,7 +191,11 @@ impl Parse for QueryAttr {
                     } else {
                         false
                     };
-                    attr.order_by.push(OrderKey { field, desc });
+                    attr.order_by.push(OrderKey {
+                        entity,
+                        field,
+                        desc,
+                    });
                 }
                 "limit" => attr.limit = Some(parse_count(input)?),
                 "offset" => attr.offset = Some(parse_count(input)?),
@@ -143,7 +204,7 @@ impl Parse for QueryAttr {
                 _ => {
                     return Err(syn::Error::new(
                         key.span(),
-                        "unknown `query` key; expected `filter`, `order_by`, `limit`, `offset`, `sql` or `entity`",
+                        "unknown `query` key; expected `filter`, `inner_join`, `left_join`, `order_by`, `limit`, `offset`, `sql` or `entity`",
                     ));
                 }
             }
@@ -155,11 +216,18 @@ impl Parse for QueryAttr {
             && (attr.filter.is_some()
                 || !attr.order_by.is_empty()
                 || attr.limit.is_some()
-                || attr.offset.is_some())
+                || attr.offset.is_some()
+                || !attr.joins.is_empty())
         {
             return Err(syn::Error::new(
                 attr.span.unwrap(),
-                "`sql` is a complete query; it cannot be combined with `filter`, `order_by`, `limit` or `offset`",
+                "`sql` is a complete query; it cannot be combined with `filter`, joins, `order_by`, `limit` or `offset`",
+            ));
+        }
+        if attr.crud.is_some() && !attr.joins.is_empty() {
+            return Err(syn::Error::new(
+                attr.span.unwrap(),
+                "`get`, `insert`, `update` and `delete` work on one entity; joins are for selects",
             ));
         }
         validate_crud(&attr)?;
@@ -733,6 +801,9 @@ pub fn query_body(ms: &TokenStream, attr: &QueryAttr, sig: &Signature) -> syn::R
                 ));
             }
         };
+        if !attr.joins.is_empty() {
+            return join_body(ms, attr, sig, &shape, result);
+        }
         let mut ctx = Ctx {
             ms,
             fields: Fields::Entity(&entity),
@@ -745,7 +816,10 @@ pub fn query_body(ms: &TokenStream, attr: &QueryAttr, sig: &Signature) -> syn::R
             b = quote!(#b.filter(#c));
         }
         for key in &attr.order_by {
-            let column = ctx.column(&key.field)?;
+            let column = match &key.entity {
+                None => ctx.column(&key.field)?,
+                Some(entity) => ctx.qualified(entity, &key.field)?,
+            };
             let dir = if key.desc { quote!(desc) } else { quote!(asc) };
             b = quote!(#b.order_by({
                 #[allow(unused_imports)]
@@ -768,6 +842,118 @@ pub fn query_body(ms: &TokenStream, attr: &QueryAttr, sig: &Signature) -> syn::R
         }
     };
     Ok(body)
+}
+
+/// `|sources| -> Expr<bool> { cond }`: a condition over a join's sources, as
+/// `on!` and joined `#[query]`s write it.
+pub fn condition_closure(ms: &TokenStream, sources: &Ident, cond: &TokenStream) -> TokenStream {
+    quote! {
+        |#sources| -> #ms::Expr<bool> {
+            let _ = &#sources;
+            // `$name` clones its value, which may be `Copy`.
+            #[allow(clippy::clone_on_copy)]
+            let condition = #cond;
+            condition
+        }
+    }
+}
+
+/// The body of a `#[query]` with joins: the join builder, with every
+/// condition and sort key a closure over the sources.
+fn join_body(
+    ms: &TokenStream,
+    attr: &QueryAttr,
+    sig: &Signature,
+    shape: &Shape,
+    result: &Type,
+) -> syn::Result<TokenStream> {
+    let row = match shape {
+        Shape::Rows { entity } => Some(&**entity),
+        Shape::Bool => None,
+        Shape::U64 => {
+            return Err(syn::Error::new(
+                sig.result_span,
+                "`u64` (affected rows) is for raw `sql` statements; joins return rows or `bool`",
+            ));
+        }
+    };
+    let tuple = match row {
+        Some(Type::Tuple(t)) => Some(t),
+        _ => None,
+    };
+    let base = match (&attr.entity, tuple) {
+        (Some(e), _) => quote!(#e),
+        (None, Some(t)) if !t.elems.is_empty() => {
+            let first = &t.elems[0];
+            quote!(#first)
+        }
+        _ => {
+            return Err(syn::Error::new(
+                sig.result_span,
+                "name the first source with `entity = Type` (the rows aren't a tuple starting with it)",
+            ));
+        }
+    };
+
+    let sources = Ident::new("__rupa_sources", Span::mixed_site());
+    let mut ctx = Ctx {
+        ms,
+        fields: Fields::Sources(sources.clone()),
+        params: Some(&sig.params),
+        used: BTreeSet::new(),
+    };
+    let mut b = quote!(#ms::select::<#base>());
+    for join in &attr.joins {
+        let entity = &join.entity;
+        let (on_method, finish, via) = match join.kind {
+            JoinKind::Inner => (quote!(inner_join_on), quote!(inner), quote!(inner_via)),
+            JoinKind::Left => (quote!(left_join_on), quote!(left), quote!(left_via)),
+        };
+        b = match &join.on {
+            JoinOn::Expr(e) => {
+                let closure = condition_closure(ms, &sources, &ctx.cond(e)?);
+                quote!(#b.#on_method::<#entity>(#closure))
+            }
+            JoinOn::Via(rel) => quote!(#b.join::<#entity>().#via(#rel())),
+            JoinOn::Inferred => quote!(#b.join::<#entity>().#finish()),
+        };
+    }
+    if let Some(f) = &attr.filter {
+        let closure = condition_closure(ms, &sources, &ctx.cond(f)?);
+        b = quote!(#b.filter(#closure));
+    }
+    for key in &attr.order_by {
+        let Some(entity) = &key.entity else {
+            return Err(syn::Error::new(
+                key.field.span(),
+                format!("name the field's entity: `Entity::{}`", key.field),
+            ));
+        };
+        let column = ctx.qualified(entity, &key.field)?;
+        let dir = if key.desc { quote!(desc) } else { quote!(asc) };
+        b = quote!(#b.order_by(|#sources| {
+            #[allow(unused_imports)]
+            use #ms::ExprOps as _;
+            #column.#dir()
+        }));
+    }
+    if let Some(l) = &attr.limit {
+        let l = count(&mut ctx, l)?;
+        b = quote!(#b.limit(#l));
+    }
+    if let Some(o) = &attr.offset {
+        let o = count(&mut ctx, o)?;
+        b = quote!(#b.offset(#o));
+    }
+    check_all_used(&ctx.used, sig)?;
+    Ok(match (shape, tuple, row) {
+        (Shape::Bool, ..) => quote!(#b.exists()),
+        (_, Some(_), _) => quote_spanned!(sig.result_span=> #b.build::<#result>()),
+        (_, None, Some(row)) => {
+            quote_spanned!(sig.result_span=> #b.into::<#row>().build::<#result, _>())
+        }
+        (_, None, None) => unreachable!("rows have a row type"),
+    })
 }
 
 fn check_all_used(used: &BTreeSet<String>, sig: &Signature) -> syn::Result<()> {
@@ -945,6 +1131,11 @@ pub fn called_functions(attr: &QueryAttr) -> Vec<syn::Path> {
         }
     }
     let mut out = Vec::new();
+    for join in &attr.joins {
+        if let JoinOn::Expr(e) = &join.on {
+            walk(e, &mut out);
+        }
+    }
     if let Some(f) = &attr.filter {
         walk(f, &mut out);
     }

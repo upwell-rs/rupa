@@ -1,0 +1,5 @@
+error: name the first source with `entity = Type` (the rows aren't a tuple starting with it)
+  --> tests/ui/query_join_struct_needs_entity.rs:11:11
+   |
+11 | fn f() -> Vec<V>;
+   |           ^^^

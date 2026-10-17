@@ -1,0 +1,5 @@
+error: name the field's entity: `Entity::id`
+ --> tests/ui/query_join_unqualified_order_by.rs:9:39
+  |
+9 | #[query(left_join = Order, order_by = id)]
+  |                                       ^^

@@ -1,0 +1,13 @@
+error[E0271]: type mismatch resolving `<Vec<(User, Order)> as RowsResult>::Item == (User, Option<Order>)`
+  --> tests/ui/query_join_tuple_mismatch.rs:10:11
+   |
+10 | fn f() -> Vec<(User, Order)>;
+   |           ^^^^^^^^^^^^^^^^^^ expected `(User, Option<Order>)`, found `(User, Order)`
+   |
+   = note: expected tuple `(User, Option<Order>)`
+              found tuple `(User, Order)`
+note: required by a bound in `JoinBuilder::<S, R>::build`
+  --> $WORKSPACE/crates/rupa-core/src/join.rs
+   |
+   |     pub fn build<Res: RowsResult<Item = R>>(self) -> Query<Res> {
+   |                                  ^^^^^^^^ required by this bound in `JoinBuilder::<S, R>::build`

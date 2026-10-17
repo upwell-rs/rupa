@@ -479,3 +479,35 @@ pub async fn case_join_into_merged_struct<E: AsyncExecutor>(e: &mut E) {
         }
     );
 }
+
+#[rupa::query(inner_join = Review, filter = Review::stars >= $min, order_by = Review::id)]
+fn reviewed(min: i32) -> Vec<(Item, Review)>;
+
+#[rupa::query(
+    entity = Item,
+    left_join = Review on Review::item_id == Item::id && Review::comment is_null,
+    order_by = Item::id,
+)]
+fn uncommented() -> Vec<ItemReview>;
+
+/// Joins declared with `#[query]`.
+pub async fn case_join_query_attribute<E: AsyncExecutor>(e: &mut E) {
+    seed(e).await;
+    let rows = e.run(reviewed(4)).await.unwrap();
+    assert_eq!(rows, [(item(1), review(10)), (item(3), review(12))]);
+
+    let rows = e.run(uncommented()).await.unwrap();
+    let got: Vec<_> = rows
+        .iter()
+        .map(|r| (r.item.as_str(), r.review.as_ref().map(|r| r.id)))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("apple", Some(11)),
+            ("banana", None),
+            ("cherry", None),
+            ("date", None)
+        ]
+    );
+}

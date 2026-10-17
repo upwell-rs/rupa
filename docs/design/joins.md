@@ -1,6 +1,6 @@
 # Joins
 
-Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 to 5 of
+Status: **in progress** (2026-10-18), on branch `joins`. Steps 1 to 6 of
 the build order are done:
 
 1. the IR, rendering (aliases `t0`, `t1`, ..), render-cache shapes, and
@@ -8,7 +8,8 @@ the build order are done:
 2. `Src` handles, the join builder for up to 10 sources, and tuple decoding;
 3. `on!`;
 4. declared relations and inferred joins (`join::<J>().inner()`);
-5. `#[derive(Joined)]` merged entities.
+5. `#[derive(Joined)]` merged entities;
+6. joins in `#[query]` (and so in repositories).
 
 They are covered by join conformance cases on every backend.
 
@@ -327,15 +328,30 @@ let lines: Vec<OrderLine> = select::<Order>()
 fn with_orders(&self) -> Result<Vec<(User, Option<Order>)>, Error>;
 ```
 
-- **How it is checked.** The return type declares the tuple, and the attribute
-  declares the joins. The macro checks that the tuple and the joins agree:
-  same order, and `Option` exactly where a join is a left join.
-- **`ON` is optional.** It can be left out where a declared relation decides
-  it (`inner_join = Order`).
+- **How it is checked.** The return type declares the tuple, and the
+  attribute declares the joins. They must agree: the same order, and
+  `Option` exactly where a join is a left join. The generated code is the
+  join builder ending in `.build::<R>()`, so the compiler checks this:
+  "expected `(User, Option<Order>)`, found `(User, Order)`".
+- **Three ways to give `ON`.** Each `inner_join` / `left_join` (repeatable,
+  in order) takes one of:
+  - `on <expr>`, a condition in the filter grammar;
+  - `via Entity::relation`, a declared relation picked by its accessor;
+  - nothing, in which case the one declared relation decides it
+    (`inner_join = Order`).
+- **The first source.** It is the tuple's first element. With a `Joined`
+  struct result (or `bool`), name it with `entity = Type`.
 - **Merged entities.** The return type may be a `Joined` struct instead of a
-  tuple. The macro then checks the struct's sources against the joins.
-- **Fields need a prefix on joins.** Today a field resolves against the single
-  entity, as `field`. On a join every field is written `Entity::field`.
+  tuple; the generated code is `.into::<V>().build::<R, _>()`.
+- **Fields need a prefix on joins.** Without joins, a field resolves against
+  the single entity, as `field`. With joins, every field, including
+  `order_by` keys, is written `Entity::field`. Plain fields are an error
+  there, and so is `Entity::field` without joins.
+- **Repositories** get the same codegen, so a repository method can join.
+  DSL calls in `on` conditions count toward the method's `DslAvailable`
+  bounds.
+- **Not combinable:** joins with `sql`, or with `get` / `insert` / `update` /
+  `delete`.
 - **Self-joins** need aliases (`left_join = User as manager on ..`). They are
   probably phase 3.
 
