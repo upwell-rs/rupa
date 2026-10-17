@@ -17,6 +17,7 @@ cargo bench -p rupa-bench -- --quick                    # fast and rough
 | `build_render` | building queries; rendering them for Postgres, MySQL and SQLite, uncached (`render`) and through the render cache (`render_cached`) | nothing |
 | `execute` | in-memory and SQLite round trips through each layer; pool checkout and owned transactions | nothing (SQLite runs in memory) |
 | `postgres` | real round trips: rupa vs the raw tokio-postgres client vs a repository over `Database` | `RUPA_BENCH_POSTGRES_URL` (skipped without it) |
+| `drivers` | every driver on the same workloads, in a tokio task (`async/..`) and from plain threads (`sync/..`) | Docker (testcontainers), or `RUPA_BENCH_POSTGRES_URL` / `RUPA_BENCH_MYSQL_URL` |
 
 The `execute` and `postgres` groups compare one lookup through each layer,
 so the difference between two rows is the overhead of one layer:
@@ -85,3 +86,44 @@ table):
 See [`design/caching.md`](design/caching.md) for what is cached and why
 values never are.
 
+
+## Drivers
+
+2026-10-17, Windows 11, 12 tokio workers, pool of 8, all through
+`Database` + an `Arc<dyn Users>` repository. Postgres 17 and MySQL 8 run in
+Docker Desktop. Medians from two runs:
+
+| workload | postgres | sqlx-postgres | postgres-sync¹ | mysql (in tokio / sync) | sqlx-mysql | sqlite (in tokio / sync) | sqlx-sqlite |
+|---|---|---|---|---|---|---|---|
+| `get_by_id` | 391–398 µs | 447 µs² | 494–542 µs | 394–603 / 459–649 µs | 547–633 µs | 6.1–8.3 / 5.7–6.4 µs | 26.5–37.3 µs |
+| `active_100` | 542 µs | 570 µs | 605 µs | 653 / 604 µs | 638 µs | 115 / 123 µs | 282 µs |
+| `insert_rollback` | 1.13 ms | 1.03 ms | 1.14 ms | 6.83 / 6.91 ms³ | 6.89 ms | 18.6 / 18.7 µs | 108 µs |
+| `concurrent_64` (lookups/s) | 9.8–10.5 K | 6.6–10.8 K | 3.0 K⁴ | 2.5–9.8 K / 6.2 K | 9.1–9.7 K | 290–354 K / 609 K | 152–185 K |
+
+1. Sync only: the `postgres` crate drives its own runtime and panics inside
+   tokio's ("Cannot start a runtime from within a runtime"), so it can't
+   serve async code at all.
+2. The first run measured 1.0 ms with a wide interval; the rerun 447 µs.
+3. The same for every MySQL driver, so it's the server (InnoDB undo on
+   rollback), not the driver.
+4. 8 OS threads × 8 lookups, threads created once per sample.
+
+What the numbers support:
+
+- **Networked databases: the round trip dominates.** Through Docker
+  Desktop it costs ~400 µs, and results vary 2–4× between runs under
+  concurrency. Driver differences (a few to tens of µs of CPU) are below
+  that noise, so these runs can't rank tokio-postgres against sqlx-postgres,
+  or mysql against sqlx-mysql, on speed. Comparing those needs a native
+  server on Linux.
+- **SQLite: rusqlite is 3–6× faster than sqlx-sqlite per statement.** That
+  holds for lookups, decoding 100 rows and writes. sqlx hands every
+  statement to a per-connection worker thread and back, which costs
+  ~20–30 µs. It also wins on concurrent throughput, even through `Blocking`
+  inside tokio.
+- **Sync drivers inside tokio block a worker for the whole statement.**
+  For SQLite that is ~6 µs and doesn't show. For a networked database it is
+  the round trip, and with more concurrent requests than workers, tasks wait
+  behind blocked workers. That likely explains the wide `concurrent_64`
+  spread for `mysql` in tokio. The benchmark doesn't measure the delay this
+  causes other tasks.

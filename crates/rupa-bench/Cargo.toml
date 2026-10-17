@@ -9,7 +9,7 @@ publish = false
 description = "Criterion benchmarks for RUPA (not published)"
 
 [dependencies]
-rupa = { path = "../rupa", features = ["sqlite", "memory", "postgres"] }
+rupa = { path = "../rupa", features = ["full"] }
 rupa-driver-memory = { path = "../rupa-driver-memory" }
 rupa-driver-rusqlite = { path = "../rupa-driver-rusqlite", features = ["pool"] }
 rupa-driver-tokio-postgres = { path = "../rupa-driver-tokio-postgres", features = ["pool"] }
@@ -20,6 +20,7 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
 criterion.workspace = true
+testcontainers-modules.workspace = true
 
 [[bench]]
 name = "build_render"
@@ -31,4 +32,8 @@ harness = false
 
 [[bench]]
 name = "postgres"
+harness = false
+
+[[bench]]
+name = "drivers"
 harness = false

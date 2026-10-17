@@ -71,6 +71,17 @@ CREATE TABLE users (
     prefs  jsonb NOT NULL
 );";
 
+/// MySQL schema for [`User`].
+pub const MYSQL_DDL: &str = "
+DROP TABLE IF EXISTS users;
+CREATE TABLE users (
+    id     BIGINT AUTO_INCREMENT PRIMARY KEY,
+    email  VARCHAR(255) NOT NULL UNIQUE,
+    name   VARCHAR(255),
+    active BOOLEAN NOT NULL,
+    prefs  JSON NOT NULL
+);";
+
 /// `n` distinct users; every third is inactive.
 pub fn new_users(n: usize) -> Vec<NewUser> {
     (0..n)

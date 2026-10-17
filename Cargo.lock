@@ -2473,6 +2473,7 @@ dependencies = [
  "rupa-driver-tokio-postgres",
  "serde",
  "serde_json",
+ "testcontainers-modules",
  "tokio",
 ]
 
