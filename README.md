@@ -58,16 +58,18 @@ Enable drivers with cargo features of `rupa`; each one is registered in
 | backend | feature | driver | sync/async | pool |
 |---|---|---|---|---|
 | Postgres | `postgres` | `rupa-driver-tokio-postgres` | async | deadpool |
-| Postgres | `postgres-sync` | `rupa-driver-postgres` | sync | r2d2 |
-| SQLite (3.38+) | `sqlite` | `rupa-driver-rusqlite` | sync | r2d2 |
-| MySQL (8.0+) | `mysql` | `rupa-driver-mysql` | sync | r2d2 |
 | Postgres | `sqlx-postgres` | `rupa-driver-sqlx` | async | deadpool |
-| MySQL (8.0+) | `sqlx-mysql` | `rupa-driver-sqlx` | async | deadpool |
+| Postgres | `postgres-sync` | `rupa-driver-postgres` | sync (not inside tokio) | r2d2 |
+| SQLite (3.38+) | `sqlite` | `rupa-driver-rusqlite` | sync | r2d2 |
 | SQLite (3.38+) | `sqlx-sqlite` | `rupa-driver-sqlx` | async (worker thread per connection) | deadpool |
+| MySQL (8.0+) | `sqlx-mysql` | `rupa-driver-sqlx` | async | deadpool |
+| MySQL (8.0+) | `mysql` | `rupa-driver-mysql` | sync | r2d2 |
 | In memory | `memory` | `rupa-driver-memory` | sync, async | one shared connection |
 
 When two drivers serve a URL scheme, the one listed first wins unless the
-configuration names a driver (`driver = "sqlx-mysql"`). A configuration that
+configuration names a driver (`driver = "mysql"`). Networked databases
+prefer async drivers; SQLite prefers rusqlite, which is 3–6× faster per
+statement (see [`docs/benchmarks.md`](docs/benchmarks.md), "Drivers"). A configuration that
 names a driver that isn't compiled in is served by another one for the same
 database. TLS for the sqlx drivers: `sqlx-tls-rustls` or
 `sqlx-tls-native-tls`.

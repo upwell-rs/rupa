@@ -88,8 +88,15 @@ pub mod drivers {
 /// structs, so this is one small allocation, once).
 ///
 /// Drivers are tried for a URL scheme in this order: `postgres` (async),
-/// `sqlx-postgres`, `postgres-sync`, `sqlite`, `sqlx-sqlite`, `mysql`,
-/// `sqlx-mysql`, `memory`. A config that names its driver
+/// `sqlx-postgres`, `postgres-sync`, `sqlite`, `sqlx-sqlite`, `sqlx-mysql`,
+/// `mysql`, `memory`.
+///
+/// The order follows the `drivers` benchmark (`docs/benchmarks.md`). For
+/// networked databases, async drivers come first: a sync driver blocks a
+/// runtime worker for every round trip, and `postgres-sync` can't run inside
+/// tokio at all. For SQLite, rusqlite comes first: it is 3–6× faster per
+/// statement than sqlx-sqlite, and blocking for a few microseconds costs
+/// little. A config that names its driver
 /// (`driver = "sqlx-mysql"`) skips the scheme lookup; if the named driver
 /// isn't enabled, another one for the same database serves it (see
 /// [`Registry::resolve`]).
@@ -113,10 +120,10 @@ pub fn registry() -> &'static Registry {
         registry.register(rupa_driver_rusqlite::SqliteDriver);
         #[cfg(feature = "sqlx-sqlite")]
         registry.register(rupa_driver_sqlx::sqlite::SqliteDriver::new());
-        #[cfg(feature = "mysql")]
-        registry.register(rupa_driver_mysql::MySqlDriver);
         #[cfg(feature = "sqlx-mysql")]
         registry.register(rupa_driver_sqlx::mysql::MySqlDriver::new());
+        #[cfg(feature = "mysql")]
+        registry.register(rupa_driver_mysql::MySqlDriver);
         #[cfg(feature = "memory")]
         registry.register(rupa_driver_memory::MemoryDriver::new());
         registry

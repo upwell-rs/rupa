@@ -26,8 +26,8 @@ fn the_registry_is_built_once() {
             "postgres-sync",
             "sqlite",
             "sqlx-sqlite",
-            "mysql",
             "sqlx-mysql",
+            "mysql",
             "memory"
         ]
     );
@@ -49,7 +49,21 @@ fn schemes_and_names_resolve() {
         "postgres-sync"
     );
     assert_eq!(resolve(DbConfig::new("sqlite::memory:")), "sqlite");
-    assert_eq!(resolve(DbConfig::new("mysql://h/db")), "mysql");
+    assert_eq!(
+        resolve(DbConfig::new("mysql://h/db")),
+        "sqlx-mysql",
+        "async first"
+    );
+    assert_eq!(
+        resolve(DbConfig::new("mysql://h/db").driver(DriverConfig::MySql(Default::default()))),
+        "mysql",
+        "named explicitly"
+    );
+    // Options without a tag: inferred as the scheme's preferred driver.
+    let inferred: DbConfig =
+        serde_json::from_value(serde_json::json!({ "url": "mysql://h/db", "init": ["SET a = 1"] }))
+            .unwrap();
+    assert_eq!(resolve(inferred), "sqlx-mysql");
     assert_eq!(resolve(DbConfig::new("memory:")), "memory");
     assert_eq!(
         resolve(DbConfig::new("mysql://h/db").driver(DriverConfig::SqlxMySql(Default::default()))),

@@ -68,13 +68,22 @@ The facade registers drivers in this order:
 3. `postgres-sync`
 4. `sqlite`
 5. `sqlx-sqlite`
-6. `mysql`
-7. `sqlx-mysql`
+6. `sqlx-mysql`
+7. `mysql`
 8. `memory`
 
-For each database, the driver named after it comes first. That keeps
-`driver = "sqlite"` and a bare `sqlite:` URL resolving to the same driver.
-On Postgres, async drivers come before the sync one.
+The order follows the `drivers` benchmark (`docs/benchmarks.md`):
+
+- **Networked databases: async first.** Per request, the drivers are within
+  noise of each other; the round trip dominates. But a sync driver inside
+  tokio blocks a worker for the whole round trip, and `postgres-sync` can't
+  run inside tokio at all.
+- **SQLite: rusqlite first.** It is 3–6× faster per statement than
+  sqlx-sqlite, and it blocks for only a few microseconds.
+
+Scheme inference follows the same order: options without a `driver` tag on
+a `mysql:` URL become `sqlx-mysql` options. An explicit `driver = "mysql"`
+still selects the sync driver.
 
 `Registry::resolve` gained one rule: if the named driver isn't registered
 but the name is one rupa knows, the first registered driver for the same

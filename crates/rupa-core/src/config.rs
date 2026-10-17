@@ -45,8 +45,10 @@
 //!   registry picks the first registered driver for the URL scheme (the
 //!   async Postgres driver before the sync one);
 //! - with driver options, the variant is inferred from the URL scheme
-//!   (`postgres:` → `postgres`, `sqlite:` → `sqlite`, `mysql:` → `mysql`), so
-//!   the options are still checked against the right type.
+//!   (`postgres:` → `postgres`, `sqlite:` → `sqlite`, `mysql:` →
+//!   `sqlx-mysql`), so the options are still checked against the right type.
+//!   Each is the preferred driver for its scheme, as in the facade's
+//!   registry order (see `docs/benchmarks.md`, "Drivers").
 //!
 //! A tag names a database's options and its preferred driver, not a hard
 //! requirement: if that driver isn't compiled in, the registry uses another
@@ -257,7 +259,8 @@ impl DriverConfig {
         Some(match scheme {
             "postgres" | "postgresql" => DriverConfig::Postgres(PostgresOptions::default()),
             "sqlite" => DriverConfig::Sqlite(SqliteOptions::default()),
-            "mysql" => DriverConfig::MySql(MySqlOptions::default()),
+            // Async: a sync driver blocks the runtime for each round trip.
+            "mysql" => DriverConfig::SqlxMySql(MySqlOptions::default()),
             "memory" => DriverConfig::Memory,
             _ => return None,
         })
