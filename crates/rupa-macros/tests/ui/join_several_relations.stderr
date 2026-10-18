@@ -13,7 +13,7 @@ note: multiple `impl`s satisfying `Order: JoinTo<User, _, _>` found
    |                           ^^^^
    = note: required for `(Src<User, 0>,)` to implement `JoinOnto<Order, At<0>, _, _>`
 note: required by a bound in `PendingJoin::<(S0,), (R0,), J>::inner`
-  --> $WORKSPACE/crates/rupa-core/src/join.rs
+  --> $WORKSPACE/crates/rupa-core/src/join/relation.rs
    |
    |             pub fn inner<P, D, Rl>(self) -> JoinBuilder<($($S,)+ Src<J, $N>), ($($R,)+ J)>
    |                    ----- required by a bound in this associated function

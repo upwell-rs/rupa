@@ -17,16 +17,17 @@ use syn::parse::{ParseStream, Parser};
 use crate::dsl::parse_expr;
 use crate::query::{Ctx, Fields, condition_closure};
 
+/// Mixed-site hygiene: the user's `$name` variables can't shadow it.
 pub fn on(input: TokenStream, ms: TokenStream) -> syn::Result<TokenStream> {
     let expr = (|input: ParseStream| {
         let e = parse_expr(input)?;
         if !input.is_empty() {
             return Err(input.error("unexpected tokens after the condition"));
         }
+
         Ok(e)
     })
     .parse2(input)?;
-    // Mixed-site hygiene: the user's `$name` variables can't shadow it.
     let sources = Ident::new("__rupa_sources", Span::mixed_site());
     let mut ctx = Ctx {
         ms: &ms,

@@ -76,6 +76,7 @@ impl Syntax for Sqlite {
         if let Some(sql) = common_tx(statement) {
             return Ok(sql);
         }
+
         let TxStatement::Begin(options) = statement else {
             unreachable!()
         };
@@ -84,6 +85,7 @@ impl Syntax for Sqlite {
                 Capability::ReadOnlyTransactions,
             ));
         }
+
         Ok("BEGIN".into())
     }
 }

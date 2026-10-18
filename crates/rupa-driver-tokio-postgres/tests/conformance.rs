@@ -93,6 +93,7 @@ async fn dirty_connections_are_cleaned_on_return(url: &str) {
             .await
             .unwrap();
     }
+
     assert_eq!(
         conn.statement_cache().len(),
         2,

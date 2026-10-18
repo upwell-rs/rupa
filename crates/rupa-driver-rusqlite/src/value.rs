@@ -1,56 +1,46 @@
 //! Conversions between rupa [`Value`]s and SQLite storage values; see the
 //! storage table in the crate docs.
 
-use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+#[cfg(feature = "chrono")]
+use rupa_core::chrono_text;
 use rupa_core::{RowCursor, RowError, SqlType, Value};
-use rusqlite::types::Value as SqlValue;
+use rusqlite::ToSql;
+use rusqlite::types::{ToSqlOutput, Value as SqlValue, ValueRef};
 
-const TS_TZ: &str = "%Y-%m-%dT%H:%M:%S%.6fZ";
-const TS: &str = "%Y-%m-%dT%H:%M:%S%.6f";
-const TIME: &str = "%H:%M:%S%.6f";
+/// A [`Value`] bound as a SQLite parameter. Text and blobs are borrowed, not
+/// copied.
+pub(crate) struct Param<'a>(pub(crate) &'a Value);
 
-pub(crate) fn to_sql(v: &Value) -> SqlValue {
-    match v {
-        Value::Null(_) => SqlValue::Null,
-        Value::Bool(b) => SqlValue::Integer(i64::from(*b)),
-        Value::I16(n) => SqlValue::Integer(i64::from(*n)),
-        Value::I32(n) => SqlValue::Integer(i64::from(*n)),
-        Value::I64(n) => SqlValue::Integer(*n),
-        Value::F32(n) => SqlValue::Real(f64::from(*n)),
-        Value::F64(n) => SqlValue::Real(*n),
-        Value::Text(s) => SqlValue::Text(s.clone()),
-        Value::Bytes(b) => SqlValue::Blob(b.clone()),
-        Value::Uuid(u) => SqlValue::Text(u.hyphenated().to_string()),
-        Value::Date(d) => SqlValue::Text(d.format("%Y-%m-%d").to_string()),
-        Value::Time(t) => SqlValue::Text(t.format(TIME).to_string()),
-        Value::Timestamp(t) => SqlValue::Text(t.format(TS).to_string()),
-        Value::TimestampTz(t) => SqlValue::Text(t.format(TS_TZ).to_string()),
-        Value::Json(j) => SqlValue::Text(j.to_string()),
-        other => SqlValue::Text(format!("{other:?}")),
+impl ToSql for Param<'_> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        let owned = |v: SqlValue| Ok(ToSqlOutput::Owned(v));
+
+        match self.0 {
+            Value::Null(_) => owned(SqlValue::Null),
+            Value::Bool(b) => owned(SqlValue::Integer(i64::from(*b))),
+            Value::I16(n) => owned(SqlValue::Integer(i64::from(*n))),
+            Value::I32(n) => owned(SqlValue::Integer(i64::from(*n))),
+            Value::I64(n) => owned(SqlValue::Integer(*n)),
+            Value::F32(n) => owned(SqlValue::Real(f64::from(*n))),
+            Value::F64(n) => owned(SqlValue::Real(*n)),
+            Value::Text(s) => Ok(ToSqlOutput::Borrowed(ValueRef::Text(s.as_bytes()))),
+            Value::Bytes(b) => Ok(ToSqlOutput::Borrowed(ValueRef::Blob(b))),
+            #[cfg(feature = "uuid")]
+            Value::Uuid(u) => owned(SqlValue::Text(u.hyphenated().to_string())),
+            #[cfg(feature = "chrono")]
+            Value::Date(d) => owned(SqlValue::Text(chrono_text::format_date(d))),
+            #[cfg(feature = "chrono")]
+            Value::Time(t) => owned(SqlValue::Text(chrono_text::format_time(t))),
+            #[cfg(feature = "chrono")]
+            Value::Timestamp(t) => owned(SqlValue::Text(chrono_text::format_timestamp(t))),
+            #[cfg(feature = "chrono")]
+            Value::TimestampTz(t) => owned(SqlValue::Text(chrono_text::format_timestamp_tz(t))),
+            Value::Json(j) => owned(SqlValue::Text(j.to_string())),
+            other => Err(rusqlite::Error::ToSqlConversionFailure(
+                format!("cannot bind {other:?}: enable the driver's matching feature").into(),
+            )),
+        }
     }
-}
-
-fn parse_timestamp(s: &str) -> Option<NaiveDateTime> {
-    [
-        "%Y-%m-%dT%H:%M:%S%.f",
-        "%Y-%m-%d %H:%M:%S%.f",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%d %H:%M:%S",
-    ]
-    .iter()
-    .find_map(|f| NaiveDateTime::parse_from_str(s.trim_end_matches('Z'), f).ok())
-}
-
-fn parse_timestamp_tz(s: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s)
-        .map(|t| t.with_timezone(&Utc))
-        .ok()
-        .or_else(|| {
-            DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f%:z")
-                .map(|t| t.with_timezone(&Utc))
-                .ok()
-        })
-        .or_else(|| parse_timestamp(s).map(|t| t.and_utc()))
 }
 
 /// Converts a stored value to the requested SQL type.
@@ -75,21 +65,27 @@ fn from_sql(v: &SqlValue, want: SqlType, index: usize) -> Result<Value, RowError
         (SqlType::Text, SqlValue::Integer(n)) => Value::Text(n.to_string()),
         (SqlType::Text, SqlValue::Real(f)) => Value::Text(f.to_string()),
         (SqlType::Bytes, SqlValue::Blob(b)) => Value::Bytes(b.clone()),
+        #[cfg(feature = "uuid")]
         (SqlType::Uuid, SqlValue::Text(s)) => Value::Uuid(s.parse().map_err(|_| bad())?),
+        #[cfg(feature = "uuid")]
         (SqlType::Uuid, SqlValue::Blob(b)) => {
             Value::Uuid(uuid::Uuid::from_slice(b).map_err(|_| bad())?)
         }
+        #[cfg(feature = "chrono")]
         (SqlType::Date, SqlValue::Text(s)) => {
-            Value::Date(NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| bad())?)
+            Value::Date(chrono_text::parse_date(s).ok_or_else(bad)?)
         }
+        #[cfg(feature = "chrono")]
         (SqlType::Time, SqlValue::Text(s)) => {
-            Value::Time(NaiveTime::parse_from_str(s, "%H:%M:%S%.f").map_err(|_| bad())?)
+            Value::Time(chrono_text::parse_time(s).ok_or_else(bad)?)
         }
+        #[cfg(feature = "chrono")]
         (SqlType::Timestamp, SqlValue::Text(s)) => {
-            Value::Timestamp(parse_timestamp(s).ok_or_else(bad)?)
+            Value::Timestamp(chrono_text::parse_timestamp(s).ok_or_else(bad)?)
         }
+        #[cfg(feature = "chrono")]
         (SqlType::TimestampTz, SqlValue::Text(s)) => {
-            Value::TimestampTz(parse_timestamp_tz(s).ok_or_else(bad)?)
+            Value::TimestampTz(chrono_text::parse_timestamp_tz(s).ok_or_else(bad)?)
         }
         (SqlType::Json, SqlValue::Text(s)) => {
             Value::Json(serde_json::from_str(s).map_err(|_| bad())?)

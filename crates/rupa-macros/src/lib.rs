@@ -127,13 +127,14 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// See the `rupa_macros::repository` module docs for the rules on receivers,
 /// sync/async methods, errors and `static_dispatch`.
+///
+/// Keep the trait so code using it still resolves; only the
+/// macro's own error is reported.
 #[proc_macro_attribute]
 pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
     let item: proc_macro2::TokenStream = item.into();
     repository::repository(attr.into(), item.clone())
         .unwrap_or_else(|e| {
-            // Keep the trait so code using it still resolves; only the
-            // macro's own error is reported.
             let mut out = e.into_compile_error();
             out.extend(repository::strip_query_attrs(item));
             out

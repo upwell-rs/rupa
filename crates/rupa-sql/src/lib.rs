@@ -15,12 +15,11 @@
 
 #![warn(missing_docs)]
 
-use std::fmt;
-
 use rupa_core::ir::{SourceId, Statement, TxStatement};
 use rupa_core::{Dialect, DialectId, DslError, Query, Value};
 
 pub mod cache;
+mod driver_error;
 mod mysql;
 mod postgres;
 mod sqlite;
@@ -37,66 +36,45 @@ pub struct Rendered {
     pub params: Vec<Value>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
 /// Why a statement could not be rendered.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[non_exhaustive]
 pub enum RenderError {
     /// No renderer exists yet for this dialect.
+    #[error("no SQL renderer for dialect {0:?}")]
     UnsupportedDialect(DialectId),
     /// A DSL function failed to lower (including "unsupported on this dialect").
-    Dsl(DslError),
+    #[error(transparent)]
+    Dsl(#[from] DslError),
     /// The statement needs a capability the dialect lacks (e.g. `RETURNING`).
+    #[error("dialect does not support {0:?}")]
     UnsupportedCapability(rupa_core::Capability),
     /// A security-context key that is not a valid setting name.
+    #[error("invalid security context key {0:?}")]
     InvalidSecurityKey(String),
     /// An `INSERT` with no rows.
+    #[error("INSERT without rows")]
     EmptyInsert,
     /// An `UPDATE` with no assignments.
+    #[error("UPDATE without assignments")]
     EmptyUpdate,
     /// An operator or function name outside the allowed character set.
+    #[error("invalid operator or function name `{0}`")]
     InvalidToken(&'static str),
     /// A JSON path key the dialect cannot express safely.
+    #[error("invalid JSON path key {0:?}")]
     InvalidJsonKey(&'static str),
     /// DSL lowering nested deeper than the renderer allows (likely a lowering cycle).
+    #[error("expression nesting too deep")]
     TooDeep,
     /// A column names a row source the statement doesn't have (e.g. a joined
     /// source in an `UPDATE` filter).
+    #[error("column refers to row source {} the statement doesn't have", .0.0)]
     UnknownSource(SourceId),
     /// More joined sources than a `SourceId` can number.
+    #[error("too many joined sources")]
     TooManySources,
 }
-
-impl From<DslError> for RenderError {
-    fn from(e: DslError) -> Self {
-        RenderError::Dsl(e)
-    }
-}
-
-impl fmt::Display for RenderError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RenderError::UnsupportedDialect(id) => write!(f, "no SQL renderer for dialect {id:?}"),
-            RenderError::Dsl(e) => e.fmt(f),
-            RenderError::UnsupportedCapability(c) => write!(f, "dialect does not support {c:?}"),
-            RenderError::InvalidSecurityKey(k) => write!(f, "invalid security context key {k:?}"),
-            RenderError::EmptyInsert => f.write_str("INSERT without rows"),
-            RenderError::EmptyUpdate => f.write_str("UPDATE without assignments"),
-            RenderError::InvalidToken(t) => write!(f, "invalid operator or function name `{t}`"),
-            RenderError::InvalidJsonKey(k) => write!(f, "invalid JSON path key {k:?}"),
-            RenderError::TooDeep => f.write_str("expression nesting too deep"),
-            RenderError::UnknownSource(id) => {
-                write!(
-                    f,
-                    "column refers to row source {} the statement doesn't have",
-                    id.0
-                )
-            }
-            RenderError::TooManySources => f.write_str("too many joined sources"),
-        }
-    }
-}
-
-impl std::error::Error for RenderError {}
 
 fn syntax_for(dialect: &dyn Dialect) -> Result<&'static dyn writer::Syntax, RenderError> {
     Ok(match dialect.id() {
@@ -121,4 +99,10 @@ pub fn render_query<R>(query: &Query<R>, dialect: &dyn Dialect) -> Result<Render
 /// several statements; drivers send it with their simple-query path.
 pub fn render_tx(statement: &TxStatement, dialect: &dyn Dialect) -> Result<String, RenderError> {
     syntax_for(dialect)?.tx(statement)
+}
+
+/// Paths used by [`driver_error!`]'s output. Not public API.
+#[doc(hidden)]
+pub mod __private {
+    pub use rupa_core;
 }

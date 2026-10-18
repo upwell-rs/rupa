@@ -7,11 +7,23 @@ repository.workspace = true
 license.workspace = true
 description = "In-memory RUPA backend that evaluates the query IR directly"
 
+[features]
+default = ["chrono", "uuid"]
+# Date, time and UUID columns.
+chrono = ["rupa-core/chrono"]
+uuid = ["rupa-core/uuid"]
+# `AsyncMemoryDb`.
+async = ["rupa-core/async"]
+# The registry driver `MemoryDriver`, for run-time driver selection.
+dynamic = ["async", "rupa-core/dynamic"]
+
 [dependencies]
 rupa-core.workspace = true
+thiserror.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+rupa-driver-memory = { path = ".", features = ["dynamic"] }
 rupa-conformance = { path = "../rupa-conformance" }
-rupa = { path = "../rupa" }
+rupa = { path = "../rupa", features = ["dynamic"] }
 pollster.workspace = true

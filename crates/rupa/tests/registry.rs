@@ -90,6 +90,7 @@ fn connect_without_a_server() {
         let db = pollster::block_on(rupa::connect(&DbConfig::new(url))).unwrap();
         assert_eq!(db.dialect().id(), dialect);
     }
+
     let err = pollster::block_on(rupa::connect(&DbConfig::new("oracle://h"))).unwrap_err();
     assert!(
         err.to_string()

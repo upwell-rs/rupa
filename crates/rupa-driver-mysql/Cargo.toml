@@ -8,21 +8,30 @@ license.workspace = true
 description = "Synchronous RUPA executor on the mysql crate (MySQL 8.0+)"
 
 [features]
-# `MySqlPool` (on r2d2) and the registry driver `MySqlDriver`.
-pool = ["dep:r2d2"]
+default = ["chrono", "uuid"]
+# Date, time and UUID columns.
+chrono = ["dep:chrono", "rupa-core/chrono", "mysql/chrono"]
+uuid = ["dep:uuid", "rupa-core/uuid"]
+# `MySqlPool` (on r2d2).
+pool = ["dep:r2d2", "rupa-core/r2d2"]
+# The registry driver `MySqlDriver`, for run-time driver selection.
+dynamic = ["pool", "rupa-core/dynamic", "rupa-core/async"]
+# TLS on rustls (ring), configured in the URL (`?require_ssl=true`).
+tls-rustls = ["mysql/rustls-tls-ring"]
 
 [dependencies]
 rupa-core.workspace = true
 rupa-sql.workspace = true
+thiserror.workspace = true
 mysql.workspace = true
 serde_json.workspace = true
-chrono.workspace = true
-uuid.workspace = true
+chrono = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 r2d2 = { workspace = true, optional = true }
 
 [dev-dependencies]
-rupa-driver-mysql = { path = ".", features = ["pool"] }
+rupa-driver-mysql = { path = ".", features = ["dynamic"] }
 rupa-conformance = { path = "../rupa-conformance" }
-rupa = { path = "../rupa" }
+rupa = { path = "../rupa", features = ["dynamic"] }
 pollster.workspace = true
 testcontainers-modules = { workspace = true, features = ["blocking"] }

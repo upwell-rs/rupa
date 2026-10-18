@@ -63,6 +63,7 @@ fn render(c: &mut Criterion) {
             b.iter(|| rupa::sql::render_query(black_box(&insert_100), dialect).unwrap())
         });
     }
+
     g.finish();
 
     // The same statements through the render cache: every iteration after
@@ -84,6 +85,7 @@ fn render(c: &mut Criterion) {
             })
         });
     }
+
     g.finish();
 }
 

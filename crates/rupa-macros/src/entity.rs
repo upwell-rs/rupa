@@ -10,6 +10,9 @@ use syn::{DeriveInput, Ident, LitStr};
 
 use crate::model::{self, Kind, column_expr, fields_struct_ident, option_inner};
 
+/// Hidden field probes: one per field, typed by how its kind is decided.
+///
+/// Fields an `Insertable` companion must provide: neither nullable nor generated.
 pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     model::reject_generics(&input, "Entity")?;
     let ms = model::support_path(&input)?;
@@ -31,10 +34,12 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
                         "unknown `entity` option; expected `table = \"..\"` or `schema = \"..\"`",
                     ));
                 }
+
                 Ok(())
             })?;
         }
     }
+
     let table = table.ok_or_else(|| {
         syn::Error::new_spanned(
             ident,
@@ -64,7 +69,6 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     };
     let (id_ident, id_ty, id_column, id_name) = (&id.ident, &id.ty, &id.column, &id.name);
 
-    // Hidden field probes: one per field, typed by how its kind is decided.
     let fields_ty = fields_struct_ident(ident);
     let mut probe_fields = Vec::new();
     let mut probe_inits = Vec::new();
@@ -100,7 +104,6 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         quote!(#c.encode(&self.#fi))
     });
 
-    // Fields an `Insertable` companion must provide: neither nullable nor generated.
     let required = fields.iter().filter(|f| !f.generated && option_inner(&f.ty).is_none()).map(|f| {
         let name = &f.name;
         let message = format!(

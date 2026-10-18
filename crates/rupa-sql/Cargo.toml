@@ -9,8 +9,11 @@ description = "Renders RUPA query IR to SQL text plus bound parameters, per dial
 
 [dependencies]
 rupa-core.workspace = true
+thiserror.workspace = true
+hashlink.workspace = true
 
 [dev-dependencies]
+rupa-core = { workspace = true, features = ["chrono", "uuid"] }
 insta.workspace = true
 serde.workspace = true
 serde_json.workspace = true

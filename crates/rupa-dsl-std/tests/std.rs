@@ -65,6 +65,7 @@ fn ilike_branches_per_dialect_at_runtime() {
             "{d:?}"
         );
     }
+
     assert_eq!(
         lowered(&e, DialectId::Memory),
         Err(DslError::unsupported("ilike", DialectId::Memory))

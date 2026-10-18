@@ -8,23 +8,28 @@ license.workspace = true
 description = "Synchronous RUPA executor on rusqlite (SQLite 3.38+)"
 
 [features]
-default = ["bundled"]
+default = ["bundled", "chrono", "uuid"]
 # Compile SQLite from source (rusqlite's `bundled`); turn off to link a system SQLite >= 3.38.
 bundled = ["rusqlite/bundled"]
-# `SqlitePool` (on r2d2) and the registry driver `SqliteDriver`.
-pool = ["dep:r2d2"]
+# Date, time and UUID columns.
+chrono = ["rupa-core/chrono"]
+uuid = ["dep:uuid", "rupa-core/uuid"]
+# `SqlitePool` (on r2d2).
+pool = ["dep:r2d2", "rupa-core/r2d2"]
+# The registry driver `SqliteDriver`, for run-time driver selection.
+dynamic = ["pool", "rupa-core/dynamic", "rupa-core/async"]
 
 [dependencies]
 rupa-core.workspace = true
 rupa-sql.workspace = true
+thiserror.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
-chrono.workspace = true
-uuid.workspace = true
+uuid = { workspace = true, optional = true }
 r2d2 = { workspace = true, optional = true }
 
 [dev-dependencies]
-rupa-driver-rusqlite = { path = ".", features = ["pool"] }
+rupa-driver-rusqlite = { path = ".", features = ["dynamic"] }
 rupa-conformance = { path = "../rupa-conformance" }
-rupa = { path = "../rupa" }
+rupa = { path = "../rupa", features = ["dynamic"] }
 pollster.workspace = true

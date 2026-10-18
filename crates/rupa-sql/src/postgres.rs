@@ -41,6 +41,7 @@ impl Syntax for Postgres {
         if let Some(sql) = common_tx(statement) {
             return Ok(sql);
         }
+
         let TxStatement::Begin(options) = statement else {
             unreachable!()
         };
@@ -49,9 +50,11 @@ impl Syntax for Postgres {
             sql.push_str(" ISOLATION LEVEL ");
             sql.push_str(isolation_sql(level));
         }
+
         if options.read_only {
             sql.push_str(" READ ONLY");
         }
+
         Ok(sql)
     }
 
@@ -76,6 +79,7 @@ impl Syntax for Postgres {
                 }
             }
         }
+
         Ok(())
     }
 }
@@ -87,10 +91,12 @@ fn string_literal(s: &'static str, out: &mut String) -> Result<(), RenderError> 
     if s.contains('\0') {
         return Err(RenderError::InvalidJsonKey(s));
     }
+
     let escape = s.contains('\\');
     if escape {
         out.push('E');
     }
+
     out.push('\'');
     for c in s.chars() {
         match c {
@@ -99,6 +105,7 @@ fn string_literal(s: &'static str, out: &mut String) -> Result<(), RenderError> 
             c => out.push(c),
         }
     }
+
     out.push('\'');
     Ok(())
 }

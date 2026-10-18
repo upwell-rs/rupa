@@ -12,9 +12,10 @@
 //! - [`SqlxExecutor`] wraps one sqlx connection (`PgConnection`,
 //!   `MySqlConnection`, `SqliteConnection`).
 //! - With the `pool` feature, [`SqlxPool`] pools them (on `deadpool`, like
-//!   the tokio-postgres driver; see [`pool`] for why not sqlx's own pool) and
-//!   [`SqlxDriver`] registers them (see `rupa_core::registry`).
-//! - `tls-rustls` or `tls-native-tls` enable TLS, configured in the URL
+//!   the tokio-postgres driver; see [`pool`] for why not sqlx's own pool).
+//! - With the `dynamic` feature, `SqlxDriver` registers them (see
+//!   `rupa_core::registry`).
+//! - `tls-rustls` enables TLS on rustls, configured in the URL
 //!   (`?sslmode=require`, `?ssl-mode=REQUIRED`).
 //!
 //! Every backend passes the shared conformance suite: results mean what they
@@ -47,10 +48,12 @@
 #![warn(missing_docs)]
 // With no database feature there is nothing to instantiate the glue for.
 #![cfg_attr(
-    not(any(feature = "postgres", feature = "mysql", feature = "sqlite")),
+    not(any(feature = "postgres", feature = "mysql", feature = "_sqlite")),
     allow(unused)
 )]
 
+#[cfg(feature = "dynamic")]
+mod driver;
 mod error;
 #[cfg(feature = "mysql")]
 pub mod mysql;
@@ -59,7 +62,7 @@ pub mod pool;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 mod rows;
-#[cfg(feature = "sqlite")]
+#[cfg(feature = "_sqlite")]
 pub mod sqlite;
 
 use std::fmt;
@@ -72,9 +75,11 @@ use rupa_core::tx::{AsyncTx, AsyncTxConnection, PendingRollback};
 use rupa_core::{Dialect, RowError, SqlType, Value};
 use sqlx::{Arguments as _, Connection as _};
 
+#[cfg(feature = "dynamic")]
+pub use driver::SqlxDriver;
 pub use error::SqlxError;
 #[cfg(feature = "pool")]
-pub use pool::{SqlxConn, SqlxDriver, SqlxManager, SqlxPool, SqlxPoolTx};
+pub use pool::{PoolBackend, SqlxConn, SqlxManager, SqlxPool, SqlxPoolTx};
 use rows::SqlxRows;
 /// Re-exported so applications use the same sqlx as this crate.
 pub use sqlx;
@@ -133,26 +138,19 @@ pub trait Backend: sqlx::Database + sqlx::database::HasStatementCache + sealed::
         conn: &'c mut Self::Connection,
         sql: &'c str,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send + 'c;
-
-    /// The pool manager a config describes.
-    #[cfg(feature = "pool")]
-    #[doc(hidden)]
-    fn manager(
-        config: &rupa_core::config::DbConfig,
-    ) -> Result<SqlxManager<Self>, rupa_core::registry::ConnectError>;
 }
 
 /// Implements [`Backend`]'s I/O methods for one database; they are the same
 /// code, but sqlx's executor bounds are only nameable per database.
 macro_rules! sqlx_io {
     ($db:ty) => {
+        /// rupa SQL is generated with every value bound, never spliced.
         fn execute<'c>(
             conn: &'c mut <$db as sqlx::Database>::Connection,
             sql: std::sync::Arc<str>,
             args: <$db as sqlx::Database>::Arguments,
         ) -> impl Future<Output = Result<u64, sqlx::Error>> + Send + 'c {
             async move {
-                // rupa SQL is generated with every value bound, never spliced.
                 let result = sqlx::query_with(sqlx::AssertSqlSafe(sql), args)
                     .execute(&mut *conn)
                     .await?;
@@ -160,6 +158,7 @@ macro_rules! sqlx_io {
             }
         }
 
+        /// Dropping the stream discards the remaining rows.
         fn fetch<'c>(
             conn: &'c mut <$db as sqlx::Database>::Connection,
             sql: std::sync::Arc<str>,
@@ -172,7 +171,6 @@ macro_rules! sqlx_io {
                 let query = sqlx::query_with(sqlx::AssertSqlSafe(sql), args);
                 match limit {
                     None => query.fetch_all(&mut *conn).await,
-                    // Dropping the stream discards the remaining rows.
                     Some(limit) => query.fetch(&mut *conn).take(limit).try_collect().await,
                 }
             }
@@ -241,16 +239,17 @@ impl<DB: Backend> SqlxExecutor<DB> {
         result.map_err(|e| self.failed(e))
     }
 
+    /// Rendered SQL is cached by statement shape; sqlx caches prepared
+    /// statements by SQL text: a repeated query skips both.
     async fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqlxError> {
         self.clean().await?;
-        // Rendered SQL is cached by statement shape; sqlx caches prepared
-        // statements by SQL text: a repeated query skips both.
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let mut args = DB::Arguments::default();
         args.reserve(rendered.params.len(), 0);
         for value in &rendered.params {
             DB::bind(&mut args, value).map_err(sqlx::Error::Encode)?;
         }
+
         let result = if expect == Expect::Affected {
             DB::execute(&mut self.conn, rendered.sql, args)
                 .await
@@ -319,6 +318,7 @@ impl<DB: Backend> AsyncTxConnection for SqlxExecutor<DB> {
             result.map_err(|e| self.failed(e))?;
             self.pending.clear();
         }
+
         Ok(())
     }
 }

@@ -29,6 +29,7 @@ fn show(r: rupa_sql::Rendered) -> String {
     for (i, p) in r.params.iter().enumerate() {
         let _ = write!(out, "\n${} = {p:?}", i + 1);
     }
+
     out
 }
 

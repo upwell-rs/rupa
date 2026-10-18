@@ -135,6 +135,7 @@ fn rows(db: &mut MemoryDb, s: Select) -> Result<Vec<Vec<Value>>, MemoryError> {
                 .collect(),
         );
     }
+
     Ok(out)
 }
 

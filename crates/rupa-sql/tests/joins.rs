@@ -78,6 +78,7 @@ fn show(s: &Statement, d: &dyn Dialect) -> String {
             for (i, p) in r.params.iter().enumerate() {
                 let _ = write!(out, "\n  {} = {p:?}", i + 1);
             }
+
             out
         }
         Err(e) => format!("error: {e:?}"),
@@ -162,6 +163,7 @@ fn join_shapes_are_cached_and_rebound() {
     if let FromClause::Join { joins, .. } = &mut left.from {
         joins[0].kind = JoinKind::Left;
     }
+
     let other = cache.render(&Statement::Select(left), &Postgres).unwrap();
     assert_ne!(other.sql, first.sql);
     assert_eq!(cache.stats().hits, 1);
@@ -202,6 +204,7 @@ fn dsl_calls_in_join_conditions_are_lowered() {
             args: vec![c(2, "id"), c(0, "manager_id")],
         });
     }
+
     let cache = RenderCache::new(1024);
     let cached = cache
         .render(&Statement::Select(s.clone()), &Postgres)
@@ -223,6 +226,7 @@ fn a_condition_on_a_later_source_is_a_render_error() {
     if let FromClause::Join { joins, .. } = &mut s.from {
         joins[0].on = bin(BinOp::Eq, c(2, "id"), c(0, "id"));
     }
+
     let err = render(&Statement::Select(s), &Postgres).unwrap_err();
     assert_eq!(err, RenderError::UnknownSource(SourceId(2)));
 }

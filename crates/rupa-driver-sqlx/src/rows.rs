@@ -17,6 +17,7 @@ impl<DB: Backend> rupa_core::Row for SqlxRow<DB> {
         if index >= len {
             return Err(RowError::IndexOutOfRange { index, len });
         }
+
         DB::read(&self.0, index, ty)
     }
 }

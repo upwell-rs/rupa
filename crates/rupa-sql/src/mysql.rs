@@ -42,6 +42,7 @@ pub(crate) fn json_path_literal(
                 {
                     return Err(RenderError::InvalidJsonKey(k));
                 }
+
                 let _ = write!(p, ".\"{k}\"");
             }
             PathSeg::Index(n) => {
@@ -49,6 +50,7 @@ pub(crate) fn json_path_literal(
             }
         }
     }
+
     Ok(format!("'{}'", p.replace('\'', "''")))
 }
 
@@ -63,8 +65,10 @@ impl Syntax for MySql {
             if c == '`' {
                 out.push('`');
             }
+
             out.push(c);
         }
+
         out.push('`');
     }
 
@@ -101,6 +105,7 @@ impl Syntax for MySql {
         } else {
             out.push_str(&extract);
         }
+
         Ok(())
     }
 
@@ -112,26 +117,29 @@ impl Syntax for MySql {
         Some("18446744073709551615")
     }
 
+    /// Applies to the next transaction only.
     fn tx(&self, statement: &TxStatement) -> Result<String, RenderError> {
         if let Some(sql) = common_tx(statement) {
             return Ok(sql);
         }
+
         let TxStatement::Begin(options) = statement else {
             unreachable!()
         };
         let mut sql = String::new();
         if let Some(level) = options.isolation {
-            // Applies to the next transaction only.
             let _ = write!(
                 sql,
                 "SET TRANSACTION ISOLATION LEVEL {}; ",
                 isolation_sql(level)
             );
         }
+
         sql.push_str("START TRANSACTION");
         if options.read_only {
             sql.push_str(" READ ONLY");
         }
+
         Ok(sql)
     }
 }

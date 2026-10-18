@@ -127,6 +127,7 @@ fn different_shapes_and_dialects_get_their_own_entries() {
             assert!(seen.insert(sql), "distinct shapes render distinctly");
         }
     }
+
     let (hits, misses, _) = stats(&cache);
     assert_eq!((hits, misses), (0, (statements.len() * 3) as u64));
     for dialect in DIALECTS {
@@ -134,6 +135,7 @@ fn different_shapes_and_dialects_get_their_own_entries() {
             check(&cache, s, dialect);
         }
     }
+
     assert_eq!(
         stats(&cache).0,
         (statements.len() * 3) as u64,
@@ -168,6 +170,7 @@ fn multi_row_inserts_bind_every_row() {
         check(&cache, &a, dialect);
         check(&cache, &b, dialect);
     }
+
     assert_eq!(stats(&cache).0, 3);
 }
 
@@ -239,6 +242,7 @@ fn value_dependent_lowerings_get_separate_shapes() {
     for v in ["x", "*", "y", "*"] {
         check(&cache, &q(v), &Postgres);
     }
+
     assert_eq!(stats(&cache), (2, 2, 0));
 }
 

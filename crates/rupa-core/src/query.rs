@@ -188,6 +188,7 @@ impl<T: FromRow> QueryResult for Vec<T> {
         while let Some(item) = next::<T>(cursor)? {
             out.push(item);
         }
+
         Ok(out)
     }
 }

@@ -42,6 +42,7 @@ fn parse_source(input: ParseStream) -> syn::Result<LitInt> {
     if key != "source" {
         return Err(syn::Error::new(key.span(), "expected `source = N`"));
     }
+
     input.parse::<Token![=]>()?;
     input.parse()
 }
@@ -93,6 +94,7 @@ fn parts(input: &DeriveInput) -> syn::Result<Vec<Part>> {
                             "name the entity and its field: `#[from(Entity::field)]`",
                         ));
                     }
+
                     let field = entity.segments.pop().expect("two segments").into_value().ident;
                     entity.segments.pop_punct();
                     Source::Column { entity, field }
@@ -100,6 +102,7 @@ fn parts(input: &DeriveInput) -> syn::Result<Vec<Part>> {
                     if !matches!(attr.meta, syn::Meta::Path(_)) {
                         at = Some(attr.parse_args_with(parse_source)?);
                     }
+
                     let entity = option_inner(&f.ty).unwrap_or(&f.ty).clone();
                     Source::Flatten { entity }
                 } else {
@@ -112,6 +115,7 @@ fn parts(input: &DeriveInput) -> syn::Result<Vec<Part>> {
                     ));
                 }
             }
+
             let source = source.ok_or_else(|| {
                 syn::Error::new(
                     ident.span(),
@@ -128,6 +132,7 @@ fn parts(input: &DeriveInput) -> syn::Result<Vec<Part>> {
         .collect()
 }
 
+/// A pinned position, or one inferred by type.
 pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     model::reject_generics(&input, "Joined")?;
     let ms = model::support_path(&input)?;
@@ -142,7 +147,6 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     let mut reads = Vec::new();
     for (k, part) in parts.iter().enumerate() {
         let kind = format_ident!("__N{k}");
-        // A pinned position, or one inferred by type.
         let at = match &part.at {
             Some(n) => quote!(#ms::At<#n>),
             None => {
@@ -195,6 +199,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
             }
         }
     }
+
     let idents = parts.iter().map(|p| &p.ident);
 
     Ok(quote! {

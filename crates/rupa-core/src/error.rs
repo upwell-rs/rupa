@@ -1,6 +1,8 @@
+use std::error::Error as StdError;
 use std::fmt;
 
 use crate::dialect::{Capability, DialectId};
+use crate::exec::ExecError;
 use crate::value::{SqlType, Value};
 
 /// A value could not be decoded into the requested Rust type.
@@ -35,19 +37,21 @@ impl DecodeError {
 
 impl fmt::Display for DecodeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.column {
-            Some(c) => write!(f, "column `{c}`: {}", self.message),
-            None => f.write_str(&self.message),
+        if let Some(column) = self.column {
+            write!(f, "column `{column}`: ")?;
         }
+
+        f.write_str(&self.message)
     }
 }
 
 impl std::error::Error for DecodeError {}
 
 /// A driver could not produce a value from a row.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum RowError {
     /// The row has fewer columns than the query projected.
+    #[error("column index {index} out of range (row has {len} columns)")]
     IndexOutOfRange {
         /// The requested column.
         index: usize,
@@ -55,72 +59,46 @@ pub enum RowError {
         len: usize,
     },
     /// The driver could not read the value.
+    #[error("{0}")]
     Driver(String),
 }
 
-impl fmt::Display for RowError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            RowError::IndexOutOfRange { index, len } => {
-                write!(
-                    f,
-                    "column index {index} out of range (row has {len} columns)"
-                )
-            }
-            RowError::Driver(msg) => f.write_str(msg),
-        }
+impl RowError {
+    /// Values of `ty` need a cargo feature (`chrono`, `uuid`) that is not
+    /// enabled.
+    pub fn not_enabled(ty: SqlType) -> Self {
+        RowError::Driver(format!(
+            "{ty:?} values need the `{}` feature",
+            ty.feature().unwrap_or("?")
+        ))
     }
 }
-
-impl std::error::Error for RowError {}
 
 /// Rows or an affected-row count could not be shaped into the query's result type.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ResultError {
     /// `T` expected exactly one row; none matched.
+    #[error("expected exactly one row, found none")]
     NotFound,
     /// `T` or `Option<T>` expected at most one row; more matched.
+    #[error("expected at most one row, found more")]
     TooManyRows,
     /// The executor produced rows where a count was expected, or vice versa.
+    #[error("executor output does not match the query's result shape")]
     ShapeMismatch,
     /// A column could not be read.
-    Row(RowError),
+    #[error(transparent)]
+    Row(#[from] RowError),
     /// A column could not be decoded into its field type.
-    Decode(DecodeError),
+    #[error(transparent)]
+    Decode(#[from] DecodeError),
 }
-
-impl From<RowError> for ResultError {
-    fn from(e: RowError) -> Self {
-        ResultError::Row(e)
-    }
-}
-
-impl From<DecodeError> for ResultError {
-    fn from(e: DecodeError) -> Self {
-        ResultError::Decode(e)
-    }
-}
-
-impl fmt::Display for ResultError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ResultError::NotFound => f.write_str("expected exactly one row, found none"),
-            ResultError::TooManyRows => f.write_str("expected at most one row, found more"),
-            ResultError::ShapeMismatch => {
-                f.write_str("executor output does not match the query's result shape")
-            }
-            ResultError::Row(e) => e.fmt(f),
-            ResultError::Decode(e) => e.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for ResultError {}
 
 /// Errors raised by a DSL function's lowering or evaluation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum DslError {
     /// The function has no lowering for the dialect.
+    #[error("`{function}` is not supported on dialect {dialect:?}")]
     Unsupported {
         /// The function's name.
         function: &'static str,
@@ -128,6 +106,7 @@ pub enum DslError {
         dialect: DialectId,
     },
     /// The function was called with the wrong number of arguments.
+    #[error("`{function}` takes {expected} arguments, got {got}")]
     Arity {
         /// The function's name.
         function: &'static str,
@@ -137,6 +116,7 @@ pub enum DslError {
         got: usize,
     },
     /// Any other failure.
+    #[error("{0}")]
     Other(String),
 }
 
@@ -147,35 +127,17 @@ impl DslError {
     }
 }
 
-impl fmt::Display for DslError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DslError::Unsupported { function, dialect } => {
-                write!(f, "`{function}` is not supported on dialect {dialect:?}")
-            }
-            DslError::Arity {
-                function,
-                expected,
-                got,
-            } => {
-                write!(f, "`{function}` takes {expected} arguments, got {got}")
-            }
-            DslError::Other(msg) => f.write_str(msg),
-        }
-    }
-}
-
-impl std::error::Error for DslError {}
-
 /// Misuse of the transaction API.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TxError {
     /// Isolation level and read-only can only be set on a top-level
     /// transaction; nested transactions are savepoints.
+    #[error("transaction options (isolation, read-only) cannot be set on a nested transaction")]
     OptionsOnNested,
     /// The dialect lacks a capability the transaction needs, e.g.
     /// `NativeRls` for `try_begin_with_security`.
+    #[error("dialect {dialect:?} does not support {capability:?}")]
     Unsupported {
         /// The executor's dialect.
         dialect: DialectId,
@@ -184,18 +146,129 @@ pub enum TxError {
     },
 }
 
-impl fmt::Display for TxError {
+/// Why a [`DbConfig`](crate::config::DbConfig) could not be turned into a
+/// connection pool.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConnectError {
+    /// `driver` names no registered driver.
+    #[error(
+        "no driver named `{name}` is registered (registered: {})",
+        registered(available)
+    )]
+    UnknownDriver {
+        /// The requested name.
+        name: String,
+        /// Registered drivers, as `name (schemes)`.
+        available: Vec<String>,
+    },
+    /// No registered driver accepts the URL's scheme.
+    #[error(
+        "no registered driver accepts `{scheme}:` URLs (registered: {})",
+        registered(available)
+    )]
+    UnknownScheme {
+        /// The URL's scheme.
+        scheme: String,
+        /// Registered drivers, as `name (schemes)`.
+        available: Vec<String>,
+    },
+    /// The URL is malformed or doesn't fit the driver.
+    #[error("invalid database URL: {0}")]
+    InvalidUrl(String),
+    /// A pool setting or driver option is invalid or unknown.
+    #[error("invalid database option `{key}`: {message}")]
+    InvalidOption {
+        /// The option's key.
+        key: String,
+        /// What is wrong with it.
+        message: String,
+    },
+    /// The driver could not open its first connection.
+    #[error("could not connect: {0}")]
+    Connect(#[source] DynError),
+}
+
+fn registered(available: &[String]) -> String {
+    if available.is_empty() {
+        return "none; enable a driver feature of `rupa` (sqlite, postgres, mysql, ..)".to_owned();
+    }
+
+    available.join(", ")
+}
+
+/// Error of an erased executor: the driver's error, boxed, plus its
+/// [`ResultError`] if it was one, so `NotFound` & co. stay inspectable.
+#[derive(Debug)]
+pub struct DynError {
+    inner: Box<dyn StdError + Send + Sync>,
+    result: Option<ResultError>,
+}
+
+impl DynError {
+    /// Wraps a driver error.
+    pub fn new<E: ExecError>(e: E) -> Self {
+        let result = e.result_error().cloned();
+        Self {
+            inner: Box::new(e),
+            result,
+        }
+    }
+
+    /// Wraps any error that is not an executor error (a pool timeout, a
+    /// configuration problem).
+    pub fn other(e: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
+        Self {
+            inner: e.into(),
+            result: None,
+        }
+    }
+
+    /// The wrapped error, e.g. to downcast to the driver's error type.
+    pub fn into_inner(self) -> Box<dyn StdError + Send + Sync> {
+        self.inner
+    }
+
+    /// The wrapped error, by reference.
+    pub fn get_ref(&self) -> &(dyn StdError + Send + Sync + 'static) {
+        &*self.inner
+    }
+
+    /// The wrapped error as `T`, if it is one.
+    pub fn downcast_ref<T: StdError + 'static>(&self) -> Option<&T> {
+        self.inner.downcast_ref()
+    }
+}
+
+impl fmt::Display for DynError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TxError::OptionsOnNested => f.write_str(
-                "transaction options (isolation, read-only) cannot be set on a nested transaction",
-            ),
-            TxError::Unsupported {
-                dialect,
-                capability,
-            } => write!(f, "dialect {dialect:?} does not support {capability:?}"),
+        self.inner.fmt(f)
+    }
+}
+
+impl StdError for DynError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(&*self.inner)
+    }
+}
+
+impl From<ResultError> for DynError {
+    fn from(e: ResultError) -> Self {
+        Self {
+            inner: Box::new(e.clone()),
+            result: Some(e),
         }
     }
 }
 
-impl std::error::Error for TxError {}
+impl From<TxError> for DynError {
+    fn from(e: TxError) -> Self {
+        Self::other(e)
+    }
+}
+
+impl ExecError for DynError {
+    fn result_error(&self) -> Option<&ResultError> {
+        self.result.as_ref()
+    }
+}

@@ -8,8 +8,16 @@ license.workspace = true
 description = "Synchronous RUPA executor on the postgres crate"
 
 [features]
-# `PgPool` (on r2d2) and the registry driver `PgDriver`.
-pool = ["dep:r2d2"]
+default = ["chrono", "uuid"]
+# Date, time and UUID columns.
+chrono = ["rupa-driver-tokio-postgres/chrono", "postgres/with-chrono-0_4"]
+uuid = ["rupa-driver-tokio-postgres/uuid", "postgres/with-uuid-1"]
+# `PgPool` (on r2d2).
+pool = ["dep:r2d2", "rupa-core/r2d2"]
+# The registry driver `PgDriver`, for run-time driver selection.
+dynamic = ["pool", "rupa-core/dynamic", "rupa-core/async"]
+# TLS on rustls (ring, webpki roots): `sslmode=prefer|require` in the URL is honoured.
+tls-rustls = ["rupa-driver-tokio-postgres/tls-rustls"]
 
 [dependencies]
 rupa-core.workspace = true
@@ -19,8 +27,8 @@ r2d2 = { workspace = true, optional = true }
 postgres.workspace = true
 
 [dev-dependencies]
-rupa-driver-postgres = { path = ".", features = ["pool"] }
+rupa-driver-postgres = { path = ".", features = ["dynamic"] }
 rupa-conformance = { path = "../rupa-conformance" }
-rupa = { path = "../rupa" }
+rupa = { path = "../rupa", features = ["dynamic"] }
 pollster.workspace = true
 testcontainers-modules = { workspace = true, features = ["blocking"] }

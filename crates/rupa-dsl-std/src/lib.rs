@@ -33,6 +33,7 @@ fn text_args<'a>(name: &'static str, args: &'a [Value]) -> Result<Option<Vec<&'a
             }
         }
     }
+
     Ok(Some(out))
 }
 
@@ -111,6 +112,7 @@ fn json_args<'a>(name: &'static str, args: &'a [Value]) -> Result<Option<Vec<&'a
             }
         }
     }
+
     Ok(Some(out))
 }
 

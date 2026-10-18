@@ -9,9 +9,10 @@
 //!
 //! Anything `tokio_postgres::Config` parses:
 //! `postgres://user:password@host:5432/db?application_name=app`, or the
-//! key-value form. The registry driver connects without TLS; for TLS, build a
-//! [`PgManager::with_tls`] and a [`PgPool`] yourself, then
-//! `Database::new(pool)`.
+//! key-value form. [`PgPool::connect`] uses rustls when the `tls-rustls`
+//! feature is on (the URL's `sslmode` decides), and no TLS otherwise; for
+//! another TLS setup, build a [`PgManager::with_tls`] and a [`PgPool`]
+//! yourself.
 //!
 //! # Recycling
 //!
@@ -21,17 +22,16 @@
 //! reuse, or discarded if that fails.
 
 use std::fmt;
-use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
 use deadpool::managed::{self, Metrics, RecycleError, RecycleResult};
+use rupa_core::Postgres;
 use rupa_core::config::{DbConfig, PoolConfig};
-use rupa_core::erased::{BoxFuture, DynError};
+use rupa_core::error::{ConnectError, DynError};
+use rupa_core::exec::BoxFuture;
+use rupa_core::pool::deadpool::{self as glue, Expiry};
 use rupa_core::pool::{AsyncPool, OwnedAsyncTx, PoolStatus, Pooled};
-use rupa_core::registry::{ConnectError, Database, Driver};
 use rupa_core::tx::AsyncTxConnection;
-use rupa_core::{DialectId, Postgres};
 use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
 use tokio_postgres::{NoTls, Socket};
 
@@ -55,8 +55,7 @@ pub struct PgManager {
     config: tokio_postgres::Config,
     connect: Arc<ConnectFn>,
     statement_cache_size: Option<usize>,
-    idle_timeout: Option<Duration>,
-    max_lifetime: Option<Duration>,
+    expiry: Expiry,
 }
 
 impl PgManager {
@@ -65,8 +64,8 @@ impl PgManager {
         Self::with_tls(config, NoTls)
     }
 
-    /// Connects with `tls` (e.g. `postgres-native-tls` or
-    /// `tokio-postgres-rustls` connectors).
+    /// Connects with `tls`, e.g. a `tokio-postgres-rustls` connector (see
+    /// `shared::rustls` with the `tls-rustls` feature).
     pub fn with_tls<T>(config: tokio_postgres::Config, tls: T) -> Self
     where
         T: MakeTlsConnect<Socket> + Clone + Send + Sync + 'static,
@@ -90,22 +89,14 @@ impl PgManager {
             config,
             statement_cache_size: None,
             connect: Arc::new(connect),
-            idle_timeout: None,
-            max_lifetime: None,
+            expiry: Expiry::default(),
         }
     }
 
-    /// Discards connections idle for longer than `timeout` when they are
-    /// next checked out.
-    pub fn idle_timeout(mut self, timeout: Option<Duration>) -> Self {
-        self.idle_timeout = timeout;
-        self
-    }
-
-    /// Discards connections older than `lifetime` when they are next checked
-    /// out.
-    pub fn max_lifetime(mut self, lifetime: Option<Duration>) -> Self {
-        self.max_lifetime = lifetime;
+    /// Discards connections that are too old or were idle too long when
+    /// they are recycled.
+    pub fn expiry(mut self, expiry: Expiry) -> Self {
+        self.expiry = expiry;
         self
     }
 
@@ -134,8 +125,7 @@ impl fmt::Debug for PgManager {
             .field("hosts", &self.config.get_hosts())
             .field("dbname", &self.config.get_dbname())
             .field("user", &self.config.get_user())
-            .field("idle_timeout", &self.idle_timeout)
-            .field("max_lifetime", &self.max_lifetime)
+            .field("expiry", &self.expiry)
             .finish_non_exhaustive()
     }
 }
@@ -153,17 +143,9 @@ impl managed::Manager for PgManager {
         if conn.client().is_closed() {
             return Err(RecycleError::message("connection closed"));
         }
-        if self.max_lifetime.is_some_and(|max| metrics.age() > max) {
-            return Err(RecycleError::message("connection reached max_lifetime"));
-        }
-        if self
-            .idle_timeout
-            .is_some_and(|max| metrics.last_used() > max)
-        {
-            return Err(RecycleError::message(
-                "connection idle for longer than idle_timeout",
-            ));
-        }
+
+        self.expiry.check(metrics)?;
+
         conn.clean().await.map_err(RecycleError::Backend)
     }
 }
@@ -181,34 +163,27 @@ impl PgPool {
     /// Builds a pool from `manager` with `config`'s sizing and timeouts, and
     /// opens the first connection (so bad credentials fail here).
     pub async fn new(manager: PgManager, config: &PoolConfig) -> Result<Self, PgError> {
-        let manager = manager
-            .idle_timeout(config.idle_timeout)
-            .max_lifetime(config.max_lifetime);
-        let pool = managed::Pool::builder(manager)
-            .max_size(config.max_size as usize)
-            .wait_timeout(config.acquire_timeout)
-            .create_timeout(config.acquire_timeout)
-            .runtime(deadpool::Runtime::Tokio1)
+        let manager = manager.expiry(Expiry::from_config(config));
+        let pool = glue::builder(manager, config, config.max_size)
             .build()
             .map_err(|e| PgError::Pool(Box::new(e)))?;
         let pool = Self::from_deadpool(pool);
+
         drop(pool.get().await?);
+
         Ok(pool)
     }
 
     /// Builds a pool for a `postgres:` URL with the config's
     /// [`PostgresOptions`](rupa_core::config::PostgresOptions), without TLS.
     pub async fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
-        let mut pg = tokio_postgres::Config::from_str(&config.url)
-            .map_err(|e| ConnectError::InvalidUrl(e.to_string()))?;
-        let options = config.driver.postgres()?;
-        if let Some(name) = &options.application_name {
-            pg.application_name(name);
-        }
-        if let Some(timeout) = options.connect_timeout {
-            pg.connect_timeout(timeout);
-        }
-        let manager = PgManager::new(pg).statement_cache_size(options.statement_cache_size);
+        let (pg, statement_cache_size) = crate::shared::pg_config(config)?;
+        #[cfg(feature = "tls-rustls")]
+        let manager = PgManager::with_tls(pg, crate::shared::rustls()?);
+        #[cfg(not(feature = "tls-rustls"))]
+        let manager = PgManager::new(pg);
+        let manager = manager.statement_cache_size(statement_cache_size);
+
         Self::new(manager, &config.pool)
             .await
             .map_err(|e| ConnectError::Connect(DynError::new(e)))
@@ -245,46 +220,10 @@ impl AsyncPool for PgPool {
     }
 
     async fn get(&self) -> Result<PgConn, PgError> {
-        match self.pool.get().await {
-            Ok(conn) => Ok(Pooled::new(conn)),
-            Err(managed::PoolError::Backend(e)) => Err(e),
-            Err(e) => Err(PgError::Pool(Box::new(e))),
-        }
+        glue::get(&self.pool, PgError::Pool).await
     }
 
     fn status(&self) -> PoolStatus {
-        let status = self.pool.status();
-        let as_u32 = |n: usize| u32::try_from(n).unwrap_or(u32::MAX);
-        PoolStatus {
-            max_size: as_u32(status.max_size),
-            size: as_u32(status.size),
-            idle: as_u32(status.available),
-        }
-    }
-}
-
-/// The registry entry for this driver: name `postgres`, schemes
-/// `postgres` and `postgresql`. Builds a [`PgPool`] without TLS.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PgDriver;
-
-impl Driver for PgDriver {
-    fn name(&self) -> &'static str {
-        "postgres"
-    }
-
-    fn dialect(&self) -> DialectId {
-        DialectId::Postgres
-    }
-
-    fn schemes(&self) -> &'static [&'static str] {
-        &["postgres", "postgresql"]
-    }
-
-    fn connect<'a>(
-        &'a self,
-        config: &'a DbConfig,
-    ) -> BoxFuture<'a, Result<Database, ConnectError>> {
-        Box::pin(async move { PgPool::connect(config).await.map(Database::new) })
+        glue::status(&self.pool)
     }
 }

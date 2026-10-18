@@ -8,31 +8,83 @@ license.workspace = true
 description = "Rust Unified Persistence API: explicit, attribute-driven repositories over any SQL database"
 
 [features]
-nightly = ["rupa-core/nightly"]
+default = ["chrono", "uuid"]
 
-# Drivers. Each enabled driver is registered in `rupa::registry()`, so a
-# `DbConfig` URL can select it at run time; its crate is re-exported under
-# `rupa::drivers`.
-# Async Postgres (tokio-postgres + deadpool); serves `postgres:` URLs.
-postgres = ["dep:rupa-driver-tokio-postgres", "rupa-driver-tokio-postgres/pool"]
-# Sync Postgres (postgres + r2d2); select with `driver = "postgres"`.
+# Column types. Each is forwarded to every enabled driver.
+chrono = [
+    "rupa-core/chrono",
+    "rupa-driver-tokio-postgres?/chrono",
+    "rupa-driver-postgres?/chrono",
+    "rupa-driver-rusqlite?/chrono",
+    "rupa-driver-mysql?/chrono",
+    "rupa-driver-sqlx?/chrono",
+    "rupa-driver-memory?/chrono",
+]
+uuid = [
+    "rupa-core/uuid",
+    "rupa-driver-tokio-postgres?/uuid",
+    "rupa-driver-postgres?/uuid",
+    "rupa-driver-rusqlite?/uuid",
+    "rupa-driver-mysql?/uuid",
+    "rupa-driver-sqlx?/uuid",
+    "rupa-driver-memory?/uuid",
+]
+
+# Async executors, transactions, pools and repositories (`async fn` in
+# `#[repository]`). Runtime-agnostic: no runtime is compiled in by this alone.
+async = [
+    "rupa-core/async",
+    "rupa-macros/async",
+    "dep:pollster",
+    "rupa-driver-memory?/async",
+]
+# Sync methods of async repositories block with tokio's `block_in_place`
+# (multi-threaded runtime) instead of a minimal local executor.
+tokio = ["async", "dep:tokio"]
+# Run-time driver selection and type erasure: `rupa::registry()`,
+# `rupa::connect`, `Database`, the boxed executors and each enabled driver's
+# registry entry. Off by default: a statically typed pool or executor has no
+# erasure overhead.
+dynamic = [
+    "async",
+    "rupa-core/dynamic",
+    "rupa-driver-tokio-postgres?/dynamic",
+    "rupa-driver-postgres?/dynamic",
+    "rupa-driver-rusqlite?/dynamic",
+    "rupa-driver-mysql?/dynamic",
+    "rupa-driver-sqlx?/dynamic",
+    "rupa-driver-memory?/dynamic",
+]
+
+# Drivers; each crate is re-exported under `rupa::drivers`.
+# Async Postgres (tokio-postgres + deadpool).
+postgres = ["async", "dep:rupa-driver-tokio-postgres", "rupa-driver-tokio-postgres/pool"]
+# Sync Postgres (postgres + r2d2); cannot run inside a tokio runtime.
 postgres-sync = ["dep:rupa-driver-postgres", "rupa-driver-postgres/pool"]
-# SQLite (rusqlite + r2d2, SQLite compiled in); serves `sqlite:` URLs.
-sqlite = ["dep:rupa-driver-rusqlite", "rupa-driver-rusqlite/pool"]
-# MySQL 8 (mysql + r2d2); serves `mysql:` URLs.
+# SQLite (rusqlite + r2d2), compiled from source.
+sqlite = ["sqlite-unbundled", "rupa-driver-rusqlite/bundled"]
+# SQLite (rusqlite + r2d2), linking the system SQLite (3.38+).
+sqlite-unbundled = ["dep:rupa-driver-rusqlite", "rupa-driver-rusqlite/pool"]
+# Sync MySQL 8 (mysql + r2d2).
 mysql = ["dep:rupa-driver-mysql", "rupa-driver-mysql/pool"]
-# The in-memory backend; serves `memory:` URLs (tests, prototypes).
+# The in-memory backend (tests, prototypes).
 memory = ["dep:rupa-driver-memory"]
-# Async drivers on sqlx (+ deadpool). Each serves its scheme when the driver
-# above isn't enabled, or when selected with `driver = "sqlx-.."`.
-sqlx-postgres = ["dep:rupa-driver-sqlx", "rupa-driver-sqlx/postgres", "rupa-driver-sqlx/pool"]
-sqlx-mysql = ["dep:rupa-driver-sqlx", "rupa-driver-sqlx/mysql", "rupa-driver-sqlx/pool"]
-# SQLite compiled in, run on sqlx's per-connection worker threads.
-sqlx-sqlite = ["dep:rupa-driver-sqlx", "rupa-driver-sqlx/sqlite", "rupa-driver-sqlx/pool"]
-# TLS for the sqlx drivers (configured in the URL).
-sqlx-tls-rustls = ["rupa-driver-sqlx?/tls-rustls"]
-sqlx-tls-native-tls = ["rupa-driver-sqlx?/tls-native-tls"]
-# Every driver.
+# Async drivers on sqlx (+ deadpool).
+sqlx-postgres = ["async", "dep:rupa-driver-sqlx", "rupa-driver-sqlx/postgres", "rupa-driver-sqlx/pool"]
+sqlx-mysql = ["async", "dep:rupa-driver-sqlx", "rupa-driver-sqlx/mysql", "rupa-driver-sqlx/pool"]
+# SQLite on sqlx's per-connection worker threads, compiled from source.
+sqlx-sqlite = ["async", "dep:rupa-driver-sqlx", "rupa-driver-sqlx/sqlite", "rupa-driver-sqlx/pool"]
+# SQLite on sqlx, linking the system SQLite.
+sqlx-sqlite-unbundled = ["async", "dep:rupa-driver-sqlx", "rupa-driver-sqlx/sqlite-unbundled", "rupa-driver-sqlx/pool"]
+# TLS (rustls, configured in the URL) for every enabled networked driver.
+# native-tls is not offered: it pulls in OpenSSL on Linux.
+tls-rustls = [
+    "rupa-driver-tokio-postgres?/tls-rustls",
+    "rupa-driver-postgres?/tls-rustls",
+    "rupa-driver-mysql?/tls-rustls",
+    "rupa-driver-sqlx?/tls-rustls",
+]
+# Every driver, with run-time selection.
 full = [
     "postgres",
     "postgres-sync",
@@ -42,13 +94,11 @@ full = [
     "sqlx-postgres",
     "sqlx-mysql",
     "sqlx-sqlite",
+    "dynamic",
 ]
 
 # DI integrations. Each is one optional dep + one feature; never default.
 upwell = ["dep:rupa-upwell"]
-# Sync methods of async repositories block with tokio's `block_in_place`
-# (multi-threaded runtime) instead of a minimal local executor.
-tokio = ["dep:tokio"]
 
 [dependencies]
 rupa-core.workspace = true
@@ -62,13 +112,38 @@ rupa-driver-rusqlite = { workspace = true, optional = true }
 rupa-driver-mysql = { workspace = true, optional = true }
 rupa-driver-memory = { workspace = true, optional = true }
 rupa-driver-sqlx = { workspace = true, optional = true }
-pollster.workspace = true
+pollster = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["rt-multi-thread"] }
 
 [dev-dependencies]
-rupa-driver-memory = { path = "../rupa-driver-memory" }
+rupa = { path = ".", features = ["memory", "dynamic"] }
+rupa-driver-memory = { path = "../rupa-driver-memory", features = ["dynamic"] }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
 pollster.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[[example]]
+name = "sqlite_crud"
+required-features = ["sqlite"]
+
+[[example]]
+name = "sqlite_joins"
+required-features = ["sqlite"]
+
+[[example]]
+name = "sqlite_dsl"
+required-features = ["sqlite"]
+
+[[example]]
+name = "sqlite_repository"
+required-features = ["sqlite"]
+
+[[example]]
+name = "sqlite_config"
+required-features = ["sqlite", "dynamic"]
+
+[[example]]
+name = "sqlite_async"
+required-features = ["sqlx-sqlite"]

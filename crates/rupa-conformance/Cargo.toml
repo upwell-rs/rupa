@@ -9,7 +9,7 @@ publish = false
 description = "Shared behavioural test suite run against every RUPA driver"
 
 [dependencies]
-rupa = { path = "../rupa" }
+rupa = { path = "../rupa", features = ["dynamic"] }
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true

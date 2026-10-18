@@ -57,6 +57,7 @@ pub fn gettable(input: DeriveInput) -> syn::Result<TokenStream> {
             "Gettable projections (`entity = ..`) are not supported yet",
         ));
     }
+
     let ident = &input.ident;
     Ok(quote!(impl #ms::Gettable<#ident> for #ident {}))
 }
@@ -70,6 +71,7 @@ pub fn deletable(input: DeriveInput) -> syn::Result<TokenStream> {
             "Deletable on companion structs (`entity = ..`) is not supported yet",
         ));
     }
+
     let ident = &input.ident;
     Ok(quote! {
         impl #ms::Deletable<#ident> for #ident {
@@ -80,6 +82,7 @@ pub fn deletable(input: DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
+/// The entity inserts itself; generated columns are left to the database.
 pub fn insertable(input: DeriveInput) -> syn::Result<TokenStream> {
     model::reject_generics(&input, "Insertable")?;
     let ms = model::support_path(&input)?;
@@ -87,7 +90,6 @@ pub fn insertable(input: DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
 
     let Some(entity) = model::companion_entity(&input, "insertable")? else {
-        // The entity inserts itself; generated columns are left to the database.
         let me = quote!(#ident);
         let pairs = fields.iter().filter(|f| !f.generated).map(|f| {
             let fi = &f.ident;
@@ -109,6 +111,7 @@ pub fn insertable(input: DeriveInput) -> syn::Result<TokenStream> {
             "`#[id]` has no meaning on an Insertable struct; include the id field like any other, or leave it out if generated",
         ));
     }
+
     let target = quote!(#entity);
     let pairs = fields.iter().map(|f| {
         let fi = &f.ident;
@@ -130,6 +133,7 @@ pub fn insertable(input: DeriveInput) -> syn::Result<TokenStream> {
     })
 }
 
+/// Full update by id: every column except the id and generated ones.
 pub fn updatable(input: DeriveInput) -> syn::Result<TokenStream> {
     model::reject_generics(&input, "Updatable")?;
     let ms = model::support_path(&input)?;
@@ -137,7 +141,6 @@ pub fn updatable(input: DeriveInput) -> syn::Result<TokenStream> {
     let ident = &input.ident;
 
     let Some(entity) = model::companion_entity(&input, "updatable")? else {
-        // Full update by id: every column except the id and generated ones.
         let id = fields.iter().find(|f| f.id).ok_or_else(|| {
             syn::Error::new_spanned(ident, "Updatable on an entity needs its `#[id]` field")
         })?;
@@ -176,10 +179,12 @@ pub fn updatable(input: DeriveInput) -> syn::Result<TokenStream> {
                     "composite ids are not supported yet",
                 ));
             }
+
             checks.push(field_check(&ms, &entity, f, &f.ty));
             key = Some(f);
             continue;
         }
+
         let Some(inner) = option_inner(&f.ty) else {
             return Err(syn::Error::new(
                 f.span(),

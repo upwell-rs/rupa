@@ -53,6 +53,7 @@ pub fn support_path(input: &DeriveInput) -> syn::Result<TokenStream> {
             })?;
         }
     }
+
     Ok(match krate {
         Some(p) => quote!(#p::__macro_support),
         None => quote!(::rupa::__macro_support),
@@ -137,6 +138,7 @@ pub fn fields(input: &DeriveInput, what: &str) -> syn::Result<Vec<Field>> {
                                 "unknown `column` option; expected `name = \"..\"`, `scalar`, `json`, `generated`, `references = Entity` or `relation = name`",
                             ));
                         }
+
                         Ok(())
                     })?;
                     if let (Some(relation), None) = (&field.relation, &field.references) {
@@ -147,6 +149,7 @@ pub fn fields(input: &DeriveInput, what: &str) -> syn::Result<Vec<Field>> {
                     }
                 }
             }
+
             Ok(field)
         })
         .collect()
@@ -158,10 +161,12 @@ pub fn option_inner(ty: &Type) -> Option<&Type> {
     if p.qself.is_some() {
         return None;
     }
+
     let last = p.path.segments.last()?;
     if last.ident != "Option" {
         return None;
     }
+
     let PathArguments::AngleBracketed(args) = &last.arguments else {
         return None;
     };
@@ -207,6 +212,7 @@ pub fn companion_entity(input: &DeriveInput, name: &str) -> syn::Result<Option<P
             })?;
         }
     }
+
     Ok(entity)
 }
 

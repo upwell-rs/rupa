@@ -6,7 +6,7 @@ error[E0277]: a `references` field must hold the referenced entity's id (`i64`),
   |
   = help: the trait `RefersTo<i64>` is not implemented for `String`
 help: the trait `RefersTo<T>` is implemented for `Option<T>`
- --> $WORKSPACE/crates/rupa-core/src/join.rs
+ --> $WORKSPACE/crates/rupa-core/src/join/relation.rs
   |
   | impl<T> RefersTo<T> for Option<T> {}
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

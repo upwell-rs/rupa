@@ -17,225 +17,38 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "async")]
+mod asynchronous;
+#[cfg(feature = "dynamic")]
+mod driver;
+mod error;
 mod eval;
 #[cfg(test)]
 mod join_tests;
+mod table;
 
 use std::collections::HashMap;
-use std::fmt;
-use std::future::Future;
 
 use rupa_core::column::ColumnMeta;
-use rupa_core::config::{DbConfig, DriverConfig};
 use rupa_core::dialect::Memory;
-use rupa_core::erased::BoxFuture;
-use rupa_core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
+use rupa_core::exec::{Executor, Outcome};
 use rupa_core::ir::{
-    ColumnRef, Delete, FromClause, Insert, JoinKind, Select, SourceId, Statement, TableRef,
-    TxStatement, Update,
+    Delete, FromClause, Insert, JoinKind, Select, Statement, TableRef, TxStatement, Update,
 };
-use rupa_core::registry::{ConnectError, Database, Driver};
 use rupa_core::row::ValueRows;
-use rupa_core::tx::{AsyncTx, AsyncTxConnection, Tx, TxConnection};
-use rupa_core::{DslError, Entity, Expect, ResultError, SqlType, TxError, Value};
+use rupa_core::tx::{Tx, TxConnection};
+use rupa_core::{Entity, Expect, SqlType, Value};
 
-use eval::{Scope, eval, keeps, sort_cmp};
+#[cfg(feature = "async")]
+pub use asynchronous::{AsyncMemoryDb, AsyncMemoryTx};
+#[cfg(feature = "dynamic")]
+pub use driver::MemoryDriver;
+pub use error::MemoryError;
+use eval::{eval, keeps, sort_cmp};
+use table::{JoinScope, JoinedRow, NoRow, RowScope, Sources, Table};
 
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-/// Everything that can go wrong evaluating a statement in memory.
-pub enum MemoryError {
-    /// The table was never registered.
-    NoSuchTable(TableRef),
-    /// The table has no such column.
-    NoSuchColumn(&'static str),
-    /// A column names a row source the statement doesn't have.
-    NoSuchSource(SourceId),
-    /// An insert or update would duplicate a primary key.
-    DuplicateKey(TableRef),
-    /// `NULL` in a `NOT NULL` column.
-    NotNull(&'static str),
-    /// A value has the wrong type for an operation.
-    Type(String),
-    /// The statement uses something the backend can't evaluate (raw SQL,
-    /// a DSL function without `eval`, ..).
-    Unsupported(String),
-    /// A DSL function failed.
-    Dsl(DslError),
-    /// The rows did not fit the query's result type.
-    Result(ResultError),
-    /// A write inside a read-only transaction.
-    ReadOnly,
-    /// The transaction API was misused.
-    Tx(TxError),
-}
-
-impl fmt::Display for MemoryError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MemoryError::NoSuchTable(t) => write!(f, "no such table {t:?}"),
-            MemoryError::NoSuchColumn(c) => write!(f, "no such column `{c}`"),
-            MemoryError::NoSuchSource(s) => write!(f, "no row source {}", s.0),
-            MemoryError::DuplicateKey(t) => write!(f, "duplicate primary key in {t:?}"),
-            MemoryError::NotNull(c) => write!(f, "NULL in NOT NULL column `{c}`"),
-            MemoryError::Type(m) => write!(f, "type error: {m}"),
-            MemoryError::Unsupported(m) => write!(f, "unsupported by the memory backend: {m}"),
-            MemoryError::Dsl(e) => e.fmt(f),
-            MemoryError::Result(e) => e.fmt(f),
-            MemoryError::ReadOnly => f.write_str("cannot write in a read-only transaction"),
-            MemoryError::Tx(e) => e.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for MemoryError {}
-
-impl From<ResultError> for MemoryError {
-    fn from(e: ResultError) -> Self {
-        MemoryError::Result(e)
-    }
-}
-
-impl From<TxError> for MemoryError {
-    fn from(e: TxError) -> Self {
-        MemoryError::Tx(e)
-    }
-}
-
-impl From<DslError> for MemoryError {
-    fn from(e: DslError) -> Self {
-        MemoryError::Dsl(e)
-    }
-}
-
-impl ExecError for MemoryError {
-    fn result_error(&self) -> Option<&ResultError> {
-        match self {
-            MemoryError::Result(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Table {
-    columns: Vec<ColumnMeta>,
-    key: Vec<usize>,
-    rows: Vec<Vec<Value>>,
-    /// Last value handed out per generated integer column (identity semantics).
-    sequences: HashMap<usize, i64>,
-}
-
-impl Table {
-    fn index(&self, name: &'static str) -> Result<usize, MemoryError> {
-        self.columns
-            .iter()
-            .position(|c| c.name == name)
-            .ok_or(MemoryError::NoSuchColumn(name))
-    }
-
-    /// Validates `row` against NOT NULL and the primary key; `skip` is the
-    /// row's own index when it is already in the table.
-    fn check(&self, name: TableRef, row: &[Value], skip: Option<usize>) -> Result<(), MemoryError> {
-        for (meta, v) in self.columns.iter().zip(row) {
-            if v.is_null() && !meta.nullable {
-                return Err(MemoryError::NotNull(meta.name));
-            }
-        }
-        if !self.key.is_empty() {
-            let key = |r: &[Value]| self.key.iter().map(|&i| r[i].clone()).collect::<Vec<_>>();
-            let k = key(row);
-            let dup = self
-                .rows
-                .iter()
-                .enumerate()
-                .any(|(i, r)| Some(i) != skip && key(r) == k);
-            if dup {
-                return Err(MemoryError::DuplicateKey(name));
-            }
-        }
-        Ok(())
-    }
-}
-
-struct RowScope<'a> {
-    table: &'a Table,
-    row: &'a [Value],
-}
-
-impl Scope for RowScope<'_> {
-    fn column(&self, col: ColumnRef) -> Result<Value, MemoryError> {
-        if col.source != SourceId(0) {
-            return Err(MemoryError::NoSuchSource(col.source));
-        }
-        Ok(self.row[self.table.index(col.name)?].clone())
-    }
-}
-
-/// One row of a select's sources: a row per source, `None` where a left
-/// join found no match.
-type JoinedRow<'a> = Vec<Option<&'a Vec<Value>>>;
-
-/// The tables a select reads, by source.
-struct Sources<'a>(Vec<&'a Table>);
-
-impl<'a> Sources<'a> {
-    fn new(db: &'a MemoryDb, from: &FromClause) -> Result<Self, MemoryError> {
-        let tables = match from {
-            FromClause::Table(t) => vec![db.table(*t)?],
-            FromClause::Join { base, joins } => std::iter::once(*base)
-                .chain(joins.iter().map(|j| j.table))
-                .map(|t| db.table(t))
-                .collect::<Result<_, _>>()?,
-        };
-        Ok(Self(tables))
-    }
-
-    /// Where `col` lives: its source and its index in that source's rows.
-    fn locate(&self, col: ColumnRef) -> Result<(usize, usize), MemoryError> {
-        let source = usize::from(col.source.0);
-        let table = self
-            .0
-            .get(source)
-            .ok_or(MemoryError::NoSuchSource(col.source))?;
-        Ok((source, table.index(col.name)?))
-    }
-
-    /// `col` of `row`; typed `NULL` for a source a left join left unmatched.
-    /// While a join's `ON` is evaluated, `row` holds only the sources joined so
-    /// far, so a later source is `NoSuchSource` too.
-    fn value(&self, row: &[Option<&Vec<Value>>], col: ColumnRef) -> Result<Value, MemoryError> {
-        let (source, index) = self.locate(col)?;
-        match row.get(source) {
-            None => Err(MemoryError::NoSuchSource(col.source)),
-            Some(Some(r)) => Ok(r[index].clone()),
-            Some(None) => Ok(Value::Null(self.0[source].columns[index].sql_type)),
-        }
-    }
-}
-
-struct JoinScope<'s, 'a> {
-    sources: &'s Sources<'a>,
-    row: &'s [Option<&'a Vec<Value>>],
-}
-
-impl Scope for JoinScope<'_, '_> {
-    fn column(&self, col: ColumnRef) -> Result<Value, MemoryError> {
-        self.sources.value(self.row, col)
-    }
-}
-
-/// Scope for expressions evaluated without a row (`LIMIT`, `OFFSET`).
-struct NoRow;
-
-impl Scope for NoRow {
-    fn column(&self, col: ColumnRef) -> Result<Value, MemoryError> {
-        Err(MemoryError::NoSuchColumn(col.name))
-    }
-}
-
-/// An in-memory database: a synchronous [`Executor`]. For an
-/// [`AsyncExecutor`], use [`AsyncMemoryDb`] (`db.into_async()`).
+/// An in-memory database: a synchronous [`Executor`]. With the `async`
+/// feature, `db.into_async()` makes it an async executor (`AsyncMemoryDb`).
 #[derive(Debug, Clone, Default)]
 pub struct MemoryDb {
     tables: HashMap<TableRef, Table>,
@@ -306,6 +119,7 @@ impl MemoryDb {
         if writes && self.read_only {
             return Err(MemoryError::ReadOnly);
         }
+
         match statement {
             Statement::Select(s) => {
                 let (sources, rows) = self.select_rows(s)?;
@@ -377,12 +191,14 @@ impl MemoryDb {
                             next.push(candidate);
                         }
                     }
+
                     if !matched && join.kind == JoinKind::Left {
                         let mut padded = partial;
                         padded.push(None);
                         next.push(padded);
                     }
                 }
+
                 joined = next;
             }
         }
@@ -435,11 +251,13 @@ impl MemoryDb {
                         return ord;
                     }
                 }
+
                 std::cmp::Ordering::Equal
             });
             if let Some(e) = err {
                 return Err(e);
             }
+
             rows = keyed.into_iter().map(|(_, r)| r).collect();
         }
 
@@ -462,6 +280,9 @@ impl MemoryDb {
     }
 
     /// Inserts rows and returns them, as stored, in insertion order.
+    ///
+    /// Build on a copy and swap it in at the end: a failed multi-row insert
+    /// leaves no partial result, as in Postgres.
     fn insert(&mut self, i: &Insert) -> Result<Vec<Vec<Value>>, MemoryError> {
         let table = self.table_mut(i.table)?;
         let idx = i
@@ -469,8 +290,6 @@ impl MemoryDb {
             .iter()
             .map(|c| table.index(c))
             .collect::<Result<Vec<_>, _>>()?;
-        // Build on a copy and swap it in at the end: a failed multi-row insert
-        // leaves no partial result, as in Postgres.
         let mut next = table.clone();
         let mut inserted = Vec::with_capacity(i.rows.len());
         for exprs in &i.rows {
@@ -482,6 +301,7 @@ impl MemoryDb {
             for (&col, e) in idx.iter().zip(exprs) {
                 row[col] = eval(&NoRow, e)?;
             }
+
             for (col, meta) in next.columns.iter().enumerate() {
                 if meta.generated && !idx.contains(&col) {
                     let seq = next.sequences.entry(col).or_insert(0);
@@ -503,14 +323,17 @@ impl MemoryDb {
                     };
                 }
             }
+
             next.check(i.table, &row, None)?;
             next.rows.push(row.clone());
             inserted.push(row);
         }
+
         *table = next;
         Ok(inserted)
     }
 
+    /// Every SET expression sees the row as it was before the update.
     fn update(&mut self, u: &Update) -> Result<u64, MemoryError> {
         let table = self.table(u.table)?;
         let set = u
@@ -522,22 +345,25 @@ impl MemoryDb {
         for (i, row) in table.rows.iter().enumerate() {
             let scope = RowScope { table, row };
             if keeps(&scope, u.filter.as_ref())? {
-                // Every SET expression sees the row as it was before the update.
                 let mut new = row.clone();
                 for (col, e) in &set {
                     new[*col] = eval(&scope, e)?;
                 }
+
                 changes.push((i, new));
             }
         }
+
         let table = self.table_mut(u.table)?;
         let mut next = table.clone();
         for (i, new) in &changes {
             next.rows[*i] = new.clone();
         }
+
         for (i, new) in &changes {
             next.check(u.table, new, Some(*i))?;
         }
+
         *table = next;
         Ok(changes.len() as u64)
     }
@@ -548,6 +374,7 @@ impl MemoryDb {
         for row in &table.rows {
             keep.push(!keeps(&RowScope { table, row }, d.filter.as_ref())?);
         }
+
         let table = self.table_mut(d.table)?;
         let before = table.rows.len();
         let mut it = keep.into_iter();
@@ -569,81 +396,9 @@ impl Executor for MemoryDb {
     }
 }
 
-/// The memory backend as an [`AsyncExecutor`]. A separate type so that each
-/// backend type implements exactly one executor trait, and `.run` is never
-/// ambiguous with both traits in scope.
-#[derive(Debug, Clone, Default)]
-pub struct AsyncMemoryDb(MemoryDb);
-
-impl AsyncMemoryDb {
-    /// An empty database: register tables before use.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Creates (or empties) the table for `E`.
-    pub fn register<E: Entity>(&mut self) -> &mut Self {
-        self.0.register::<E>();
-        self
-    }
-
-    /// The sync database underneath.
-    pub fn inner(&self) -> &MemoryDb {
-        &self.0
-    }
-
-    /// The sync database underneath, mutably.
-    pub fn inner_mut(&mut self) -> &mut MemoryDb {
-        &mut self.0
-    }
-
-    /// The sync database underneath, by value.
-    pub fn into_inner(self) -> MemoryDb {
-        self.0
-    }
-}
-
-impl From<MemoryDb> for AsyncMemoryDb {
-    fn from(db: MemoryDb) -> Self {
-        Self(db)
-    }
-}
-
-impl MemoryDb {
-    /// The same database, as an async executor.
-    pub fn into_async(self) -> AsyncMemoryDb {
-        AsyncMemoryDb(self)
-    }
-}
-
-impl AsyncExecutor for AsyncMemoryDb {
-    type Dialect = Memory;
-    type Error = MemoryError;
-
-    fn dialect(&self) -> &Memory {
-        &self.0.dialect
-    }
-
-    fn execute(
-        &mut self,
-        statement: &Statement,
-        _expect: Expect,
-    ) -> impl Future<Output = Result<Outcome, MemoryError>> + Send {
-        std::future::ready(self.0.run_statement(statement))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Transactions: a stack of table snapshots.
-// ---------------------------------------------------------------------------
-
 /// A transaction (or, nested, a savepoint) on a [`MemoryDb`]. Rolled back
 /// when dropped without `commit`.
 pub type MemoryTx<'t> = Tx<&'t mut MemoryDb>;
-
-/// A transaction (or, nested, a savepoint) on an [`AsyncMemoryDb`]. Rolled
-/// back when dropped without `commit` (immediately: nothing to await).
-pub type AsyncMemoryTx<'t> = AsyncTx<&'t mut AsyncMemoryDb>;
 
 impl MemoryDb {
     /// Applies a transaction-control statement to the snapshot stack.
@@ -666,6 +421,7 @@ impl MemoryDb {
                 }
             }
         }
+
         if self.snapshots.is_empty() {
             self.read_only = false;
         }
@@ -678,8 +434,8 @@ impl TxConnection for MemoryDb {
         Ok(())
     }
 
+    /// Nothing can fail in memory: roll back right away.
     fn defer_rollback(&mut self, depth: u32) {
-        // Nothing can fail in memory: roll back right away.
         self.control_now(rupa_core::tx::rollback_to(depth));
     }
 
@@ -689,114 +445,5 @@ impl TxConnection for MemoryDb {
 
     fn clean(&mut self) -> Result<(), MemoryError> {
         Ok(())
-    }
-}
-
-impl AsyncTxConnection for AsyncMemoryDb {
-    fn control(
-        &mut self,
-        statement: TxStatement,
-    ) -> impl Future<Output = Result<(), MemoryError>> + Send {
-        std::future::ready(TxConnection::control(&mut self.0, statement))
-    }
-
-    fn defer_rollback(&mut self, depth: u32) {
-        TxConnection::defer_rollback(&mut self.0, depth);
-    }
-
-    fn is_dirty(&self) -> bool {
-        false
-    }
-
-    fn clean(&mut self) -> impl Future<Output = Result<(), MemoryError>> + Send {
-        std::future::ready(Ok(()))
-    }
-}
-
-impl From<MemoryError> for rupa_core::DynError {
-    fn from(e: MemoryError) -> Self {
-        rupa_core::DynError::new(e)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Registry
-// ---------------------------------------------------------------------------
-
-type SetupFn = dyn Fn(&mut MemoryDb) + Send + Sync;
-
-/// The registry entry for the memory backend: name `memory`, scheme
-/// `memory` (`memory:` is a complete URL).
-///
-/// Each `connect` creates a fresh, empty database served as a single shared
-/// connection ([`Database::single`]); pool settings are ignored. Tables must
-/// be registered before use, so give the driver a [`setup`](Self::setup)
-/// function:
-///
-/// ```ignore
-/// let registry = Registry::new().with(MemoryDriver::new().setup(|db| {
-///     db.register::<User>();
-/// }));
-/// ```
-#[derive(Clone, Default)]
-pub struct MemoryDriver {
-    setup: Option<std::sync::Arc<SetupFn>>,
-}
-
-impl MemoryDriver {
-    /// A driver whose databases start without tables.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Runs `f` on every new database, e.g. to register tables or seed rows.
-    pub fn setup(mut self, f: impl Fn(&mut MemoryDb) + Send + Sync + 'static) -> Self {
-        self.setup = Some(std::sync::Arc::new(f));
-        self
-    }
-}
-
-impl fmt::Debug for MemoryDriver {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MemoryDriver")
-            .field("setup", &self.setup.is_some())
-            .finish()
-    }
-}
-
-impl Driver for MemoryDriver {
-    fn name(&self) -> &'static str {
-        "memory"
-    }
-
-    fn dialect(&self) -> rupa_core::DialectId {
-        rupa_core::DialectId::Memory
-    }
-
-    fn schemes(&self) -> &'static [&'static str] {
-        &["memory"]
-    }
-
-    fn connect<'a>(
-        &'a self,
-        config: &'a DbConfig,
-    ) -> BoxFuture<'a, Result<Database, ConnectError>> {
-        let database = match &config.driver {
-            DriverConfig::Auto | DriverConfig::Memory => {
-                let mut db = MemoryDb::new();
-                if let Some(setup) = &self.setup {
-                    setup(&mut db);
-                }
-                Ok(Database::single(db.into_async()))
-            }
-            other => Err(ConnectError::InvalidOption {
-                key: "driver".into(),
-                message: format!(
-                    "the memory driver was given options for `{}`",
-                    other.name().unwrap_or("auto")
-                ),
-            }),
-        };
-        Box::pin(std::future::ready(database))
     }
 }
