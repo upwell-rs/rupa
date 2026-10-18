@@ -6,7 +6,7 @@ error[E0277]: JSON path access requires a JSON column, but this column's kind is
   |
   = help: the trait `IsJson` is not implemented for `rupa_core::Scalar`
 help: the trait `IsJson` is implemented for `rupa_core::Json`
- --> src/column.rs
+ --> src/column/mod.rs
   |
   | impl IsJson for Json {}
   | ^^^^^^^^^^^^^^^^^^^^

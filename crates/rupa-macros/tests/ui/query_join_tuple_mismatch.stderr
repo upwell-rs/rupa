@@ -7,7 +7,7 @@ error[E0271]: type mismatch resolving `<Vec<(User, Order)> as RowsResult>::Item 
    = note: expected tuple `(User, Option<Order>)`
               found tuple `(User, Order)`
 note: required by a bound in `JoinBuilder::<S, R>::build`
-  --> $WORKSPACE/crates/rupa-core/src/join.rs
+  --> $WORKSPACE/crates/rupa-core/src/join/build.rs
    |
    |     pub fn build<Res: RowsResult<Item = R>>(self) -> Query<Res> {
    |                                  ^^^^^^^^ required by this bound in `JoinBuilder::<S, R>::build`

@@ -25,7 +25,7 @@ note: required for `View` to implement `rupa::rupa_core::Joined<(User, Order), (
    = help: consider manually implementing `rupa::rupa_core::Joined<(User, Order), ((At<0>, rupa::rupa_core::Inner), (_, _))>` to avoid undesired bounds caused by "imperfect derives"
    = note: to learn more, visit <https://github.com/rust-lang/rust/issues/26925>
 note: required by a bound in `IntoJoined::<R, V>::all`
-  --> $WORKSPACE/crates/rupa-core/src/join.rs
+  --> $WORKSPACE/crates/rupa-core/src/join/merged.rs
    |
    |     pub fn all<M>(self) -> Query<Vec<V>>
    |            --- required by a bound in this associated function

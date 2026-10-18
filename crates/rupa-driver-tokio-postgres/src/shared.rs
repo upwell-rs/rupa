@@ -3,87 +3,19 @@
 //! `postgres::Error` are re-exports of tokio-postgres').
 
 use std::error::Error as StdError;
-use std::fmt;
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use hashlink::LruCache;
 use postgres_types::{IsNull, ToSql, Type, to_sql_checked};
-use rupa_core::exec::ExecError;
-use rupa_core::lru::LruCache;
 use rupa_core::row::RowCursor;
-use rupa_core::{ResultError, RowError, SqlType, TxError, Value};
-use rupa_sql::RenderError;
+use rupa_core::{RowError, SqlType, Value};
 
-/// Everything that can go wrong running a statement on Postgres.
-#[derive(Debug)]
-#[non_exhaustive]
-pub enum PgError {
-    /// The statement could not be rendered as Postgres SQL.
-    Render(RenderError),
-    /// Postgres (or the connection) reported an error.
-    Db(tokio_postgres::Error),
-    /// The rows did not fit the query's result type.
-    Result(ResultError),
-    /// The transaction API was misused.
-    Tx(TxError),
-    /// No pooled connection could be obtained (e.g. a timeout).
-    Pool(Box<dyn StdError + Send + Sync>),
-}
-
-impl fmt::Display for PgError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PgError::Render(e) => write!(f, "rendering failed: {e}"),
-            PgError::Db(e) => e.fmt(f),
-            PgError::Result(e) => e.fmt(f),
-            PgError::Tx(e) => e.fmt(f),
-            PgError::Pool(e) => write!(f, "connection pool: {e}"),
-        }
-    }
-}
-
-impl StdError for PgError {
-    fn source(&self) -> Option<&(dyn StdError + 'static)> {
-        match self {
-            PgError::Render(e) => Some(e),
-            PgError::Db(e) => Some(e),
-            PgError::Result(e) => Some(e),
-            PgError::Tx(e) => Some(e),
-            PgError::Pool(e) => Some(&**e),
-        }
-    }
-}
-
-impl From<RenderError> for PgError {
-    fn from(e: RenderError) -> Self {
-        PgError::Render(e)
-    }
-}
-
-impl From<tokio_postgres::Error> for PgError {
-    fn from(e: tokio_postgres::Error) -> Self {
-        PgError::Db(e)
-    }
-}
-
-impl From<TxError> for PgError {
-    fn from(e: TxError) -> Self {
-        PgError::Tx(e)
-    }
-}
-
-impl From<ResultError> for PgError {
-    fn from(e: ResultError) -> Self {
-        PgError::Result(e)
-    }
-}
-
-impl ExecError for PgError {
-    fn result_error(&self) -> Option<&ResultError> {
-        match self {
-            PgError::Result(e) => Some(e),
-            _ => None,
-        }
+rupa_sql::driver_error! {
+    /// Everything that can go wrong running a statement on Postgres.
+    pub enum PgError {
+        /// Postgres (or the connection) reported an error.
+        Db(tokio_postgres::Error),
     }
 }
 
@@ -117,18 +49,23 @@ impl ToSql for Param<'_> {
             Value::F64(v) => v.to_sql_checked(ty, out),
             Value::Text(v) => v.to_sql_checked(ty, out),
             Value::Bytes(v) => v.to_sql_checked(ty, out),
+            #[cfg(feature = "uuid")]
             Value::Uuid(v) => v.to_sql_checked(ty, out),
+            #[cfg(feature = "chrono")]
             Value::Date(v) => v.to_sql_checked(ty, out),
+            #[cfg(feature = "chrono")]
             Value::Time(v) => v.to_sql_checked(ty, out),
+            #[cfg(feature = "chrono")]
             Value::Timestamp(v) => v.to_sql_checked(ty, out),
+            #[cfg(feature = "chrono")]
             Value::TimestampTz(v) => v.to_sql_checked(ty, out),
             Value::Json(v) => v.to_sql_checked(ty, out),
             other => Err(format!("unsupported parameter value {other:?}").into()),
         }
     }
 
+    /// Per-value checks happen in `to_sql`.
     fn accepts(_: &Type) -> bool {
-        // Per-value checks happen in `to_sql`.
         true
     }
 
@@ -185,14 +122,21 @@ pub fn read(row: &tokio_postgres::Row, index: usize, want: SqlType) -> Result<Va
         },
         SqlType::Text => get!(String).map_or(null, Value::Text),
         SqlType::Bytes => get!(Vec<u8>).map_or(null, Value::Bytes),
+        #[cfg(feature = "uuid")]
         SqlType::Uuid => get!(uuid::Uuid).map_or(null, Value::Uuid),
+        #[cfg(feature = "chrono")]
         SqlType::Date => get!(chrono::NaiveDate).map_or(null, Value::Date),
+        #[cfg(feature = "chrono")]
         SqlType::Time => get!(chrono::NaiveTime).map_or(null, Value::Time),
+        #[cfg(feature = "chrono")]
         SqlType::Timestamp => get!(chrono::NaiveDateTime).map_or(null, Value::Timestamp),
+        #[cfg(feature = "chrono")]
         SqlType::TimestampTz => {
             get!(chrono::DateTime<chrono::Utc>).map_or(null, Value::TimestampTz)
         }
         SqlType::Json => get!(serde_json::Value).map_or(null, Value::Json),
+        #[cfg(not(all(feature = "chrono", feature = "uuid")))]
+        other => return Err(RowError::not_enabled(other)),
     })
 }
 
@@ -226,12 +170,6 @@ impl RowCursor for PgRows {
     fn next_row(&mut self) -> Option<Result<&dyn rupa_core::Row, RowError>> {
         self.current = Some(PgRow(self.rows.next()?));
         self.current.as_ref().map(|r| Ok(r as &dyn rupa_core::Row))
-    }
-}
-
-impl From<PgError> for rupa_core::DynError {
-    fn from(e: PgError) -> Self {
-        rupa_core::DynError::new(e)
     }
 }
 
@@ -306,4 +244,43 @@ impl StatementCache {
     pub fn set_capacity(&mut self, capacity: usize) {
         self.statements.set_capacity(capacity);
     }
+}
+
+/// The connection settings for a `postgres:` URL, with the config's
+/// [`PostgresOptions`](rupa_core::config::PostgresOptions) applied.
+pub fn pg_config(
+    config: &rupa_core::config::DbConfig,
+) -> Result<(tokio_postgres::Config, Option<usize>), rupa_core::ConnectError> {
+    let mut pg = config
+        .url
+        .parse::<tokio_postgres::Config>()
+        .map_err(|e| rupa_core::ConnectError::InvalidUrl(e.to_string()))?;
+    let options = config.driver.postgres()?;
+
+    if let Some(name) = &options.application_name {
+        pg.application_name(name);
+    }
+
+    if let Some(timeout) = options.connect_timeout {
+        pg.connect_timeout(timeout);
+    }
+
+    Ok((pg, options.statement_cache_size))
+}
+
+/// A TLS connector on rustls (ring, Mozilla's root certificates). The URL's
+/// `sslmode` decides whether TLS is used (`prefer`, the default, tries it).
+#[cfg(feature = "tls-rustls")]
+pub fn rustls() -> Result<tokio_postgres_rustls::MakeRustlsConnect, rupa_core::ConnectError> {
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let roots = rustls::RootCertStore {
+        roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+    };
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|e| rupa_core::ConnectError::Connect(rupa_core::DynError::other(e)))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+
+    Ok(tokio_postgres_rustls::MakeRustlsConnect::new(config))
 }

@@ -117,5 +117,6 @@ async fn statement_cache_size_is_configurable() {
             .await
             .unwrap();
     }
+
     assert_eq!(conn.cached_statements(), 2, "least recently used dropped");
 }

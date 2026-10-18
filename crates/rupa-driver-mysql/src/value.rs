@@ -3,23 +3,30 @@
 //! UUIDs and JSON travel as text; `DateTime<Utc>` is stored as a UTC
 //! `DATETIME(6)`; `bool` as `TINYINT(1)`.
 
+#[cfg(feature = "chrono")]
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use rupa_core::{RowCursor, RowError, SqlType, Value};
 
-pub(crate) fn to_mysql(v: &Value) -> mysql::Value {
+use crate::MySqlError;
+
+/// A MySQL `DATETIME` value.
+#[cfg(feature = "chrono")]
+fn datetime(t: &NaiveDateTime) -> mysql::Value {
+    mysql::Value::Date(
+        t.year() as u16,
+        t.month() as u8,
+        t.day() as u8,
+        t.hour() as u8,
+        t.minute() as u8,
+        t.second() as u8,
+        t.nanosecond() / 1000,
+    )
+}
+
+pub(crate) fn to_mysql(v: &Value) -> Result<mysql::Value, MySqlError> {
     use mysql::Value as M;
-    let datetime = |t: &NaiveDateTime| {
-        M::Date(
-            t.year() as u16,
-            t.month() as u8,
-            t.day() as u8,
-            t.hour() as u8,
-            t.minute() as u8,
-            t.second() as u8,
-            t.nanosecond() / 1000,
-        )
-    };
-    match v {
+
+    Ok(match v {
         Value::Null(_) => M::NULL,
         Value::Bool(b) => M::Int(i64::from(*b)),
         Value::I16(n) => M::Int(i64::from(*n)),
@@ -29,8 +36,11 @@ pub(crate) fn to_mysql(v: &Value) -> mysql::Value {
         Value::F64(n) => M::Double(*n),
         Value::Text(s) => M::Bytes(s.clone().into_bytes()),
         Value::Bytes(b) => M::Bytes(b.clone()),
+        #[cfg(feature = "uuid")]
         Value::Uuid(u) => M::Bytes(u.hyphenated().to_string().into_bytes()),
+        #[cfg(feature = "chrono")]
         Value::Date(d) => M::Date(d.year() as u16, d.month() as u8, d.day() as u8, 0, 0, 0, 0),
+        #[cfg(feature = "chrono")]
         Value::Time(t) => M::Time(
             false,
             0,
@@ -39,11 +49,17 @@ pub(crate) fn to_mysql(v: &Value) -> mysql::Value {
             t.second() as u8,
             t.nanosecond() / 1000,
         ),
+        #[cfg(feature = "chrono")]
         Value::Timestamp(t) => datetime(t),
+        #[cfg(feature = "chrono")]
         Value::TimestampTz(t) => datetime(&t.naive_utc()),
         Value::Json(j) => M::Bytes(j.to_string().into_bytes()),
-        other => unreachable!("value {other:?} needs a rupa-core feature this driver enables"),
-    }
+        other => {
+            return Err(MySqlError::Bind(format!(
+                "{other:?}: enable the driver's matching feature"
+            )));
+        }
+    })
 }
 
 fn from_mysql(v: &mysql::Value, want: SqlType) -> Result<Value, RowError> {
@@ -58,6 +74,7 @@ fn from_mysql(v: &mysql::Value, want: SqlType) -> Result<Value, RowError> {
             _ => Err(bad()),
         }
     };
+    #[cfg(feature = "chrono")]
     let datetime = |v: &M| match v {
         M::Date(y, mo, d, h, mi, s, us) => {
             NaiveDate::from_ymd_opt(i32::from(*y), u32::from(*mo), u32::from(*d))
@@ -78,13 +95,18 @@ fn from_mysql(v: &mysql::Value, want: SqlType) -> Result<Value, RowError> {
         (SqlType::F32 | SqlType::F64, M::Float(f)) => Value::F64(f64::from(*f)),
         (SqlType::Text, M::Bytes(b)) => Value::Text(text(b)?),
         (SqlType::Bytes, M::Bytes(b)) => Value::Bytes(b.clone()),
+        #[cfg(feature = "uuid")]
         (SqlType::Uuid, M::Bytes(b)) => Value::Uuid(text(b)?.parse().map_err(|_| bad())?),
+        #[cfg(feature = "chrono")]
         (SqlType::Date, v) => Value::Date(datetime(v)?.date()),
+        #[cfg(feature = "chrono")]
         (SqlType::Time, M::Time(_, _, h, m, s, us)) => Value::Time(
             NaiveTime::from_hms_micro_opt(u32::from(*h), u32::from(*m), u32::from(*s), *us)
                 .ok_or_else(bad)?,
         ),
+        #[cfg(feature = "chrono")]
         (SqlType::Timestamp, v) => Value::Timestamp(datetime(v)?),
+        #[cfg(feature = "chrono")]
         (SqlType::TimestampTz, v) => Value::TimestampTz(datetime(v)?.and_utc()),
         (SqlType::Json, M::Bytes(b)) => Value::Json(serde_json::from_slice(b).map_err(|_| bad())?),
         _ => return Err(bad()),

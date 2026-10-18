@@ -38,6 +38,20 @@ pub enum SqlType {
     Json,
 }
 
+impl SqlType {
+    /// The cargo feature values of this type need (`"chrono"`, `"uuid"`), if
+    /// any.
+    pub const fn feature(self) -> Option<&'static str> {
+        match self {
+            SqlType::Uuid => Some("uuid"),
+            SqlType::Date | SqlType::Time | SqlType::Timestamp | SqlType::TimestampTz => {
+                Some("chrono")
+            }
+            _ => None,
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 /// A runtime value: a bound parameter, or a decoded column.

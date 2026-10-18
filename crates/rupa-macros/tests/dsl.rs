@@ -118,7 +118,7 @@ fn runtime_checked_functions_work_with_a_dynamic_dialect() {
         #[query(filter = dsl::ilike(email, $pattern), order_by = id)]
         async fn search(&self, pattern: &str) -> Result<Vec<User>, DynError>;
     }
-    let boxed = rupa::core::exec::BoxAsyncExecutor::new(db().into_async());
+    let boxed = rupa::BoxAsyncExecutor::new(db().into_async());
     let repo: Arc<dyn Search> = Arc::new(Repo::shared_async(boxed));
     let found = pollster::block_on(repo.search("%EXAMPLE%")).unwrap();
     assert_eq!(found.iter().map(|u| u.id).collect::<Vec<_>>(), [1, 3]);

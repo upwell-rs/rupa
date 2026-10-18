@@ -8,7 +8,7 @@ error[E0277]: this field can't hold the column `rupa::Column<User, String, rupa:
   |
   = note: a `#[from(..)]` field has its column's type, or an `Option` of it
 help: `rupa::Column<E, T, K>` implements trait `ReadAs<F>`
- --> $WORKSPACE/crates/rupa-core/src/column.rs
+ --> $WORKSPACE/crates/rupa-core/src/column/mod.rs
   |
   | impl<E, T, K> ReadAs<T> for Column<E, T, K> {
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ReadAs<T>`

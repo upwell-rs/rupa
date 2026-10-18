@@ -1,10 +1,11 @@
 //! Synchronous RUPA executor on the [`postgres`] crate.
 //!
 //! - [`PgExecutor`] wraps one `postgres::Client`.
-//! - With the `pool` feature, [`PgPool`] pools them (on `r2d2`) and
-//!   [`PgDriver`] registers the driver as `postgres-sync` (see
-//!   `rupa_core::registry`; select it with `driver = "postgres-sync"`, since
-//!   the async driver is preferred for `postgres:` URLs).
+//! - With the `pool` feature, [`PgPool`] pools them (on `r2d2`).
+//! - With the `dynamic` feature, `PgDriver` registers the driver as
+//!   `postgres-sync` (see `rupa_core::registry`; select it with
+//!   `driver = "postgres-sync"`, since the async driver is preferred for
+//!   `postgres:` URLs).
 //!
 //! # Performance
 //!
@@ -27,6 +28,8 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "dynamic")]
+mod driver;
 #[cfg(feature = "pool")]
 pub mod pool;
 
@@ -41,8 +44,10 @@ use rupa_core::query::Expect;
 use rupa_core::tx::{PendingRollback, Tx, TxConnection};
 use rupa_driver_tokio_postgres::shared::{Param, PgRows};
 
+#[cfg(feature = "dynamic")]
+pub use driver::PgDriver;
 #[cfg(feature = "pool")]
-pub use pool::{PgConn, PgDriver, PgManager, PgPool, PgPoolTx};
+pub use pool::{PgConn, PgManager, PgPool, PgPoolTx};
 pub use rupa_driver_tokio_postgres::{PgError, STATEMENT_CACHE_CAPACITY, StatementCache};
 
 /// A transaction (or savepoint) on a [`PgExecutor`]. Rolled back when dropped
@@ -97,23 +102,26 @@ impl PgExecutor {
         if let Some(statement) = self.statements.get(sql) {
             return Ok(statement);
         }
+
         let statement = self.client.prepare(sql)?;
         self.statements.insert(sql.clone(), statement.clone());
         Ok(statement)
     }
 
+    /// Rendered SQL is cached by statement shape, prepared statements by
+    /// SQL text: a repeated query skips both rendering and parsing.
+    ///
+    /// The statement may be stale; prepare it afresh next time.
     fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
         self.clean()?;
-        // Rendered SQL is cached by statement shape, prepared statements by
-        // SQL text: a repeated query skips both rendering and parsing.
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let prepared = self.prepare(&rendered.sql)?;
         let params: Vec<Param<'_>> = rendered.params.iter().map(Param).collect();
         let result = self.query(&prepared, &params, expect);
         if result.is_err() {
-            // The statement may be stale; prepare it afresh next time.
             self.statements.evict(&rendered.sql);
         }
+
         result
     }
 
@@ -128,6 +136,7 @@ impl PgExecutor {
         if expect == Expect::Affected {
             return Ok(Outcome::Affected(self.client.execute(statement, &refs)?));
         }
+
         let rows = match expect.fetch_limit() {
             None => self.client.query(statement, &refs)?,
             Some(limit) => self
@@ -184,6 +193,7 @@ impl TxConnection for PgExecutor {
                 .batch_execute(&rupa_sql::render_tx(&statement, &self.dialect)?)?;
             self.pending.clear();
         }
+
         Ok(())
     }
 }

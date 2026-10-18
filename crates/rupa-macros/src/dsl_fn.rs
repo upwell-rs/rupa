@@ -39,6 +39,7 @@ fn generic_arg<'a>(ty: &'a Type, name: &str) -> Option<&'a Type> {
     if last.ident != name {
         return None;
     }
+
     let PathArguments::AngleBracketed(a) = &last.arguments else {
         return None;
     };
@@ -55,6 +56,11 @@ fn is_dyn_dialect(ty: &Type) -> bool {
     )))
 }
 
+/// Parameters: optional leading `dialect: &dyn Dialect`, then `name: Expr<T>`.
+///
+/// Return: `Expr<R>` or `Result<Expr<R>, DslError>`.
+///
+/// The user's body, kept as an inner function with its own signature.
 pub fn function(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let mut requires: Vec<Ident> = Vec::new();
     let mut eval: Option<syn::Path> = None;
@@ -81,6 +87,7 @@ pub fn function(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream
                 "unknown option; expected `requires = Capability`, `eval = path`, `name = \"..\"` or `crate = path`",
             ));
         }
+
         Ok(())
     });
     parser.parse2(args)?;
@@ -99,18 +106,19 @@ pub fn function(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream
              gate it statically with `requires = Capability`",
         ));
     }
+
     if let Some(a) = &sig.asyncness {
         return Err(syn::Error::new_spanned(
             a,
             "a DSL function's lowering is synchronous",
         ));
     }
+
     let fname = &sig.ident;
     let display = name.map(|n| n.value()).unwrap_or_else(|| fname.to_string());
     let vis = &func.vis;
     let attrs = &func.attrs;
 
-    // Parameters: optional leading `dialect: &dyn Dialect`, then `name: Expr<T>`.
     let mut inputs = sig.inputs.iter().peekable();
     let mut takes_dialect = false;
     if let Some(FnArg::Typed(pt)) = inputs.peek()
@@ -119,6 +127,7 @@ pub fn function(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream
         takes_dialect = true;
         inputs.next();
     }
+
     let mut params: Vec<(Ident, Type)> = Vec::new();
     for arg in inputs {
         let FnArg::Typed(pt) = arg else {
@@ -142,7 +151,6 @@ pub fn function(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream
         params.push((pi.ident.clone(), inner.clone()));
     }
 
-    // Return: `Expr<R>` or `Result<Expr<R>, DslError>`.
     let ReturnType::Type(_, ret) = &sig.output else {
         return Err(syn::Error::new_spanned(
             sig,
@@ -160,7 +168,6 @@ pub fn function(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream
         ));
     };
 
-    // The user's body, kept as an inner function with its own signature.
     let body = &func.block;
     let inner_inputs = &sig.inputs;
     let inner_output = &sig.output;
@@ -226,6 +233,7 @@ pub fn function(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream
                             got: args.len(),
                         });
                     }
+
                     let mut args = args.into_iter();
                     #(let #arg_names = #ms::Expr::<#arg_types>::from_node(args.next().unwrap());)*
                     #lowered

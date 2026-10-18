@@ -125,6 +125,7 @@ async fn titles(db: &Database) -> Vec<String> {
         .collect()
 }
 
+/// Nested savepoints work on owned transactions too.
 async fn db_owned_tx_commits_and_rolls_back(db: &Database) {
     let mut tx = db.begin().await.unwrap();
     add(&mut tx, &note("kept")).await;
@@ -132,7 +133,6 @@ async fn db_owned_tx_commits_and_rolls_back(db: &Database) {
 
     let mut tx = db.begin().await.unwrap();
     add(&mut tx, &note("gone")).await;
-    // Nested savepoints work on owned transactions too.
     let mut inner = tx.begin().await.unwrap();
     add(&mut inner, &note("inner")).await;
     inner.commit().await.unwrap();
@@ -141,12 +141,12 @@ async fn db_owned_tx_commits_and_rolls_back(db: &Database) {
     assert_eq!(titles(db).await, ["kept"]);
 }
 
+/// Dropped while open: the connection goes back to the pool owing a
+/// rollback, which must happen before anyone else uses it.
 async fn db_dropped_owned_tx_rolls_back_before_reuse(db: &Database) {
     {
         let mut tx = db.begin().await.unwrap();
         add(&mut tx, &note("gone")).await;
-        // Dropped while open: the connection goes back to the pool owing a
-        // rollback, which must happen before anyone else uses it.
     }
     let mut tx = db.begin().await.unwrap();
     add(&mut tx, &note("next")).await;
@@ -185,10 +185,10 @@ async fn db_secure_tx_is_checked_at_run_time(db: &Database) {
     }
 }
 
+/// One at a time: a single-connection database has only one.
 async fn db_connections_return_to_the_pool(db: &Database) {
     let before = db.status();
     {
-        // One at a time: a single-connection database has only one.
         let _conn = db.get().await.unwrap();
         assert_eq!(db.status().in_use(), before.in_use() + 1);
     }

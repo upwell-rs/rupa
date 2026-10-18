@@ -43,25 +43,65 @@ pub trait UserRepository: Send + Sync {
     async fn create(&self, user: &NewUser) -> Result<User, rupa::DynError>;
 }
 
-let db = rupa::connect(&DbConfig::new("postgres://app@localhost/app")).await?;   // a pool
+let db = PgPool::connect(&DbConfig::new("postgres://app@localhost/app")).await?;   // a pool
 let users: Arc<dyn UserRepository> = Arc::new(Repo::new(db));
 ```
 
-See [`crates/rupa/examples/tour.rs`](crates/rupa/examples/tour.rs) for a
-runnable tour (`cargo run -p rupa --example tour`, no database needed).
+## Examples
+
+See [`docs/architecture.md`](docs/architecture.md) for how a query flows
+through the crates. The small examples below use SQLite in memory; they need
+no database server, Docker, or database file.
+
+| Example | What it shows | Run |
+|---|---|---|
+| [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
+| [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
+| [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |
+| [DSL and JSON](crates/rupa/examples/sqlite_dsl.rs) | Custom DSL lowering, JSON paths, dialect rendering, bound parameters | `cargo run -p rupa --example sqlite_dsl --features sqlite` |
+| [Dynamic connection](crates/rupa/examples/sqlite_config.rs) | `DbConfig`, runtime driver selection, raw DDL, async pooled repository | `cargo run -p rupa --example sqlite_config --features sqlite,dynamic` |
+| [Async companion](crates/rupa/examples/sqlite_async.rs) | The same `Task`, insert and get API on an async executor | `cargo run -p rupa --example sqlite_async --features sqlx-sqlite` |
+
+The main examples use synchronous SQLite. The async companion shows API parity
+with a native async driver; for SQLite workloads, the synchronous driver is
+the faster default.
+
+Native row-level security needs Postgres. Its end-to-end coverage lives in the
+[sync](crates/rupa-driver-postgres/tests/rls.rs) and
+[async](crates/rupa-driver-tokio-postgres/tests/rls.rs) testcontainers tests.
+
+## Features
+
+Nothing is compiled that you didn't ask for. The default build is the sync,
+statically typed core with `chrono` and `uuid` column types; everything else
+is a cargo feature of `rupa`:
+
+| feature | adds |
+|---|---|
+| `async` | async executors, transactions, pools and `async fn` repository methods (no runtime by itself) |
+| `dynamic` | run-time driver selection and type erasure: `rupa::connect`, `rupa::registry()`, `Database`, boxed executors |
+| `tokio` | sync methods of async repositories block with tokio's `block_in_place` |
+| `tls-rustls` | TLS on rustls (ring) for every enabled networked driver |
+| `full` | every driver, plus `dynamic` |
+
+Most applications know their database: use its pool directly
+(`rupa::drivers::sqlite::SqlitePool`, `rupa::drivers::postgres::PgPool`), which
+is statically dispatched. `dynamic` is for the cases that pick a database
+from configuration at run time.
 
 ## Backends
 
-Enable drivers with cargo features of `rupa`; each one is registered in
-`rupa::registry()`, so a configuration can pick it at run time.
+Each driver is a cargo feature of `rupa`, re-exported under `rupa::drivers`.
+With `dynamic`, it is also registered in `rupa::registry()`, so a
+configuration can pick it at run time.
 
 | backend | feature | driver | sync/async | pool |
 |---|---|---|---|---|
 | Postgres | `postgres` | `rupa-driver-tokio-postgres` | async | deadpool |
 | Postgres | `sqlx-postgres` | `rupa-driver-sqlx` | async | deadpool |
 | Postgres | `postgres-sync` | `rupa-driver-postgres` | sync (not inside tokio) | r2d2 |
-| SQLite (3.38+) | `sqlite` | `rupa-driver-rusqlite` | sync | r2d2 |
-| SQLite (3.38+) | `sqlx-sqlite` | `rupa-driver-sqlx` | async (worker thread per connection) | deadpool |
+| SQLite (3.38+) | `sqlite` (`sqlite-unbundled`: system SQLite) | `rupa-driver-rusqlite` | sync | r2d2 |
+| SQLite (3.38+) | `sqlx-sqlite` (`sqlx-sqlite-unbundled`) | `rupa-driver-sqlx` | async (worker thread per connection) | deadpool |
 | MySQL (8.0+) | `sqlx-mysql` | `rupa-driver-sqlx` | async | deadpool |
 | MySQL (8.0+) | `mysql` | `rupa-driver-mysql` | sync | r2d2 |
 | In memory | `memory` | `rupa-driver-memory` | sync, async | one shared connection |
@@ -71,8 +111,8 @@ configuration names a driver (`driver = "mysql"`). Networked databases
 prefer async drivers; SQLite prefers rusqlite, which is 3–6× faster per
 statement (see [`docs/benchmarks.md`](docs/benchmarks.md), "Drivers"). A configuration that
 names a driver that isn't compiled in is served by another one for the same
-database. TLS for the sqlx drivers: `sqlx-tls-rustls` or
-`sqlx-tls-native-tls`.
+database. TLS: `tls-rustls` (native-tls is not offered, as it pulls in
+OpenSSL on Linux).
 
 Repositories with `async` methods also run on sync executors without an
 async runtime.
@@ -95,14 +135,15 @@ acquire_timeout = "5s"
 ```
 
 ```rust
-let db: rupa::Database = rupa::connect(&config.database).await?;
+let db: rupa::Database = rupa::connect(&config.database).await?;   // `dynamic`
 let mut tx = db.begin().await?;                  // owns its connection: 'static
 Repo::new(&mut tx).rename(id, "x").await?;
 tx.commit().await?;
 ```
 
-`Database` is a cheaply cloneable, type-erased pool. Each driver's pool
-(`SqlitePool`, `PgPool`, ..) can also be used directly, statically typed. See
+`Database` (feature `dynamic`) is a cheaply cloneable, type-erased pool.
+Each driver's pool (`SqlitePool`, `PgPool`, ..) takes the same `DbConfig`
+and is used directly, statically typed: `SqlitePool::connect(&config)`. See
 [`docs/design/connections.md`](docs/design/connections.md).
 
 ## Tests

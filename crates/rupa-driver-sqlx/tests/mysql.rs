@@ -43,6 +43,7 @@ async fn conformance() {
             Err(_) => tokio::time::sleep(std::time::Duration::from_millis(500)).await,
         }
     }
+
     let mut h = My(exec.expect("connect"));
     rupa_conformance::run(&mut h).await;
     rupa_conformance::run_transactions(&mut h).await;

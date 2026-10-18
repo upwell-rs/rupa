@@ -109,6 +109,7 @@ async fn pooled_connections(url: &str) {
             .await
             .unwrap();
     }
+
     assert_eq!(conn.cached_statements(), 2, "least recently used dropped");
 
     // A wrong password fails at connect, with the server's error.

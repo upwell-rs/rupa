@@ -69,7 +69,7 @@ value-dependent lowering then simply yields two shapes (tested).
 ### Bounds and concurrency
 
 `RenderCache` is 16 shards, each a `Mutex` around an O(1) LRU
-(`rupa_core::lru::LruCache`, a slab with recency links and a pass-through
+(`hashlink::LruCache`, a linked hash map in recency order, with a pass-through
 hasher, since the keys are already hashes). The lock is held for the lookup
 and an `Arc` clone only. Rendering and binding happen outside it, so
 connections on different threads rarely contend. The capacity is split evenly

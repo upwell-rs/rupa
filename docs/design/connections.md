@@ -179,6 +179,11 @@ pub async fn connect(config: &DbConfig) -> Result<Database, ConnectError>
 | `memory` | `memory` | the in-memory backend |
 | `full` | all of the above | |
 
+**Update (2026-10-18):** the registry, `Database` and each driver's registry
+entry are behind the facade's `dynamic` feature (`full` includes it). Most
+applications know their database and use its pool directly, statically
+typed; the registry is for configurations that pick one at run time.
+
 Feature, `driver` tag and registry name are the same word. For `postgres:`
 URLs the async driver is registered first, so it wins unless the config says
 `driver = "postgres-sync"`.

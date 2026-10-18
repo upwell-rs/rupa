@@ -5,11 +5,14 @@
 
 pub mod builder;
 pub mod capability;
+#[cfg(feature = "chrono")]
+pub mod chrono_text;
 pub mod column;
 pub mod config;
 pub mod dialect;
 /// Entities: tables, their ids and row decoding.
 pub mod entity;
+#[cfg(feature = "dynamic")]
 pub mod erased;
 /// Error types shared by the core and drivers.
 pub mod error;
@@ -17,9 +20,9 @@ pub mod exec;
 pub mod expr;
 pub mod ir;
 pub mod join;
-pub mod lru;
 pub mod pool;
 pub mod query;
+#[cfg(all(feature = "dynamic", feature = "async"))]
 pub mod registry;
 pub mod repo;
 pub mod row;
@@ -70,25 +73,36 @@ pub use dialect::{
     Supports,
 };
 pub use entity::{Entity, FromRow, IdValues};
-pub use erased::{BoxAsyncExecutor, BoxAsyncTx, BoxExecutor, BoxTx, DynError};
-pub use error::{DecodeError, DslError, ResultError, RowError, TxError};
-pub use exec::{AsyncExecutor, Blocking, ExecError, Executor, Outcome};
+#[cfg(all(feature = "dynamic", feature = "async"))]
+pub use erased::{BoxAsyncExecutor, BoxAsyncTx};
+#[cfg(feature = "dynamic")]
+pub use erased::{BoxExecutor, BoxTx};
+pub use error::{ConnectError, DecodeError, DslError, DynError, ResultError, RowError, TxError};
+#[cfg(feature = "async")]
+pub use exec::{AsyncExecutor, Blocking};
+pub use exec::{ExecError, Executor, Outcome};
 pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
 pub use join::{
     Admits, At, Fwd, Has, Inner, IntoJoined, JoinBuilder, JoinOnto, JoinPart, JoinTo, Joined, Left,
     OffsetRow, Opt, PartOf, PendingJoin, Plain, RefersTo, Rel, Rev, Source, Sources, Src,
     source_col,
 };
-pub use pool::{AsyncPool, OwnedAsyncTx, OwnedTx, Pool, PoolStatus, Pooled, SingleConnection};
+#[cfg(feature = "async")]
+pub use pool::{AsyncPool, OwnedAsyncTx, SingleConnection};
+pub use pool::{OwnedTx, Pool, PoolStatus, Pooled};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
-pub use registry::{ConnectError, Database, Driver, Registry};
-pub use repo::{Acquire, AcquireAsync, Repo, Shared, SharedAsync};
+#[cfg(all(feature = "dynamic", feature = "async"))]
+pub use registry::{Database, Driver, Registry};
+pub use repo::{Acquire, Repo, Shared};
+#[cfg(feature = "async")]
+pub use repo::{AcquireAsync, SharedAsync};
 pub use row::{Row, RowCursor};
-pub use security::{AsyncSecureTransactional, SecureTransactional, SecureTx, SecurityContext};
-pub use tx::{
-    AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxConnection, IsolationLevel, Transaction,
-    Transactional, Tx, TxConnection, TxOptions,
-};
+#[cfg(feature = "async")]
+pub use security::AsyncSecureTransactional;
+pub use security::{SecureTransactional, SecureTx, SecurityContext};
+#[cfg(feature = "async")]
+pub use tx::{AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxConnection};
+pub use tx::{IsolationLevel, Transaction, Transactional, Tx, TxConnection, TxOptions};
 pub use value::{ScalarColumn, SqlType, Value};
 
 /// The names most code needs: `use rupa_core::prelude::*`.

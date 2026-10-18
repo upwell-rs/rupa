@@ -3,7 +3,8 @@
 use rupa::prelude::*;
 use rupa_conformance::{Item, items};
 use rupa_core::dialect::{DialectId, Supports, caps};
-use rupa_core::exec::{AsyncExecutor, BoxAsyncExecutor, BoxExecutor, ExecError, Executor};
+use rupa_core::erased::{BoxAsyncExecutor, BoxExecutor};
+use rupa_core::exec::{AsyncExecutor, ExecError, Executor};
 use rupa_core::{Dialect, ResultError};
 use rupa_driver_memory::MemoryDb;
 

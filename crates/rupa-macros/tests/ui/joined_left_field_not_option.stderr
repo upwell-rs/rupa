@@ -7,7 +7,7 @@ error[E0277]: a field from a left-joined entity must be an `Option`
    = note: the entity's columns are `NULL` when the left join finds no match
 help: the trait `Admits<Plain>` is not implemented for `rupa::rupa_core::Left`
       but trait `Admits<Opt>` is implemented for it
-  --> $WORKSPACE/crates/rupa-core/src/join.rs
+  --> $WORKSPACE/crates/rupa-core/src/join/merged.rs
    |
    | impl Admits<Opt> for Left {}
    | ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -22,7 +22,7 @@ note: required for `View` to implement `rupa::rupa_core::Joined<(User, Option<Or
    = help: consider manually implementing `rupa::rupa_core::Joined<(User, Option<Order>), ((At<0>, rupa::rupa_core::Inner), (At<1>, rupa::rupa_core::Left))>` to avoid undesired bounds caused by "imperfect derives"
    = note: to learn more, visit <https://github.com/rust-lang/rust/issues/26925>
 note: required by a bound in `IntoJoined::<R, V>::all`
-  --> $WORKSPACE/crates/rupa-core/src/join.rs
+  --> $WORKSPACE/crates/rupa-core/src/join/merged.rs
    |
    |     pub fn all<M>(self) -> Query<Vec<V>>
    |            --- required by a bound in this associated function

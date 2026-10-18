@@ -217,6 +217,7 @@ fn repeated_queries_hit_the_render_cache() {
     for _ in 0..5 {
         count(&pool);
     }
+
     assert!(rupa::sql::render_cache().stats().hits >= before + 4);
 }
 

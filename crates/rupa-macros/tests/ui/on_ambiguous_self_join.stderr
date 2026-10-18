@@ -8,7 +8,7 @@ error[E0283]: type annotations needed
           - impl<E, S0> Has<E, At<1>> for (S0, Src<E, 1>);
           - impl<E, S1> Has<E, At<0>> for (Src<E, 0>, S1);
 note: required by a bound in `source_col`
- --> $WORKSPACE/crates/rupa-core/src/join.rs
+ --> $WORKSPACE/crates/rupa-core/src/join/build.rs
   |
   | pub fn source_col<S, E, I, T, K>(_sources: &S, column: Column<E, T, K>) -> Column<E, T, K>
   |        ---------- required by a bound in this function

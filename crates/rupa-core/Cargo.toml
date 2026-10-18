@@ -11,15 +11,24 @@ description = "Sans-IO core of RUPA: values, query IR, typed builder, entity and
 default = ["chrono", "uuid"]
 chrono = ["dep:chrono"]
 uuid = ["dep:uuid"]
-# Opt-in nightly-only conveniences. Never required.
-nightly = []
+# Async executors, transactions, pools and repositories (runtime-agnostic).
+async = ["dep:futures-util"]
+# Run-time driver selection and type erasure: `erased`, and with `async` the
+# `registry` (`Registry`, `Driver`, `Database`).
+dynamic = []
+# Pool glue for drivers built on `r2d2` / `deadpool` (tokio).
+r2d2 = ["dep:r2d2"]
+deadpool = ["async", "dep:deadpool"]
 
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
-futures-util.workspace = true
+thiserror.workspace = true
+futures-util = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
+r2d2 = { workspace = true, optional = true }
+deadpool = { workspace = true, optional = true, features = ["rt_tokio_1"] }
 
 [dev-dependencies]
 serde.workspace = true

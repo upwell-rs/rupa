@@ -1,12 +1,12 @@
 //! Synchronous RUPA executor on the [`mysql`] crate (MySQL 8.0+).
 //!
 //! - [`MySqlExecutor`] wraps one `mysql::Conn`.
-//! - With the `pool` feature, [`MySqlPool`] pools them (on `r2d2`) and
-//!   [`MySqlDriver`] registers the driver for `mysql:` URLs (see
-//!   `rupa_core::registry`).
+//! - With the `pool` feature, [`MySqlPool`] pools them (on `r2d2`).
+//! - With the `dynamic` feature, `MySqlDriver` registers the driver for
+//!   `mysql:` URLs (see `rupa_core::registry`).
 //!
-//! An async driver on sqlx is planned; this one serves async repositories
-//! through `Blocking`, like the other sync drivers.
+//! For async code, prefer the sqlx-based driver (`rupa-driver-sqlx`, feature
+//! `mysql`): this one blocks the calling thread for each round trip.
 //!
 //! # Semantics
 //!
@@ -28,6 +28,8 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "dynamic")]
+mod driver;
 mod error;
 #[cfg(feature = "pool")]
 pub mod pool;
@@ -40,9 +42,11 @@ use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
 use rupa_core::tx::{PendingRollback, Tx, TxConnection};
 
+#[cfg(feature = "dynamic")]
+pub use driver::MySqlDriver;
 pub use error::MySqlError;
 #[cfg(feature = "pool")]
-pub use pool::{MySqlConn, MySqlDriver, MySqlManager, MySqlPool, MySqlPoolTx};
+pub use pool::{MySqlConn, MySqlManager, MySqlPool, MySqlPoolTx};
 use value::{MyRows, to_mysql};
 
 /// A transaction (or savepoint) on a [`MySqlExecutor`]. Rolled back when
@@ -97,33 +101,45 @@ impl MySqlExecutor {
         for statement in sql.split(';').map(str::trim).filter(|s| !s.is_empty()) {
             self.conn.query_drop(statement)?;
         }
+
         Ok(())
     }
 
+    /// Rendered SQL is cached by statement shape; the `mysql` crate caches
+    /// server-side prepared statements by SQL text (`statement_cache_size`).
+    ///
+    /// `exec*` prepares through the connection's statement cache.
+    ///
+    /// Dropping the iterator drains the remaining rows.
     fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, MySqlError> {
         self.clean()?;
-        // Rendered SQL is cached by statement shape; the `mysql` crate caches
-        // server-side prepared statements by SQL text (`statement_cache_size`).
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let params = if rendered.params.is_empty() {
             mysql::Params::Empty
         } else {
-            mysql::Params::Positional(rendered.params.iter().map(to_mysql).collect())
+            mysql::Params::Positional(
+                rendered
+                    .params
+                    .iter()
+                    .map(to_mysql)
+                    .collect::<Result<_, _>>()?,
+            )
         };
-        // `exec*` prepares through the connection's statement cache.
         if expect == Expect::Affected {
             self.conn.exec_drop(&*rendered.sql, params)?;
             return Ok(Outcome::Affected(self.conn.affected_rows()));
         }
+
         let limit = expect.fetch_limit().unwrap_or(usize::MAX);
         let mut rows = Vec::new();
         for row in self.conn.exec_iter(&*rendered.sql, params)? {
             if rows.len() == limit {
-                // Dropping the iterator drains the remaining rows.
                 break;
             }
+
             rows.push(row?.unwrap());
         }
+
         Ok(Outcome::Rows(Box::new(MyRows::new(rows))))
     }
 }
@@ -171,6 +187,7 @@ impl TxConnection for MySqlExecutor {
             self.script(&sql)?;
             self.pending.clear();
         }
+
         Ok(())
     }
 }

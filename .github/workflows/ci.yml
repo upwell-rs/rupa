@@ -20,27 +20,40 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      # `rupa/full` enables every driver, so all pool and registry code is linted.
-      - run: cargo clippy --workspace --all-targets --features rupa/full -- -D warnings
-      - run: cargo doc --workspace --no-deps --features rupa/full
+      # Every feature of every crate, so all pool, registry and TLS code is linted.
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo doc --workspace --no-deps --features rupa/full,rupa/tls-rustls
         env:
           RUSTDOCFLAGS: -D warnings
 
   features:
-    name: facade features
+    name: feature matrix
     runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99"
       - uses: Swatinem/rust-cache@v2
-      # Each driver feature must build on its own (and none at all).
+      # Each facade feature must build on its own, as must no features at all.
       - run: |
-          cargo check -p rupa
-          for f in postgres postgres-sync sqlite mysql memory sqlx-postgres sqlx-mysql sqlx-sqlite full; do
+          set -e
+          cargo check -p rupa --no-default-features
+          for f in chrono uuid async tokio dynamic postgres postgres-sync sqlite sqlite-unbundled mysql memory sqlx-postgres sqlx-mysql sqlx-sqlite sqlx-sqlite-unbundled tls-rustls full; do
             echo "::group::rupa/$f"
             cargo check -p rupa --features "$f"
+            echo "::endgroup::"
+          done
+          cargo check -p rupa --no-default-features --features full,tls-rustls
+      # Each crate must build (with its tests) on its own features, not only
+      # through workspace feature unification.
+      - run: |
+          set -e
+          for p in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do
+            echo "::group::$p"
+            cargo check -p "$p" --all-targets
             echo "::endgroup::"
           done
 
@@ -64,7 +77,7 @@ jobs:
       - if: matrix.toolchain == '1.99'
         run: cargo nextest run --profile ci --workspace --features rupa/full
       - if: matrix.toolchain == 'nightly'
-        run: cargo nextest run --profile ci --workspace --features rupa/full,rupa/nightly -E 'not test(ui)'
+        run: cargo nextest run --profile ci --workspace --features rupa/full -E 'not test(ui)'
       # nextest doesn't run doctests.
       - run: cargo test --doc --workspace --features rupa/full
       # trybuild's work dir looks like a nested target dir to rust-cache, whose

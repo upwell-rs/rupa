@@ -127,3 +127,33 @@ What the numbers support:
   behind blocked workers. That likely explains the wide `concurrent_64`
   spread for `mysql` in tokio. The benchmark doesn't measure the delay this
   causes other tasks.
+
+## Cleanup pass
+
+2026-10-18, `--quick`, macOS (Apple silicon), Rust 1.99, the same session
+before and after. The pass swapped the hand-rolled LRU for `hashlink`, split
+the core into sync / `async` / `dynamic` modules, made rusqlite bind text and
+blobs without copying, and moved shared pool and error code into macros.
+Criterion reported no regression (34 benchmarks unchanged within noise, one
+improved):
+
+| benchmark | before | after |
+|---|---|---|
+| render `get_by_id`, Postgres / MySQL / SQLite | 271 / 262 / 258 ns | 270 / 264 / 260 ns |
+| render_cached `get_by_id`, Postgres / MySQL / SQLite | 135 / 128 / 129 ns | 135 / 128 / 126 ns |
+| render_cached `select_filtered_page` (any dialect) | 266–277 ns | 268–271 ns |
+| render vs render_cached `insert_100` | 20–26 µs / 21 µs | 21–26 µs / 21 µs |
+| SQLite `get_by_id`: `executor` / `repo_shared` / `repo_database` | 1.31 / 1.37 / 1.62 µs | 1.33 / 1.41 / 1.65 µs |
+| pool checkout + return: `SqlitePool` / `Database` | 154 / 200 ns | 143 / 197 ns |
+
+What they say:
+
+- **The render cache pays off** for typical statements: 2× for a lookup and
+  2.6–4× for a filtered page. It gains nothing for large multi-row inserts:
+  shaping clones every bound value, which costs as much as rendering. Binding
+  borrowed values on a hit is the next step there.
+- **The `hashlink` LRU is as fast as the custom one** on the hit path (the
+  lookup is a hash and a pointer relink either way).
+- **Static dispatch is the cheap path.** A repository over a typed pool adds
+  ~70 ns to a SQLite lookup; the erased `Database` (feature `dynamic`) adds
+  another ~0.25 µs.

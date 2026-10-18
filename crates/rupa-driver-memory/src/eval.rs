@@ -40,6 +40,9 @@ pub(crate) fn keeps(scope: &dyn Scope, filter: Option<&ExprNode>) -> Result<bool
     }
 }
 
+/// FALSE wins over NULL in either position.
+///
+/// x IN (a, b) = x = a OR x = b, with the usual NULL rules.
 pub(crate) fn eval(scope: &dyn Scope, node: &ExprNode) -> Result<Value, MemoryError> {
     Ok(match node {
         ExprNode::Column(c) => scope.column(*c)?,
@@ -48,7 +51,6 @@ pub(crate) fn eval(scope: &dyn Scope, node: &ExprNode) -> Result<Value, MemoryEr
         ExprNode::Unary(UnOp::IsNull, e) => Value::Bool(eval(scope, e)?.is_null()),
         ExprNode::Unary(UnOp::IsNotNull, e) => Value::Bool(!eval(scope, e)?.is_null()),
         ExprNode::Binary(BinOp::And, l, r) => {
-            // FALSE wins over NULL in either position.
             match (truth(&eval(scope, l)?)?, truth(&eval(scope, r)?)?) {
                 (Some(false), _) | (_, Some(false)) => Value::Bool(false),
                 (Some(true), Some(true)) => Value::Bool(true),
@@ -72,6 +74,7 @@ pub(crate) fn eval(scope: &dyn Scope, node: &ExprNode) -> Result<Value, MemoryEr
             if a.is_null() || b.is_null() {
                 return Ok(null_bool());
             }
+
             let ord = compare(&a, &b)?;
             Value::Bool(match op {
                 BinOp::Eq => ord == Ordering::Equal,
@@ -88,7 +91,6 @@ pub(crate) fn eval(scope: &dyn Scope, node: &ExprNode) -> Result<Value, MemoryEr
             list,
             negated,
         } => {
-            // x IN (a, b) = x = a OR x = b, with the usual NULL rules.
             let x = eval(scope, expr)?;
             let mut result = Some(false);
             for item in list {
@@ -104,6 +106,7 @@ pub(crate) fn eval(scope: &dyn Scope, node: &ExprNode) -> Result<Value, MemoryEr
                     _ => None,
                 };
             }
+
             from_truth(if *negated { result.map(|b| !b) } else { result })
         }
         ExprNode::JsonPath {
@@ -152,6 +155,10 @@ fn num(v: &Value) -> Option<Num> {
 }
 
 /// Total order between two non-null values of compatible types.
+///
+/// Postgres orders NaN above all other values; total_cmp does too.
+///
+/// Byte order, i.e. the "C" collation; see the crate docs.
 pub(crate) fn compare(a: &Value, b: &Value) -> Result<Ordering, MemoryError> {
     if let (Some(x), Some(y)) = (num(a), num(b)) {
         return Ok(match (x, y) {
@@ -161,20 +168,24 @@ pub(crate) fn compare(a: &Value, b: &Value) -> Result<Ordering, MemoryError> {
                     Num::Int(i) => i as f64,
                     Num::Float(f) => f,
                 };
-                // Postgres orders NaN above all other values; total_cmp does too.
                 f(x).total_cmp(&f(y))
             }
         });
     }
+
     Ok(match (a, b) {
         (Value::Bool(x), Value::Bool(y)) => x.cmp(y),
-        // Byte order, i.e. the "C" collation; see the crate docs.
         (Value::Text(x), Value::Text(y)) => x.cmp(y),
         (Value::Bytes(x), Value::Bytes(y)) => x.cmp(y),
+        #[cfg(feature = "uuid")]
         (Value::Uuid(x), Value::Uuid(y)) => x.cmp(y),
+        #[cfg(feature = "chrono")]
         (Value::Date(x), Value::Date(y)) => x.cmp(y),
+        #[cfg(feature = "chrono")]
         (Value::Time(x), Value::Time(y)) => x.cmp(y),
+        #[cfg(feature = "chrono")]
         (Value::Timestamp(x), Value::Timestamp(y)) => x.cmp(y),
+        #[cfg(feature = "chrono")]
         (Value::TimestampTz(x), Value::TimestampTz(y)) => x.cmp(y),
         (Value::Json(x), Value::Json(y)) if x == y => Ordering::Equal,
         (Value::Json(_), Value::Json(_)) => {
@@ -205,6 +216,9 @@ fn like(s: &str, pattern: &str) -> Result<bool, MemoryError> {
 
 /// `->` / `->>`: a missing key or index, or a path through a non-container,
 /// is SQL NULL. With `->>`, JSON `null` is SQL NULL too.
+///
+/// Numbers and booleans print the same in serde_json and Postgres.
+/// Objects and arrays do not (jsonb normalizes key order and spacing).
 fn json_path(value: Value, path: &[PathSeg], as_text: bool) -> Result<Value, MemoryError> {
     let null = Value::Null(if as_text {
         SqlType::Text
@@ -234,12 +248,11 @@ fn json_path(value: Value, path: &[PathSeg], as_text: bool) -> Result<Value, Mem
             None => return Ok(null),
         }
     }
+
     Ok(match (as_text, cur) {
         (false, j) => Value::Json(j),
         (true, serde_json::Value::Null) => null,
         (true, serde_json::Value::String(s)) => Value::Text(s),
-        // Numbers and booleans print the same in serde_json and Postgres.
-        // Objects and arrays do not (jsonb normalizes key order and spacing).
         (true, j @ (serde_json::Value::Number(_) | serde_json::Value::Bool(_))) => {
             Value::Text(j.to_string())
         }
@@ -256,6 +269,7 @@ fn cast(v: Value, ty: SqlType) -> Result<Value, MemoryError> {
     if v.is_null() {
         return Ok(Value::Null(ty));
     }
+
     let int = |v: &Value| -> Option<i128> {
         match num(v)? {
             Num::Int(i) => Some(i),
@@ -306,6 +320,7 @@ fn cast(v: Value, ty: SqlType) -> Result<Value, MemoryError> {
             (_, Some(t)) => serde_json::from_str(t).ok().map(Value::Json),
             _ => None,
         },
+        #[cfg(feature = "uuid")]
         SqlType::Uuid => text.and_then(|t| t.parse().ok()).map(Value::Uuid),
         _ => return Err(MemoryError::Unsupported(format!("cast to {ty:?}"))),
     };

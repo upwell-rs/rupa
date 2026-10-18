@@ -20,8 +20,8 @@ pub(crate) fn and_filter(filter: &mut Option<ExprNode>, cond: ExprNode) {
     });
 }
 
+/// SQL LIMIT/OFFSET are signed 64-bit; anything larger means "no bound".
 pub(crate) fn count_param(n: u64) -> ExprNode {
-    // SQL LIMIT/OFFSET are signed 64-bit; anything larger means "no bound".
     ExprNode::Param(Value::I64(i64::try_from(n).unwrap_or(i64::MAX)))
 }
 
@@ -206,6 +206,7 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
         if self.insert.rows.is_empty() {
             self.insert.columns = pairs.iter().map(|(c, _)| *c).collect();
         }
+
         debug_assert!(
             self.insert
                 .columns

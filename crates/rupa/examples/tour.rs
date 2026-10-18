@@ -186,6 +186,7 @@ fn main() {
         let r = rupa::sql::render_query(&active_dark, dialect).expect("render");
         println!("   {name}: {}", r.sql);
     }
+
     show_sql(
         "case-insensitive email lookup (DSL function, lowered)",
         &by_email,
@@ -331,7 +332,8 @@ fn run_in_memory(
 
 /// 4. An executor chosen at run time: boxed, dialect known only dynamically.
 fn run_boxed(db: MemoryDb) -> MemoryDb {
-    use rupa::core::exec::{AsyncExecutor, BoxAsyncExecutor, ExecError};
+    use rupa::core::erased::BoxAsyncExecutor;
+    use rupa::core::exec::{AsyncExecutor, ExecError};
 
     let mut dynamic = BoxAsyncExecutor::new(db.clone().into_async());
     println!(

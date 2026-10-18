@@ -1,9 +1,9 @@
 //! Synchronous RUPA executor on [`rusqlite`] (SQLite 3.38+).
 //!
 //! - [`SqliteExecutor`] wraps one `rusqlite::Connection`.
-//! - With the `pool` feature, [`SqlitePool`] pools them (on `r2d2`) and
-//!   [`SqliteDriver`] registers the driver for `sqlite:` URLs (see
-//!   `rupa_core::registry`).
+//! - With the `pool` feature, [`SqlitePool`] pools them (on `r2d2`).
+//! - With the `dynamic` feature, `SqliteDriver` registers the driver for
+//!   `sqlite:` URLs (see `rupa_core::registry`).
 //!
 //! # Storage formats
 //!
@@ -47,6 +47,8 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "dynamic")]
+mod driver;
 mod error;
 #[cfg(feature = "pool")]
 pub mod pool;
@@ -59,12 +61,12 @@ use rupa_core::query::Expect;
 use rupa_core::tx::{PendingRollback, Tx, TxConnection};
 use rusqlite::types::Value as SqlValue;
 
+#[cfg(feature = "dynamic")]
+pub use driver::SqliteDriver;
 pub use error::SqliteError;
 #[cfg(feature = "pool")]
-pub use pool::{
-    OpenMode, SqliteConn, SqliteDriver, SqliteManager, SqlitePool, SqlitePoolTx, SqliteTarget,
-};
-use value::{SqliteRows, to_sql};
+pub use pool::{OpenMode, SqliteConn, SqliteManager, SqlitePool, SqlitePoolTx, SqliteTarget};
+use value::{Param, SqliteRows};
 
 /// Prepared statements cached per connection.
 pub const STATEMENT_CACHE_CAPACITY: usize = 128;
@@ -119,16 +121,17 @@ impl SqliteExecutor {
         self.conn
     }
 
+    /// Rendered SQL is cached by statement shape, prepared statements by
+    /// SQL text: a repeated query skips both rendering and parsing.
     fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqliteError> {
         self.clean()?;
-        // Rendered SQL is cached by statement shape, prepared statements by
-        // SQL text: a repeated query skips both rendering and parsing.
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
-        let params = rusqlite::params_from_iter(rendered.params.iter().map(to_sql));
+        let params = rusqlite::params_from_iter(rendered.params.iter().map(Param));
         let mut stmt = self.conn.prepare_cached(&rendered.sql)?;
         if expect == Expect::Affected {
             return Ok(Outcome::Affected(stmt.execute(params)? as u64));
         }
+
         let limit = expect.fetch_limit().unwrap_or(usize::MAX);
         let width = stmt.column_count();
         let mut rows = stmt.query(params)?;
@@ -141,6 +144,7 @@ impl SqliteExecutor {
                     .collect::<Result<Vec<_>, _>>()?,
             );
         }
+
         Ok(Outcome::Rows(Box::new(SqliteRows::new(out))))
     }
 }
@@ -188,6 +192,7 @@ impl TxConnection for SqliteExecutor {
                 .execute_batch(&rupa_sql::render_tx(&statement, &self.dialect)?)?;
             self.pending.clear();
         }
+
         Ok(())
     }
 }

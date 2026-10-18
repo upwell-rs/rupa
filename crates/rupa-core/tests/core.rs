@@ -259,6 +259,7 @@ fn static_and_runtime_capabilities_agree() {
         assert!(Postgres.supports(*cap));
         assert!(DynDialect::new(DialectId::Postgres).supports(*cap));
     }
+
     assert_eq!(capabilities_of(DialectId::Postgres), Postgres::CAPABILITIES);
     assert!(!DynDialect::new(DialectId::MySql).supports(Capability::Ilike));
     let dynamic: &dyn Dialect = &DynDialect::new(DialectId::Postgres);

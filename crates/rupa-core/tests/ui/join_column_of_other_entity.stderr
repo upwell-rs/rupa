@@ -9,7 +9,7 @@ error[E0308]: mismatched types
    = note: expected struct `Column<User, _, _>`
               found struct `Column<Other, i64, rupa_core::Scalar>`
 note: method defined here
-  --> src/join.rs
+  --> src/join/mod.rs
    |
    |     pub const fn col<T, K>(&self, column: Column<E, T, K>) -> Column<E, T, K> {
    |                  ^^^

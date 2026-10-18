@@ -67,6 +67,7 @@ fn pg<R>(q: &Query<R>) -> String {
     for (i, p) in r.params.iter().enumerate() {
         let _ = write!(out, "\n${} = {p:?}", i + 1);
     }
+
     out
 }
 

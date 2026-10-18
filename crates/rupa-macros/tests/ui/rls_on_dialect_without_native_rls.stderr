@@ -13,7 +13,7 @@ error[E0277]: dialect `rupa::rupa_core::Memory` does not support `rupa::dsl::cap
             Supports<rupa::dsl::caps::Returning>
             Supports<rupa::dsl::caps::Savepoints>
 note: required by a bound in `rupa::SecureTransactional::begin_with_security`
- --> $WORKSPACE/crates/rupa-core/src/security.rs
+ --> $WORKSPACE/crates/rupa-core/src/security/mod.rs
   |
   |     fn begin_with_security(
   |        ------------------- required by a bound in this associated function
@@ -36,7 +36,7 @@ error[E0277]: dialect `rupa::rupa_core::Memory` does not support `rupa::dsl::cap
             Supports<rupa::dsl::caps::Returning>
             Supports<rupa::dsl::caps::Savepoints>
 note: required by a bound in `AsyncSecureTransactional::begin_with_security::{anon_assoc#0}`
- --> $WORKSPACE/crates/rupa-core/src/security.rs
+ --> $WORKSPACE/crates/rupa-core/src/security/asynchronous.rs
   |
   |         Self::Dialect: Supports<caps::NativeRls>,
   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `AsyncSecureTransactional::begin_with_security::{anon_assoc#0}`

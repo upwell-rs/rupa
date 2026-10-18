@@ -19,6 +19,7 @@ fn show<R>(q: &Query<R>, d: &dyn Dialect) -> String {
             for (i, p) in r.params.iter().enumerate() {
                 let _ = write!(out, "\n  {} = {p:?}", i + 1);
             }
+
             out
         }
         Err(e) => format!("error: {e:?}"),
@@ -141,6 +142,7 @@ fn cases(d: &dyn Dialect) -> String {
     for (name, sql) in all {
         let _ = writeln!(out, "-- {name}\n{sql}\n");
     }
+
     for (name, stmt) in [
         ("begin", TxStatement::Begin(TxOptions::default())),
         (
@@ -221,6 +223,7 @@ fn security_context_rendering() {
             Err(RenderError::UnsupportedCapability(Capability::NativeRls))
         );
     }
+
     let bad = SecurityContext::new().set("tenant-id", "1");
     assert_eq!(
         rupa_sql::render(&Statement::ApplySecurity(bad), &rupa_core::Postgres),

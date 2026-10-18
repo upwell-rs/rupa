@@ -74,6 +74,7 @@ async fn connect(url: &str, driver: &str) -> Database {
             Err(_) => std::thread::sleep(Duration::from_millis(500)),
         }
     }
+
     panic!("cannot connect {driver} to {url}");
 }
 
@@ -84,6 +85,7 @@ async fn seed(db: &Database, ddl: &'static str) {
             .await
             .unwrap();
     }
+
     conn.run(insert::<User>().values(&new_users(ROWS)).affected())
         .await
         .unwrap();
@@ -93,6 +95,7 @@ async fn postgres_url(servers: &mut Servers) -> Option<String> {
     if let Ok(url) = std::env::var("RUPA_BENCH_POSTGRES_URL") {
         return Some(url);
     }
+
     let node = Postgres::default().with_tag("17-alpine").start().await;
     let node = node
         .map_err(|e| eprintln!("no Postgres container ({e}); skipping"))
@@ -109,6 +112,7 @@ async fn mysql_url(servers: &mut Servers) -> Option<String> {
     if let Ok(url) = std::env::var("RUPA_BENCH_MYSQL_URL") {
         return Some(url);
     }
+
     let node = Mysql::default().start().await;
     let node = node
         .map_err(|e| eprintln!("no MySQL container ({e}); skipping"))
@@ -151,12 +155,14 @@ async fn targets(servers: &mut Servers) -> (Vec<Target>, Option<String>) {
             false,
         );
     }
+
     if let Some(url) = mysql_url(servers).await {
         let my = connect(&url, "mysql").await;
         seed(&my, MYSQL_DDL).await;
         add("mysql", my, true, true);
         add("sqlx-mysql", connect(&url, "sqlx-mysql").await, true, false);
     }
+
     let dir = std::env::temp_dir().join(format!("rupa-bench-drivers-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     for driver in ["sqlite", "sqlx-sqlite"] {
@@ -172,6 +178,7 @@ async fn targets(servers: &mut Servers) -> (Vec<Target>, Option<String>) {
         seed(&db, SQLITE_DDL).await;
         add(driver, db, true, driver == "sqlite");
     }
+
     (out, postgres)
 }
 
@@ -220,6 +227,7 @@ where
         for i in 0..iters {
             work(i).await;
         }
+
         start.elapsed()
     }))
     .unwrap()
@@ -249,6 +257,7 @@ fn bench_one(g: &mut BenchmarkGroup<'_, WallTime>, rt: &Runtime, t: &Target, wor
             })
         });
     }
+
     if t.sync {
         // Sync drivers' futures are already complete; no runtime involved.
         let (db, users) = (&t.db, &*t.users);
@@ -288,6 +297,7 @@ fn bench_concurrent(g: &mut BenchmarkGroup<'_, WallTime>, rt: &Runtime, t: &Targ
             })
         });
     }
+
     if t.sync {
         let users = &*t.users;
         // 8 threads, started once per sample (not per iteration, which would
@@ -331,6 +341,7 @@ fn drivers(c: &mut Criterion) {
         );
         targets.insert(2, t);
     }
+
     eprintln!(
         "drivers: {} (tokio workers: {})",
         targets
@@ -348,6 +359,7 @@ fn drivers(c: &mut Criterion) {
         for t in &targets {
             bench_one(&mut g, &rt, t, workload);
         }
+
         g.finish();
     }
 
@@ -358,6 +370,7 @@ fn drivers(c: &mut Criterion) {
     for t in &targets {
         bench_concurrent(&mut g, &rt, t);
     }
+
     g.finish();
     drop(targets);
     // Containers are removed asynchronously, on a runtime.
