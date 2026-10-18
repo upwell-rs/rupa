@@ -11,6 +11,11 @@ Derive and attribute macros: `#[derive(Entity)]` and the capability derives,
 Through the `rupa` facade (`use rupa::prelude::*`). Generated code refers to
 `::rupa::__macro_support`.
 
+Repositories use native, unboxed futures by default. Use
+`#[repository(dynamic_dispatch)]` when the trait must support `dyn Trait`.
+`&mut self` query methods borrow a connection or transaction directly;
+`&self` methods acquire from a pool or an explicitly shared context.
+
 ## Internal role
 
 - `model` reads entity attributes; `entity`, `capability`, `joined` emit the

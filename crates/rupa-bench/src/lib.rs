@@ -37,7 +37,7 @@ pub struct NewUser {
 }
 
 /// A dyn-compatible repository, as an application would inject it.
-#[repository]
+#[repository(dynamic_dispatch)]
 pub trait Users: Send + Sync {
     #[query(get)]
     async fn by_id(&self, id: i64) -> Result<Option<User>, rupa::DynError>;

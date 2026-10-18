@@ -94,11 +94,9 @@ pub use pool::{OwnedTx, Pool, PoolStatus, Pooled};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 #[cfg(all(feature = "dynamic", feature = "async"))]
 pub use registry::{Database, Driver, Registry};
-pub use repo::{Acquire, Repo, RepoView, SecureTxSession, Shared, TxSession};
+pub use repo::{Acquire, Repo, RepoMut, RepoView, Shared, TxSession};
 #[cfg(feature = "async")]
-pub use repo::{
-    AcquireAsync, AsyncSecureTxSession, AsyncTransactionSource, AsyncTxSession, SharedAsync,
-};
+pub use repo::{AcquireAsync, AsyncTxSession, SharedAsync};
 pub use row::{Row, RowCursor};
 #[cfg(feature = "async")]
 pub use security::AsyncSecureTransactional;

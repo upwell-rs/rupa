@@ -34,7 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         title: "shared".into(),
     };
 
-    let session = NoteWritesView::new(&pool).begin()?;
+    let session = rupa::TxSession::new(NoteWritesView::new(&pool).begin()?);
     let writes = NoteWritesView::new(&session);
     let reads = NoteReadsView::new(&session);
     assert_eq!(writes.add(&note)?, 1);
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(writes.add(&note).is_err());
     assert!(NoteReadsView::new(&pool).all()?.is_empty());
 
-    let session = NoteWritesView::new(&pool).begin()?;
+    let session = rupa::TxSession::new(NoteWritesView::new(&pool).begin()?);
     NoteWritesView::new(&session).add(&note)?;
     session.commit()?;
     assert_eq!(NoteReadsView::new(&pool).all()?.len(), 1);

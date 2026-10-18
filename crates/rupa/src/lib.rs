@@ -71,13 +71,11 @@ pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional};
 pub use rupa_core::tx::{IsolationLevel, Transaction, Transactional, TxOptions};
 pub use rupa_core::{
     Acquire, Column, Deletable, Entity, Executor, Expr, ExprOps, FromRow, Gettable, Insertable,
-    Json, NoKey, Query, Repo, RepoView, Scalar, SecureTxSession, Shared, TxSession, Updatable,
-    bind, col, delete, get, insert, raw, select, update,
+    Json, NoKey, Query, Repo, RepoMut, RepoView, Scalar, Shared, TxSession, Updatable, bind, col,
+    delete, get, insert, raw, select, update,
 };
 #[cfg(feature = "async")]
-pub use rupa_core::{
-    AcquireAsync, AsyncExecutor, AsyncSecureTxSession, AsyncTransactionSource, SharedAsync,
-};
+pub use rupa_core::{AcquireAsync, AsyncExecutor, SharedAsync};
 pub use rupa_macros::{
     Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository,
 };

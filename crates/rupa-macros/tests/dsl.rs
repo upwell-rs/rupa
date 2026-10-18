@@ -39,7 +39,7 @@ fn eval_longer_than(args: &[Value]) -> Result<Value, DslError> {
     }
 }
 
-#[repository]
+#[repository(dynamic_dispatch)]
 pub trait Users: Send + Sync {
     #[query(filter = dsl::ilike(email, $pattern) && longer_than(email, $n), order_by = id)]
     async fn search(&self, pattern: &str, n: i64) -> Result<Vec<User>, DynError>;
@@ -74,7 +74,7 @@ fn db() -> MemoryDb {
 
 #[test]
 fn dsl_functions_in_a_repository() {
-    let repo: Arc<dyn Users> = Arc::new(UsersRepo::shared(db()));
+    let repo: Arc<dyn Users> = Arc::new(UsersRepo::shared(rupa::core::exec::Blocking(db())));
     let ids = |v: Vec<User>| v.into_iter().map(|u| u.id).collect::<Vec<_>>();
 
     let found = pollster::block_on(repo.search("ada%", 15)).unwrap();
@@ -113,13 +113,13 @@ fn dsl_functions_render_for_postgres() {
 /// statically gated ones would not compile here (see `ui/dsl_static_gate_on_dyn_dialect.rs`).
 #[test]
 fn runtime_checked_functions_work_with_a_dynamic_dialect() {
-    #[repository]
+    #[repository(dynamic_dispatch)]
     pub trait Search: Send + Sync {
         #[query(filter = dsl::ilike(email, $pattern), order_by = id)]
         async fn search(&self, pattern: &str) -> Result<Vec<User>, DynError>;
     }
     let boxed = rupa::BoxAsyncExecutor::new(db().into_async());
-    let repo: Arc<dyn Search> = Arc::new(SearchRepo::shared_async(boxed));
+    let repo: Arc<dyn Search> = Arc::new(SearchRepo::shared(boxed));
     let found = pollster::block_on(repo.search("%EXAMPLE%")).unwrap();
     assert_eq!(found.iter().map(|u| u.id).collect::<Vec<_>>(), [1, 3]);
 }

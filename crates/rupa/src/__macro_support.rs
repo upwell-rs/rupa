@@ -8,9 +8,11 @@ pub use rupa_core::__macro_support::*;
 #[cfg(feature = "async")]
 pub use rupa_core::exec::AsyncExecutor;
 pub use rupa_core::exec::Executor;
+pub use rupa_core::repo::{
+    Acquire, Context, ContextMut, ExclusiveSyncMode, Repo, RepoMut, RepoView, Repository, SyncMode,
+};
 #[cfg(feature = "async")]
-pub use rupa_core::repo::AcquireAsync;
-pub use rupa_core::repo::{Acquire, Repo, RepoView};
+pub use rupa_core::repo::{AcquireAsync, AsyncMode, ExclusiveAsyncMode};
 
 /// Runs `future` to completion from a sync repository method of an async
 /// repository.

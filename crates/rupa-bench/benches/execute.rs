@@ -92,7 +92,7 @@ fn sqlite(c: &mut Criterion) {
     });
     rupa::sql::render_cache().set_capacity(rupa::sql::cache::DEFAULT_CAPACITY);
 
-    let shared: Arc<dyn Users> = Arc::new(UsersRepo::shared(seeded_sqlite()));
+    let shared: Arc<dyn Users> = Arc::new(UsersRepo::shared(Blocking(seeded_sqlite())));
     let mut next = ids();
     g.bench_function("get_by_id/repo_shared", |b| {
         b.iter(|| pollster::block_on(shared.by_id(next())).unwrap().unwrap())
