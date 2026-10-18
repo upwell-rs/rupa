@@ -202,12 +202,15 @@ impl<'a> Sources<'a> {
     }
 
     /// `col` of `row`; typed `NULL` for a source a left join left unmatched.
+    /// While a join's `ON` is evaluated, `row` holds only the sources joined so
+    /// far, so a later source is `NoSuchSource` too.
     fn value(&self, row: &[Option<&Vec<Value>>], col: ColumnRef) -> Result<Value, MemoryError> {
         let (source, index) = self.locate(col)?;
-        Ok(match row[source] {
-            Some(r) => r[index].clone(),
-            None => Value::Null(self.0[source].columns[index].sql_type),
-        })
+        match row.get(source) {
+            None => Err(MemoryError::NoSuchSource(col.source)),
+            Some(Some(r)) => Ok(r[index].clone()),
+            Some(None) => Ok(Value::Null(self.0[source].columns[index].sql_type)),
+        }
     }
 }
 

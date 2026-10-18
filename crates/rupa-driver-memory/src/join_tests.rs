@@ -194,7 +194,8 @@ fn filter_and_order_by_on_joined_columns() {
         users_orders(JoinKind::Left),
         vec![col(0, "id"), col(1, "total")],
     );
-    // Postgres order: NULLs last ascending, so cy (no orders) comes last.
+    // Sorted by a joined column; the filter below also drops cy's
+    // unmatched row (its NULL ordering is covered by the conformance cases).
     s.order_by = vec![OrderBy {
         expr: c(1, "total"),
         direction: Direction::Asc,
@@ -269,4 +270,27 @@ fn unknown_sources_are_errors() {
         .err()
         .unwrap();
     assert_eq!(err, MemoryError::NoSuchSource(SourceId(1)));
+}
+
+/// A join condition may only use the sources joined so far: here source 1's
+/// `ON` names source 2, which the statement has but hasn't joined yet.
+#[test]
+fn a_condition_on_a_later_source_is_an_error() {
+    let from = FromClause::Join {
+        base: USERS,
+        joins: vec![
+            Join {
+                kind: JoinKind::Inner,
+                table: ORDERS,
+                on: eq(c(2, "id"), c(0, "id")),
+            },
+            Join {
+                kind: JoinKind::Left,
+                table: USERS,
+                on: eq(c(2, "id"), c(1, "user_id")),
+            },
+        ],
+    };
+    let err = rows(&mut db(), select(from, vec![col(0, "id")])).unwrap_err();
+    assert_eq!(err, MemoryError::NoSuchSource(SourceId(2)));
 }

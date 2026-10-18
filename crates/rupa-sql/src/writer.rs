@@ -295,7 +295,12 @@ impl<'a> Writer<'a> {
                     let id = u16::try_from(n + 1).map_err(|_| RenderError::TooManySources)?;
                     self.alias(SourceId(id));
                     self.sql.push_str(" ON ");
-                    self.expr(&join.on, prec::ANY)?;
+                    // A condition may use this source and earlier ones only:
+                    // a later alias isn't in scope yet.
+                    let all = std::mem::replace(&mut self.source_count, n + 2);
+                    let on = self.expr(&join.on, prec::ANY);
+                    self.source_count = all;
+                    on?;
                 }
             }
         }

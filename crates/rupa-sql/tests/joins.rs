@@ -214,3 +214,15 @@ fn dsl_calls_in_join_conditions_are_lowered() {
         direct.sql
     );
 }
+
+/// A join condition can't use a source joined after it: that alias isn't in
+/// scope yet, so it's a render error rather than a database error.
+#[test]
+fn a_condition_on_a_later_source_is_a_render_error() {
+    let mut s = joined(5);
+    if let FromClause::Join { joins, .. } = &mut s.from {
+        joins[0].on = bin(BinOp::Eq, c(2, "id"), c(0, "id"));
+    }
+    let err = render(&Statement::Select(s), &Postgres).unwrap_err();
+    assert_eq!(err, RenderError::UnknownSource(SourceId(2)));
+}

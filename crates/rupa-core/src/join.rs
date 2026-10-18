@@ -351,7 +351,7 @@ impl<S, R> JoinBuilder<S, R> {
 /// projection.
 fn add_join<J: Entity>(mut select: Select, kind: JoinKind, on: ExprNode) -> Select {
     let source =
-        SourceId(u16::try_from(select.from.source_count()).expect("a join has at most 10 sources"));
+        SourceId(u16::try_from(select.from.source_count()).expect("a source index fits in a u16"));
     let join = Join {
         kind,
         table: J::TABLE,
@@ -885,6 +885,17 @@ pub trait Admits<F> {}
 impl Admits<Plain> for Inner {}
 impl Admits<Opt> for Inner {}
 impl Admits<Opt> for Left {}
+
+/// Never a slot kind ([`PartOf`] only yields [`Inner`] or [`Left`]). It
+/// exists so that `Admits` never has a single impl for a field shape: with
+/// one, the compiler would infer the slot kind from it, and a plain field of
+/// an entity joined twice (`(Item, Option<Item>)`) would silently pick the
+/// inner source instead of being ambiguous. Only `PartOf` decides the slot.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy)]
+pub enum NoSlot {}
+impl Admits<Plain> for NoSlot {}
+impl Admits<Opt> for NoSlot {}
 
 /// A struct that joined rows decode into, with fields taken from several
 /// entities (`#[derive(Joined)]`). `R` is the join's row type; `M` the

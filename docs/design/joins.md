@@ -147,8 +147,9 @@ As built (step 2):
   It also made `filter`, `order_by`, `limit` and the result methods a single
   generic impl. Only the next-join methods are per arity.
 - **Names (decided 2026-10-18).** The closure forms are `inner_join_on` and
-  `left_join_on`. `inner_join` and `left_join` are kept for joins inferred
-  from declared relations (step 4).
+  `left_join_on`. Joins inferred from declared relations are
+  `.join::<J>().inner()` / `.left()` (step 4: Rust has no partial turbofish,
+  so they can't be `inner_join::<J>()`).
 
 ### `on!` for the common case
 
@@ -382,14 +383,31 @@ fn with_orders(&self) -> Result<Vec<(User, Option<Order>)>, Error>;
 
 ## Conformance
 
-New capability-free cases, all run on every backend:
+Capability-free cases in `rupa-conformance` (`joins.rs`), run on every
+backend (memory, Postgres, MySQL, SQLite, each through every driver):
 
 - inner, left, self-join, and three-way join;
 - filter on a joined column;
-- order by a joined column with `NULL`s from left-join misses;
-- `exists()` on a join;
-- left join decoding to `None`;
-- a join under native RLS, where policies apply to each table on their own.
+- order by a joined column with `NULL`s from left-join misses, and limit and
+  offset;
+- single-row shapes and `exists()` on a join;
+- left join decoding to `None`, including an entity with non-null JSON and
+  timestamp columns;
+- `on!` with JSON paths, a DSL call and `$variables`;
+- declared relations in both directions, through `via`, and onto a non-first
+  source;
+- `#[derive(Joined)]` structs;
+- `#[query]` joins, and self-joins through aliases and pinned sources.
+
+Native RLS is Postgres-only (`Capability::NativeRls`), so joins under RLS are
+tested in `rupa-driver-tokio-postgres/tests/rls.rs` instead. That test checks
+that each table's policy filters its own rows in a join: a comment by
+another tenant on a visible doc stays hidden, and a visible comment on a
+hidden doc comes back with `None` for the doc.
+
+Malformed IR is an error, not a panic: a column of a source the statement
+doesn't have, or of a source joined after the condition that uses it, is
+`RenderError::UnknownSource` / `MemoryError::NoSuchSource`.
 
 ## Decisions (2026-10-18)
 

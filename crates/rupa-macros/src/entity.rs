@@ -110,11 +110,14 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         quote!((#name, #message))
     });
 
-    let relations = fields.iter().filter_map(|f| {
-        f.references
-            .as_ref()
-            .map(|target| relation(&ms, &input, f, target))
-    });
+    let relations = fields
+        .iter()
+        .filter_map(|f| {
+            f.references
+                .as_ref()
+                .map(|target| relation(&ms, &input, f, target))
+        })
+        .collect::<syn::Result<Vec<_>>>()?;
 
     Ok(quote! {
         #(#relations)*
@@ -173,24 +176,37 @@ fn relation(
     input: &DeriveInput,
     f: &model::Field,
     target: &syn::Path,
-) -> TokenStream {
+) -> syn::Result<TokenStream> {
     let (ident, vis) = (&input.ident, &input.vis);
     let (ty, column) = (&f.ty, &f.column);
-    let name = f.relation.clone().unwrap_or_else(|| {
-        let base = f
-            .name
-            .strip_suffix("_id")
-            .filter(|b| !b.is_empty())
-            .unwrap_or(&f.name);
-        Ident::new(base, f.ident.span())
-    });
+    let name = match &f.relation {
+        Some(name) => name.clone(),
+        None => {
+            let base = f
+                .name
+                .strip_suffix("_id")
+                .filter(|b| !b.is_empty())
+                .unwrap_or(&f.name);
+            // `type_id` would make `fn type()`: keywords can't be accessor names.
+            syn::parse_str::<Ident>(base).map_err(|_| {
+                syn::Error::new(
+                    f.ident.span(),
+                    format!(
+                        "the relation accessor would be named `{base}`, a keyword; \
+                         name it: `#[column(references = .., relation = name)]`"
+                    ),
+                )
+            })?;
+            Ident::new(base, f.ident.span())
+        }
+    };
     let marker = format_ident!("__RupaRel{}_{}", ident, name);
     let doc = format!(
         "The relation through `{}`, for `join::<..>().inner_via(..)`.",
         f.name
     );
     let span = target.span();
-    quote_spanned! {span=>
+    Ok(quote_spanned! {span=>
         #[doc(hidden)]
         #[allow(non_camel_case_types)]
         #vis struct #marker;
@@ -226,5 +242,5 @@ fn relation(
                 #ms::Rel::new()
             }
         }
-    }
+    })
 }

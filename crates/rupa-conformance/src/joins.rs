@@ -64,7 +64,9 @@ pub async fn case_join_on_macro<E: AsyncExecutor>(e: &mut E) {
                     Review::item_id == Item::id && Review::stars >= $min_stars
                 ))
                 .filter(rupa::on!(
-                    (Item::meta.score > 4 || Review::comment is_null) && Item::name like $pattern
+                    (Item::meta.score > 4 || Review::comment is_null)
+                        && Item::name like $pattern
+                        && !ci_eq(Item::name, "BANANA")
                 ))
                 .order_by(|(i, _)| i.col(col!(Item::id)).asc())
                 .all(),
@@ -72,9 +74,9 @@ pub async fn case_join_on_macro<E: AsyncExecutor>(e: &mut E) {
         .await
         .unwrap();
     // `stars >= 3` keeps reviews 10 and 12. apple (score 5) passes on its
-    // score, banana and date (no review left, so `comment` is NULL) on
-    // `is_null`; cherry doesn't match the pattern.
-    assert_eq!(pairs(&rows), [(1, Some(10)), (2, None), (4, None)]);
+    // score, date (no review left, so `comment` is NULL) on `is_null`;
+    // cherry doesn't match the pattern, and the DSL call `ci_eq` drops banana.
+    assert_eq!(pairs(&rows), [(1, Some(10)), (4, None)]);
     // `$variables` are borrowed and cloned, so they are still usable.
     assert_eq!((min_stars, pattern.len()), (3, 3));
 }
