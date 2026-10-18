@@ -1,5 +1,0 @@
-error: a repository query method takes `&self`; bind a transaction session for transactional calls
-  --> tests/ui/repo_mut_receiver.rs:13:5
-   |
-13 |     fn by_id(&mut self, id: i64) -> Result<Option<User>, rupa::DynError>;
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

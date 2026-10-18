@@ -1,5 +1,11 @@
 //! Shared access to one owned synchronous transaction.
 
+#[cfg(feature = "async")]
+mod asynchronous;
+
+#[cfg(feature = "async")]
+pub use asynchronous::AsyncTxSession;
+
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use super::Acquire;
@@ -9,7 +15,10 @@ use crate::ir::Statement;
 use crate::query::Expect;
 use crate::tx::Transaction;
 
-/// One application-owned transaction shared by borrowed repository views.
+/// One transaction explicitly shared by `&self` repository views.
+///
+/// The mutex serializes access to the same mutable transaction. For exclusive
+/// ownership, bind an `&mut self` repository directly to the native transaction.
 pub struct TxSession<T: Transaction> {
     tx: Mutex<Option<T>>,
 }

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use rupa::core::exec::{AsyncExecutor, Executor};
+use rupa::core::exec::{AsyncExecutor, Blocking, Executor};
 use rupa::core::tx::Transactional;
 use rupa::prelude::*;
 use rupa::{Database, DynError, Shared};
@@ -28,10 +28,10 @@ fn users() -> Vec<User> {
 }
 
 // ---------------------------------------------------------------------------
-// The default: dyn-compatible, `&self`, async (one method blocks in place).
+// Explicit dynamic dispatch: dyn-compatible, `&self`, async (one method blocks in place).
 // ---------------------------------------------------------------------------
 
-#[repository]
+#[repository(dynamic_dispatch)]
 pub trait UserRepository: Send + Sync {
     #[query(filter = email == $email)]
     async fn by_email(&self, email: &str) -> Result<Option<User>, DynError>;
@@ -58,7 +58,7 @@ fn async_db() -> AsyncMemoryDb {
 
 #[test]
 fn dyn_repository_behind_arc() {
-    let repo: Arc<dyn UserRepository> = Arc::new(UserRepositoryRepo::shared_async(async_db()));
+    let repo: Arc<dyn UserRepository> = Arc::new(UserRepositoryRepo::shared(async_db()));
     let ada = pollster::block_on(repo.by_email("ada@x")).unwrap();
     assert_eq!(ada.map(|u| u.id), Some(1));
     assert_eq!(
@@ -75,7 +75,7 @@ fn dyn_repository_behind_arc() {
 
 #[test]
 fn dyn_repository_errors_keep_their_kind() {
-    #[repository]
+    #[repository(dynamic_dispatch)]
     pub trait Strict: Send + Sync {
         #[query(filter = active == $active)]
         async fn exactly_one(&self, active: bool) -> Result<User, DynError>;
@@ -171,17 +171,17 @@ fn repository_view_inside_a_transaction() {
 }
 
 // ---------------------------------------------------------------------------
-// static_dispatch: unboxed futures.
+// The default: unboxed futures.
 // ---------------------------------------------------------------------------
 
-#[repository(static_dispatch)]
+#[repository]
 pub trait FastUsers {
     #[query(filter = active == $active, order_by = id desc, limit = 1)]
     async fn newest_active(&self, active: bool) -> Result<Option<User>, AppError>;
 }
 
 #[test]
-fn static_dispatch_repository() {
+fn default_repository_uses_unboxed_futures() {
     let db = rupa::SharedAsync::new(async_db());
     let repo = FastUsersView::new(&db);
     let newest = pollster::block_on(repo.newest_active(true)).unwrap();
@@ -231,7 +231,7 @@ impl UserRepository for FakeUsers {
 fn hand_written_mock_is_interchangeable() {
     let repos: Vec<Arc<dyn UserRepository>> = vec![
         Arc::new(FakeUsers(users())),
-        Arc::new(UserRepositoryRepo::shared_async(async_db())),
+        Arc::new(UserRepositoryRepo::shared(async_db())),
     ];
     for repo in repos {
         assert_eq!(repo.active(false).unwrap().len(), 1);
@@ -266,7 +266,7 @@ pub struct NotePatch {
     body: Option<Option<String>>,
 }
 
-#[repository]
+#[repository(dynamic_dispatch)]
 pub trait NoteRepository: Send + Sync {
     #[query(get)]
     async fn get(&self, id: i64) -> Result<Option<Note>, DynError>;
@@ -355,22 +355,22 @@ fn exercise_notes(repo: &dyn NoteRepository) {
 #[test]
 fn crud_repository_over_an_async_executor() {
     let repo: Arc<dyn NoteRepository> =
-        Arc::new(NoteRepositoryRepo::shared_async(note_db().into_async()));
+        Arc::new(NoteRepositoryRepo::shared(note_db().into_async()));
     exercise_notes(&*repo);
 }
 
 /// A sync-only application (think SQLite) declaring `async` methods: the
-/// plain sync executor serves them, and no async runtime is involved.
+/// explicitly shared `Blocking` executor serves them without an async runtime.
 #[test]
 fn async_repository_over_a_sync_executor() {
-    let repo: Arc<dyn NoteRepository> = Arc::new(NoteRepositoryRepo::shared(note_db()));
+    let repo: Arc<dyn NoteRepository> = Arc::new(NoteRepositoryRepo::shared(Blocking(note_db())));
     exercise_notes(&*repo);
 }
 
 #[repository]
 pub trait OneConnection {
     #[query(get)]
-    async fn get(&self, id: i64) -> Result<Option<Note>, AppError>;
+    async fn get(&mut self, id: i64) -> Result<Option<Note>, AppError>;
 }
 
 /// `&mut self` over one sync executor (or transaction), made async with `Blocking`.
@@ -384,8 +384,7 @@ fn blocking_wraps_one_sync_executor() {
     )
     .unwrap();
     let tx = db.begin().unwrap();
-    let source = Shared::new(tx);
-    let repo = OneConnectionView::new(&source);
+    let mut repo = OneConnectionRepo::new(Blocking(tx));
     assert!(pollster::block_on(repo.get(1)).unwrap().is_some());
 }
 
@@ -411,7 +410,7 @@ pub struct Byline {
     author: String,
 }
 
-#[repository]
+#[repository(dynamic_dispatch)]
 pub trait PostRepository: Send + Sync {
     #[query(left_join = Post, filter = User::active == $active, order_by = User::id, order_by = Post::id)]
     async fn with_posts(&self, active: bool) -> Result<Vec<(User, Option<Post>)>, DynError>;
@@ -433,7 +432,7 @@ fn joins_in_a_repository() {
             title: title.into(),
         });
     db.run(insert::<Post>().values(&posts).affected()).unwrap();
-    let repo: Arc<dyn PostRepository> = Arc::new(PostRepositoryRepo::shared_async(db.into_async()));
+    let repo: Arc<dyn PostRepository> = Arc::new(PostRepositoryRepo::shared(db.into_async()));
 
     let rows = pollster::block_on(repo.with_posts(true)).unwrap();
     let ids: Vec<_> = rows

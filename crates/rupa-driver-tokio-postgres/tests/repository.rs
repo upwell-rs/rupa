@@ -9,7 +9,7 @@ use rupa_driver_tokio_postgres::PgExecutor;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
-#[repository]
+#[repository(dynamic_dispatch)]
 pub trait Notes: Send + Sync {
     #[query(filter = pinned == $pinned, order_by = id)]
     async fn pinned(&self, pinned: bool) -> Result<Vec<Note>, DynError>;
@@ -59,7 +59,7 @@ async fn dyn_repository_on_postgres() {
             .unwrap();
     }
 
-    let repo: Arc<dyn Notes> = Arc::new(NotesRepo::shared_async(exec));
+    let repo: Arc<dyn Notes> = Arc::new(NotesRepo::shared(exec));
     let pinned = repo.pinned(true).await.unwrap();
     assert_eq!(
         pinned.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(),

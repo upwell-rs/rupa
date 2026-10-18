@@ -24,12 +24,12 @@ help: the trait `From<DynError>` is not implemented for `MyError`
    |
  9 | pub struct MyError;
    | ^^^^^^^^^^^^^^^^^^
-help: the trait `R` is conditionally implemented for `Repo<__S, RKey>`
+help: the trait `R` is conditionally implemented for `Repository<__C, RKey, rupa::rupa_core::repo::SyncMode>`
   --> tests/ui/repo_error_without_from.rs:10:1
    |
 10 | #[repository]
    | ^^^^^^^^^^^^^ unsatisfied requirement introduced here: `MyError: From<DynError>`
-note: required for `Repo<Shared<MemoryDb>, RKey>` to implement `R`
+note: required for `Repository<rupa::rupa_core::repo::Owned<Shared<MemoryDb>>, RKey, rupa::rupa_core::repo::SyncMode>` to implement `R`
   --> tests/ui/repo_error_without_from.rs:10:1
    |
 10 | #[repository]

@@ -4,7 +4,9 @@
 > type and borrowed view. Applications can put one `TxSession` or
 > `AsyncTxSession` around an owned transaction and bind any repository view to
 > it. A future Upwell custom scope can hold that single session and explicitly
-> commit or roll it back; `rupa-upwell` remains a placeholder.
+> commit or roll it back. Exclusive `&mut self` repositories borrow native
+> transactions directly without a session or repository lock. `rupa-upwell`
+> remains a placeholder.
 
 Status: **items 1–3 done; item 4 partly** (2026-10-03). See
 [`connections.md`](connections.md) for what was built and the decisions

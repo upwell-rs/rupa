@@ -66,7 +66,7 @@ struct UserPatch {
 /// A repository: declared queries, implemented for its own view and owned type. `async` and
 /// receivers are the author's choice; this one is dyn-compatible (the
 /// default), so it can be shared as `Arc<dyn UserRepository>`.
-#[repository]
+#[repository(dynamic_dispatch)]
 trait UserRepository: Send + Sync {
     #[query(filter = email == $email)]
     async fn by_email(&self, email: &str) -> Result<Option<User>, rupa::DynError>;
@@ -202,8 +202,7 @@ fn main() {
 fn run_repository(db: MemoryDb) {
     use std::sync::Arc;
 
-    let users: Arc<dyn UserRepository> =
-        Arc::new(UserRepositoryRepo::shared_async(db.into_async()));
+    let users: Arc<dyn UserRepository> = Arc::new(UserRepositoryRepo::shared(db.into_async()));
     println!(
         "
 Repository behind Arc<dyn UserRepository>:"

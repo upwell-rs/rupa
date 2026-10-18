@@ -63,7 +63,17 @@ type and kind (`rupa-core/src/column/__private.rs`).
 `#[repository]` (`rupa-macros/src/repository.rs`) emits the trait, a unique
 `UsersKey`, a borrowed `UsersView<'_, S>`, and an owned `UsersRepo<S>`.
 The key prevents unrelated repository traits from accumulating on one
-concrete type. For each method:
+concrete type. Owned handles and borrowed views share one implementation.
+The query declarations select sync or async execution at compile time, so both
+use `begin`, `begin_with`, and `begin_with_security` without method suffixes.
+These return native transactions directly. `&mut self` query methods borrow an
+executor or transaction exclusively; `&self` methods acquire from a pool or an
+explicitly shared session. `Blocking` is the explicit adapter for a sync driver
+used through async traits; the adapter itself adds no locks. Async futures are unboxed by default; `#[repository(dynamic_dispatch)]`
+opts into boxing for dyn-compatible traits. Dynamic `Database`
+implements the same transaction-source contract as native pools.
+
+For each method:
 
 - `query::query_body` (`rupa-macros/src/query/mod.rs`) translates
   `#[query(filter = ..)]` into builder calls: `select::<User>().filter(..)
@@ -72,15 +82,15 @@ concrete type. For each method:
   terminal (`.optional()`) in `query/signature.rs`.
 - An `&self` method acquires from a pool or transaction session. Acquisition
   and execution errors pass through `DynError`; the declared error type only
-  needs `From<DynError>`. Sync or async
-  is decided by whether any method is `async`.
+  needs `From<DynError>`. An `&mut self` method runs on the borrowed executor
+  directly. Sync or async is decided by whether any method is `async`.
 
 So the method body is roughly:
 
 ```rust
 let __query = select::<User>().filter(col!(User::email).eq(email)).optional();
-let mut __conn = Acquire::acquire(self.source()).map_err(DynError::new)?;
-Ok(Executor::run(&mut __conn, __query).map_err(DynError::new)?)
+let mut __conn = Acquire::acquire(self.source()).map_err(ExecError::into_dyn_error)?;
+Ok(Executor::run(&mut __conn, __query).map_err(ExecError::into_dyn_error)?)
 ```
 
 ### 2. Building: a `Query<R>` value, no IO

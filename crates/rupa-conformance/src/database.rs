@@ -56,7 +56,7 @@ impl Harness for DatabaseHarness {
 
 /// A dyn-compatible repository over the pool (`Arc<dyn Notes>`), as a DI
 /// container would hold it.
-#[rupa::repository]
+#[rupa::repository(dynamic_dispatch)]
 pub trait Notes: Send + Sync {
     #[query(insert)]
     async fn add(&self, note: &NewNote) -> Result<u64, DynError>;

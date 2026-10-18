@@ -122,11 +122,12 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     fn active(&self, active: bool) -> Result<Vec<User>, DynError>;  // blocks in place
 /// }
 ///
-/// let users: Arc<dyn UserRepository> = Arc::new(UserRepositoryRepo::shared_async(executor));
+/// let users = UserRepositoryView::new(&pool);
 /// ```
 ///
 /// See the `rupa_macros::repository` module docs for the rules on receivers,
-/// sync/async methods, errors and `static_dispatch`.
+/// sync/async methods, errors and optional `dynamic_dispatch`.
+/// Async methods use unboxed futures by default.
 ///
 /// Keep the trait so code using it still resolves; only the
 /// macro's own error is reported.

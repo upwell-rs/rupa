@@ -13,10 +13,10 @@ use task::{NewTask, Task, TaskPatch};
 #[repository]
 trait Tasks {
     #[query(insert)]
-    async fn add(&self, task: &NewTask) -> Result<u64, rupa::DynError>;
+    async fn add(&mut self, task: &NewTask) -> Result<u64, rupa::DynError>;
 
     #[query(get)]
-    async fn get(&self, id: i64) -> Result<Option<Task>, rupa::DynError>;
+    async fn get(&mut self, id: i64) -> Result<Option<Task>, rupa::DynError>;
 }
 
 #[tokio::main]
@@ -24,10 +24,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = SqlitePool::connect(&DbConfig::new("sqlite::memory:")).await?;
     let mut conn = pool.get().await?;
     conn.run(raw().sql(task::SCHEMA).execute::<u64>()).await?;
-    drop(conn);
-
-    let session = TasksView::new(&pool).begin_async().await?;
-    let tasks = TasksView::new(&session);
+    let mut repository = TasksRepo::new(conn);
+    let mut tx = repository.begin().await?;
+    let mut tasks = TasksView::new(&mut tx);
     tasks
         .add(&NewTask {
             title: "write examples".into(),
@@ -38,14 +37,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tasks.get(1).await?.expect("task in transaction").title,
         "write examples"
     );
-    session.commit().await?;
-    assert!(
-        tasks.get(1).await.is_err(),
-        "the finished session stays closed"
-    );
+    tx.commit().await?;
 
-    let mut conn = pool.get().await?;
-    let task = conn.run(get::<Task>(&1)).await?.expect("task 1 exists");
+    let task = repository.get(1).await?.expect("committed task");
+    let mut conn = repository.into_inner();
     assert_eq!(task.title, "write examples");
     conn.run(
         update::<Task>()
@@ -56,9 +51,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .affected(),
     )
     .await?;
-    drop(conn);
     assert!(
-        TasksView::new(&pool)
+        TasksView::new(&mut conn)
             .get(task.id)
             .await?
             .expect("task still exists")

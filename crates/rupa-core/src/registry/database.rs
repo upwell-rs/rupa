@@ -6,11 +6,11 @@ use std::sync::Arc;
 use crate::dialect::{Dialect, DynDialect};
 use crate::erased::{BoxAsyncExecutor, BoxAsyncTx};
 use crate::error::DynError;
-use crate::exec::{Blocking, BoxFuture};
+use crate::exec::{Blocking, BoxFuture, ExecError};
 use crate::pool::{AsyncPool, PoolStatus, SingleConnection};
 use crate::repo::{AcquireAsync, AsyncTransactionSource};
 use crate::security::{SecureTx, SecurityContext, apply_security, check_native_rls};
-use crate::tx::{AsyncTx, AsyncTxConnection, TxOptions};
+use crate::tx::{AsyncTxConnection, TxOptions};
 
 /// A pool behind a dyn-compatible interface; implemented for every
 /// [`AsyncPool`].
@@ -28,7 +28,7 @@ impl<P: AsyncPool> DynPool for P {
 
     fn get_dyn(&self) -> BoxFuture<'_, Result<BoxAsyncExecutor, DynError>> {
         Box::pin(async move {
-            let conn = self.get().await.map_err(DynError::new)?;
+            let conn = self.get().await.map_err(ExecError::into_dyn_error)?;
             Ok(BoxAsyncExecutor::new(conn))
         })
     }
@@ -38,10 +38,9 @@ impl<P: AsyncPool> DynPool for P {
         options: TxOptions,
     ) -> BoxFuture<'_, Result<BoxAsyncTx<'static>, DynError>> {
         Box::pin(async move {
-            let conn = self.get().await.map_err(DynError::new)?;
-            let tx = AsyncTx::begin(Box::new(conn), options)
+            let tx = AsyncPool::begin_with(self, options)
                 .await
-                .map_err(DynError::new)?;
+                .map_err(ExecError::into_dyn_error)?;
             Ok(BoxAsyncTx::new(tx))
         })
     }
@@ -58,7 +57,8 @@ impl<P: AsyncPool> DynPool for P {
 /// let users = UserRepositoryView::new(&db);
 ///
 /// // A unit of work: an owned ('static) transaction on one connection.
-/// let session = UserRepositoryView::new(&db).begin_async().await?;
+/// let tx = UserRepositoryView::new(&db).begin().await?;
+/// let session = AsyncTxSession::new(tx);
 /// UserRepositoryView::new(&session).rename(id, "x").await?;
 /// session.commit().await?;
 /// ```
@@ -166,10 +166,7 @@ impl AsyncTransactionSource for Database {
         &self.dialect
     }
 
-    fn begin_async_with(
-        &self,
-        options: TxOptions,
-    ) -> impl std::future::Future<Output = Result<Self::Tx, DynError>> + Send {
-        self.begin_with(options)
+    async fn open(&self, options: TxOptions) -> Result<Self::Tx, DynError> {
+        self.begin_with(options).await
     }
 }

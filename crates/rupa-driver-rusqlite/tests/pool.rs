@@ -27,6 +27,155 @@ trait NoteReads {
     fn all(&self) -> Result<Vec<Note>, rupa::DynError>;
 }
 
+#[repository]
+trait ExclusiveNotes {
+    #[query(insert)]
+    fn add(&mut self, note: &NewNote) -> Result<u64, rupa::DynError>;
+
+    #[query(order_by = id)]
+    fn all(&mut self) -> Result<Vec<Note>, rupa::DynError>;
+}
+
+#[repository]
+trait AsyncExclusiveNotes {
+    #[query(insert)]
+    async fn add(&mut self, note: &NewNote) -> Result<u64, rupa::DynError>;
+
+    #[query(order_by = id)]
+    async fn all(&mut self) -> Result<Vec<Note>, rupa::DynError>;
+}
+
+#[repository]
+trait AsyncNoteReads {
+    #[query(order_by = id)]
+    async fn all(&self) -> Result<Vec<Note>, rupa::DynError>;
+}
+
+/// A native pool with an application policy that rejects transactions.
+struct TransactionsDisabled(Blocking<SqlitePool>);
+
+impl rupa::AsyncPool for TransactionsDisabled {
+    type Conn = <Blocking<SqlitePool> as rupa::AsyncPool>::Conn;
+
+    fn dialect(&self) -> &rupa::core::Sqlite {
+        rupa::AsyncPool::dialect(&self.0)
+    }
+
+    async fn get(&self) -> Result<Self::Conn, SqliteError> {
+        rupa::AsyncPool::get(&self.0).await
+    }
+
+    fn status(&self) -> rupa::PoolStatus {
+        rupa::AsyncPool::status(&self.0)
+    }
+
+    async fn begin_with(
+        &self,
+        _: rupa::TxOptions,
+    ) -> Result<rupa::core::OwnedAsyncTx<Self::Conn>, SqliteError> {
+        Err(SqliteError::Pool(Box::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "transactions disabled",
+        ))))
+    }
+}
+
+#[test]
+fn dynamic_repository_preserves_native_pool_transaction_policy() {
+    let file = TempDb::new("repo-native-policy");
+    let pool = TransactionsDisabled(Blocking(file.pool(1)));
+
+    pollster::block_on(async {
+        let native_error = AsyncNoteReadsView::new(&pool)
+            .begin()
+            .await
+            .err()
+            .expect("native transaction policy");
+        let database = Database::new(pool);
+        let dynamic_error = AsyncNoteReadsView::new(&database)
+            .begin()
+            .await
+            .expect_err("preserve native transaction policy");
+
+        assert!(native_error.to_string().contains("transactions disabled"));
+        assert_eq!(dynamic_error.to_string(), native_error.to_string());
+    });
+}
+
+#[test]
+fn exclusive_repository_borrows_native_transactions() {
+    let note = NewNote {
+        title: "exclusive".into(),
+        pinned: false,
+    };
+
+    let file = TempDb::new("repo-exclusive");
+    let pool = file.pool(1);
+    let mut repository = ExclusiveNotesRepo::new(pool.get().expect("connection"));
+
+    let mut tx = repository.begin().expect("native transaction");
+    let mut notes = ExclusiveNotesView::new(&mut tx);
+    assert_eq!(notes.add(&note).expect("insert"), 1);
+    assert_eq!(notes.all().expect("read own write")[0].title, "exclusive");
+    tx.commit().expect("commit");
+    assert_eq!(repository.all().expect("read committed").len(), 1);
+}
+
+#[test]
+fn blocking_repository_borrows_native_transactions_without_a_session() {
+    let note = NewNote {
+        title: "blocking".into(),
+        pinned: false,
+    };
+
+    let file = TempDb::new("repo-blocking");
+    let pool = file.pool(1);
+    let mut repository = AsyncExclusiveNotesRepo::new(Blocking(pool.get().expect("connection")));
+
+    pollster::block_on(async {
+        let mut tx = repository.begin().await.expect("native transaction");
+        let mut notes = AsyncExclusiveNotesView::new(&mut tx);
+        assert_eq!(notes.add(&note).await.expect("insert"), 1);
+        assert_eq!(
+            notes.all().await.expect("read own write")[0].title,
+            "blocking"
+        );
+        tx.rollback().await.expect("rollback");
+        assert!(
+            repository
+                .all()
+                .await
+                .expect("read after rollback")
+                .is_empty()
+        );
+    });
+}
+
+#[test]
+fn async_owned_and_borrowed_repositories_use_begin() {
+    let file = TempDb::new("repo-async-pool");
+    let pool = Blocking(file.pool(1));
+    let repository = AsyncNoteReadsRepo::new(pool);
+    let view = AsyncNoteReadsView::new(repository.source());
+
+    pollster::block_on(async {
+        repository
+            .begin()
+            .await
+            .expect("owned repository transaction")
+            .rollback()
+            .await
+            .expect("rollback");
+        view.begin_with(rupa::TxOptions::default())
+            .await
+            .expect("borrowed repository transaction")
+            .commit()
+            .await
+            .expect("commit");
+        assert!(view.all().await.expect("query through pool").is_empty());
+    });
+}
+
 #[test]
 fn repository_views_share_one_owned_transaction() {
     let note = NewNote {
@@ -36,9 +185,11 @@ fn repository_views_share_one_owned_transaction() {
 
     let file = TempDb::new("repo-session");
     let pool = file.pool(2);
-    let session = NoteWritesView::new(&pool)
-        .begin()
-        .expect("begin transaction from repository");
+    let session = rupa::TxSession::new(
+        NoteWritesView::new(&pool)
+            .begin()
+            .expect("begin transaction from repository"),
+    );
     let writes = NoteWritesView::new(&session);
     let reads = NoteReadsView::new(&session);
 

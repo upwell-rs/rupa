@@ -31,7 +31,7 @@ struct User {
 #[insertable(entity = User)]
 struct NewUser { email: String, prefs: Prefs }
 
-#[repository]                           // dyn-compatible: Arc<dyn UserRepository>
+#[repository]                           // native, unboxed futures
 pub trait UserRepository: Send + Sync {
     #[query(filter = email == $email)]
     async fn by_email(&self, email: &str) -> Result<Option<User>, rupa::DynError>;
@@ -46,6 +46,12 @@ pub trait UserRepository: Send + Sync {
 let db = PgPool::connect(&DbConfig::new("postgres://app@localhost/app")).await?;   // a pool
 let users = UserRepositoryView::new(&db);
 ```
+
+Async repository futures are unboxed by default. Use
+`#[repository(dynamic_dispatch)]` when a trait must support `dyn Trait`.
+Repositories open native transactions with `begin` and `begin_with_security`;
+exclusive `&mut self` queries borrow those transactions directly. Shared
+`&self` transaction views use an explicit `TxSession` or `AsyncTxSession`.
 
 ## Examples
 
@@ -137,7 +143,8 @@ acquire_timeout = "5s"
 
 ```rust
 let db: rupa::Database = rupa::connect(&config.database).await?;   // `dynamic`
-let session = UserRepositoryView::new(&db).begin_async().await?;
+let tx = UserRepositoryView::new(&db).begin().await?;
+let session = rupa::AsyncTxSession::new(tx);
 UserRepositoryView::new(&session).create(&new_user).await?;
 session.commit().await?;
 ```

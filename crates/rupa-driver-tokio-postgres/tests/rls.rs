@@ -174,10 +174,12 @@ async fn native_row_level_security() {
     tx.commit().await.unwrap();
 
     // A repository can open an RLS transaction and share it with other views.
-    let session = DocsView::new(&pool)
-        .begin_async_with_security(TxOptions::default(), tenant(2))
-        .await
-        .unwrap();
+    let session = rupa::AsyncTxSession::new(
+        DocsView::new(&pool)
+            .begin_with_security(TxOptions::default(), tenant(2))
+            .await
+            .unwrap(),
+    );
     let docs = DocsView::new(&session);
     let counts = DocCountsView::new(&session);
     let found = docs.after(0).await.unwrap();
@@ -250,10 +252,12 @@ async fn native_row_level_security() {
 
     // ...and checked at run time on a type-erased `Database`.
     let erased = Database::new(pool);
-    let session = DocsView::new(&erased)
-        .try_begin_async_with_security(TxOptions::default(), tenant(2))
-        .await
-        .unwrap();
+    let session = rupa::AsyncTxSession::new(
+        DocsView::new(&erased)
+            .try_begin_with_security(TxOptions::default(), tenant(2))
+            .await
+            .unwrap(),
+    );
     let docs = DocsView::new(&session);
     assert_eq!(
         docs.after(0)
