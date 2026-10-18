@@ -9,7 +9,8 @@ use rupa_core::registry::{Database, Driver};
 use crate::PgPool;
 
 /// The registry entry for this driver: name `postgres`, schemes
-/// `postgres` and `postgresql`. Builds a [`PgPool`] without TLS.
+/// `postgres` and `postgresql`. Builds a [`PgPool`] using rustls when the
+/// `tls-rustls` feature is on (the URL's `sslmode` decides), and no TLS otherwise.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PgDriver;
 

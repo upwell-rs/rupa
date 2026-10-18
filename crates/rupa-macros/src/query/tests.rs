@@ -36,6 +36,42 @@ fn ignores_dollars_in_quotes_and_comments() {
 }
 
 #[test]
+fn rejects_dialect_dependent_backslash_quotes() {
+    let statements = [
+        r"SELECT 'O\'Brien $literal', $yes",
+        r"SELECT E'O\'Brien $literal', $yes",
+        r"SELECT 'a\' || $literal || \'b', $yes",
+        r#"SELECT "a\"$literal", $yes"#,
+        r"SELECT '\', $yes",
+        r"SELECT 'a\\' AS value, $yes",
+    ];
+
+    for sql in statements {
+        let error = split_sql(sql).expect_err("ambiguous quoting must not extract parameters");
+
+        assert!(error.contains("backslash before a quote"), "{error}");
+        assert!(error.contains("bind"), "{error}");
+    }
+}
+
+#[test]
+fn preserves_portable_quotes_and_literal_backslashes() {
+    let literals = [
+        r"'O''Brien $literal'",
+        r#""a""$literal""#,
+        r"'C:\data $literal'",
+        "'東京 $literal'",
+    ];
+
+    for literal in literals {
+        let sql = format!("SELECT {literal}, $yes");
+        let parts = split_sql(&sql).expect("portable quoted SQL should split");
+
+        assert_eq!(parts, [text(&format!("SELECT {literal}, ")), param("yes")]);
+    }
+}
+
+#[test]
 fn rejects_unsupported_placeholders() {
     assert!(
         split_sql("WHERE a = $1")

@@ -16,6 +16,11 @@ Repositories use native, unboxed futures by default. Use
 `&mut self` query methods borrow a connection or transaction directly;
 `&self` methods acquire from a pool or an explicitly shared context.
 
+Raw `#[query(sql = "...")]` statements use `$name` parameters outside quotes
+and comments. Backslashes immediately before a closing or escaped quote are
+rejected because their meaning depends on the database and session settings.
+Bind such values as parameters, or use SQL's doubled quotes for literal quotes.
+
 ## Internal role
 
 - `model` reads entity attributes; `entity`, `capability`, `joined` emit the
