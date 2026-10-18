@@ -21,14 +21,14 @@
 //!
 //! ```ignore
 //! let pool = rupa::drivers::sqlite::SqlitePool::connect(&DbConfig::new("sqlite://app.db"))?;
-//! let users = Repo::new(pool);
+//! let users = UserRepositoryView::new(&pool);
 //! ```
 //!
 //! # Chosen at run time (`dynamic`)
 //!
 //! ```ignore
 //! let db: rupa::Database = rupa::connect(&DbConfig::new("sqlite://app.db")).await?;
-//! let users: Arc<dyn UserRepository> = Arc::new(Repo::new(db.clone()));
+//! let users = UserRepositoryView::new(&db);
 //! ```
 //!
 //! [`registry()`] lists the drivers compiled in, in the order they are
@@ -49,6 +49,9 @@ pub use rupa_sql as sql;
 
 #[cfg(feature = "dynamic")]
 pub use registry::{connect, registry};
+#[cfg(feature = "async")]
+pub use rupa_core::AsyncTxSession;
+pub use rupa_core::TxError;
 pub use rupa_core::config::{
     DbConfig, DriverConfig, MySqlOptions, PoolConfig, PostgresOptions, SqliteOptions,
 };
@@ -68,11 +71,13 @@ pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional};
 pub use rupa_core::tx::{IsolationLevel, Transaction, Transactional, TxOptions};
 pub use rupa_core::{
     Acquire, Column, Deletable, Entity, Executor, Expr, ExprOps, FromRow, Gettable, Insertable,
-    Json, NoKey, Query, Repo, Scalar, Shared, Updatable, bind, col, delete, get, insert, raw,
-    select, update,
+    Json, NoKey, Query, Repo, RepoView, Scalar, SecureTxSession, Shared, TxSession, Updatable,
+    bind, col, delete, get, insert, raw, select, update,
 };
 #[cfg(feature = "async")]
-pub use rupa_core::{AcquireAsync, AsyncExecutor, SharedAsync};
+pub use rupa_core::{
+    AcquireAsync, AsyncExecutor, AsyncSecureTxSession, AsyncTransactionSource, SharedAsync,
+};
 pub use rupa_macros::{
     Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository,
 };

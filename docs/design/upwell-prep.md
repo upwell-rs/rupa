@@ -1,5 +1,11 @@
 # Preparing for `rupa-upwell` (milestone 9)
 
+> Historical preparation note. Repository traits now generate a distinct owned
+> type and borrowed view. Applications can put one `TxSession` or
+> `AsyncTxSession` around an owned transaction and bind any repository view to
+> it. A future Upwell custom scope can hold that single session and explicitly
+> commit or roll it back; `rupa-upwell` remains a placeholder.
+
 Status: **items 1–3 done; item 4 partly** (2026-10-03). See
 [`connections.md`](connections.md) for what was built and the decisions
 taken. This note lists what rupa needs before the Upwell integration can be

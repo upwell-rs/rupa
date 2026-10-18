@@ -5,8 +5,8 @@ use std::sync::Arc;
 use rupa::core::exec::{AsyncExecutor, Executor};
 use rupa::core::tx::Transactional;
 use rupa::prelude::*;
-use rupa::{DynError, Shared};
-use rupa_driver_memory::{AsyncMemoryDb, MemoryDb, MemoryError};
+use rupa::{Database, DynError, Shared};
+use rupa_driver_memory::{AsyncMemoryDb, MemoryDb};
 
 #[derive(Debug, Clone, PartialEq, Entity, Insertable)]
 #[entity(table = "users")]
@@ -58,7 +58,7 @@ fn async_db() -> AsyncMemoryDb {
 
 #[test]
 fn dyn_repository_behind_arc() {
-    let repo: Arc<dyn UserRepository> = Arc::new(Repo::shared_async(async_db()));
+    let repo: Arc<dyn UserRepository> = Arc::new(UserRepositoryRepo::shared_async(async_db()));
     let ada = pollster::block_on(repo.by_email("ada@x")).unwrap();
     assert_eq!(ada.map(|u| u.id), Some(1));
     assert_eq!(
@@ -80,13 +80,14 @@ fn dyn_repository_errors_keep_their_kind() {
         #[query(filter = active == $active)]
         async fn exactly_one(&self, active: bool) -> Result<User, DynError>;
     }
-    let repo: Arc<dyn Strict> = Arc::new(Repo::shared_async(async_db()));
+    let repo: Arc<dyn Strict> = Arc::new(StrictRepo::new(Database::single(async_db())));
     let err = pollster::block_on(repo.exactly_one(true)).unwrap_err();
     use rupa::core::exec::ExecError;
     assert_eq!(
         err.result_error(),
         Some(&rupa::core::ResultError::TooManyRows)
     );
+    assert!(err.downcast_ref::<rupa::core::ResultError>().is_some());
 }
 
 // ---------------------------------------------------------------------------
@@ -95,11 +96,11 @@ fn dyn_repository_errors_keep_their_kind() {
 
 #[derive(Debug)]
 pub enum AppError {
-    Db(MemoryError),
+    Db(DynError),
 }
 
-impl From<MemoryError> for AppError {
-    fn from(e: MemoryError) -> Self {
+impl From<DynError> for AppError {
+    fn from(e: DynError) -> Self {
         AppError::Db(e)
     }
 }
@@ -110,19 +111,29 @@ pub trait SyncUsers {
     fn by_id(&self, id: i64) -> Result<Option<User>, AppError>;
 }
 
+#[repository]
+pub trait UserFlags {
+    #[query(entity = User, filter = id == $id && active == true)]
+    fn by_id(&self, id: i64) -> Result<bool, AppError>;
+}
+
 #[test]
 fn sync_repository_over_shared_executor() {
     let mut db = MemoryDb::new();
     db.register::<User>();
     db.run(insert::<User>().values(&users()).affected())
         .unwrap();
-    let repo = Repo::new(Shared::new(db));
+    let source = Shared::new(db);
+    let repo = SyncUsersView::new(&source);
+    let flags = UserFlagsView::new(&source);
     assert_eq!(
         repo.by_id(2).unwrap().map(|u| u.email),
         Some("bob@x".to_string())
     );
     let shared: &dyn SyncUsers = &repo;
     assert!(shared.by_id(9).unwrap().is_none());
+    assert!(!flags.by_id(2).unwrap());
+    assert!(flags.by_id(1).unwrap());
 }
 
 // ---------------------------------------------------------------------------
@@ -132,27 +143,28 @@ fn sync_repository_over_shared_executor() {
 #[repository]
 pub trait TxUsers {
     #[query(filter = active == $active)]
-    fn active(&mut self, active: bool) -> Result<Vec<User>, MemoryError>;
+    fn active(&self, active: bool) -> Result<Vec<User>, AppError>;
 }
 
 #[test]
-fn mut_repository_inside_a_transaction() {
+fn repository_view_inside_a_transaction() {
     let mut db = MemoryDb::new();
     db.register::<User>();
     let mut tx = db.begin().unwrap();
     tx.run(insert::<User>().values(&users()).affected())
         .unwrap();
     {
-        let mut repo = Repo::new(&mut tx);
+        let session = rupa::TxSession::new(tx);
+        let repo = TxUsersView::new(&session);
         assert_eq!(
             repo.active(true).unwrap().len(),
             2,
             "sees the tx's own writes"
         );
     }
-    drop(tx);
+    let source = Shared::new(db);
     assert_eq!(
-        Repo::new(&mut db).active(true).unwrap().len(),
+        TxUsersView::new(&source).active(true).unwrap().len(),
         0,
         "rolled back"
     );
@@ -165,13 +177,13 @@ fn mut_repository_inside_a_transaction() {
 #[repository(static_dispatch)]
 pub trait FastUsers {
     #[query(filter = active == $active, order_by = id desc, limit = 1)]
-    async fn newest_active(&mut self, active: bool) -> Result<Option<User>, MemoryError>;
+    async fn newest_active(&self, active: bool) -> Result<Option<User>, AppError>;
 }
 
 #[test]
 fn static_dispatch_repository() {
-    let mut db = async_db();
-    let mut repo = Repo::new(&mut db);
+    let db = rupa::SharedAsync::new(async_db());
+    let repo = FastUsersView::new(&db);
     let newest = pollster::block_on(repo.newest_active(true)).unwrap();
     assert_eq!(newest.map(|u| u.id), Some(3));
     // The future is Send, so it can be spawned.
@@ -179,7 +191,7 @@ fn static_dispatch_repository() {
     let fut = repo.newest_active(false);
     assert_send(&fut);
     drop(fut);
-    let _ = AsyncExecutor::dialect(&db);
+    let _ = AsyncExecutor::dialect(&async_db());
 }
 
 // ---------------------------------------------------------------------------
@@ -219,7 +231,7 @@ impl UserRepository for FakeUsers {
 fn hand_written_mock_is_interchangeable() {
     let repos: Vec<Arc<dyn UserRepository>> = vec![
         Arc::new(FakeUsers(users())),
-        Arc::new(Repo::shared_async(async_db())),
+        Arc::new(UserRepositoryRepo::shared_async(async_db())),
     ];
     for repo in repos {
         assert_eq!(repo.active(false).unwrap().len(), 1);
@@ -342,7 +354,8 @@ fn exercise_notes(repo: &dyn NoteRepository) {
 
 #[test]
 fn crud_repository_over_an_async_executor() {
-    let repo: Arc<dyn NoteRepository> = Arc::new(Repo::shared_async(note_db().into_async()));
+    let repo: Arc<dyn NoteRepository> =
+        Arc::new(NoteRepositoryRepo::shared_async(note_db().into_async()));
     exercise_notes(&*repo);
 }
 
@@ -350,20 +363,19 @@ fn crud_repository_over_an_async_executor() {
 /// plain sync executor serves them, and no async runtime is involved.
 #[test]
 fn async_repository_over_a_sync_executor() {
-    let repo: Arc<dyn NoteRepository> = Arc::new(Repo::shared(note_db()));
+    let repo: Arc<dyn NoteRepository> = Arc::new(NoteRepositoryRepo::shared(note_db()));
     exercise_notes(&*repo);
 }
 
 #[repository]
 pub trait OneConnection {
     #[query(get)]
-    async fn get(&mut self, id: i64) -> Result<Option<Note>, MemoryError>;
+    async fn get(&self, id: i64) -> Result<Option<Note>, AppError>;
 }
 
 /// `&mut self` over one sync executor (or transaction), made async with `Blocking`.
 #[test]
 fn blocking_wraps_one_sync_executor() {
-    use rupa::core::exec::Blocking;
     let mut db = note_db();
     db.run(
         insert::<Note>()
@@ -371,8 +383,9 @@ fn blocking_wraps_one_sync_executor() {
             .affected(),
     )
     .unwrap();
-    let mut tx = db.begin().unwrap();
-    let mut repo = Repo::new(Blocking(&mut tx));
+    let tx = db.begin().unwrap();
+    let source = Shared::new(tx);
+    let repo = OneConnectionView::new(&source);
     assert!(pollster::block_on(repo.get(1)).unwrap().is_some());
 }
 
@@ -420,7 +433,7 @@ fn joins_in_a_repository() {
             title: title.into(),
         });
     db.run(insert::<Post>().values(&posts).affected()).unwrap();
-    let repo: Arc<dyn PostRepository> = Arc::new(Repo::shared_async(db.into_async()));
+    let repo: Arc<dyn PostRepository> = Arc::new(PostRepositoryRepo::shared_async(db.into_async()));
 
     let rows = pollster::block_on(repo.with_posts(true)).unwrap();
     let ids: Vec<_> = rows

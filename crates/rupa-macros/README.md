@@ -18,7 +18,7 @@ Through the `rupa` facade (`use rupa::prelude::*`). Generated code refers to
 - `dsl` parses the filter grammar shared by `#[query]` and `on!`.
 - `query` turns a declared signature into a `Query<R>` builder expression
   (`attr` grammar, `ctx` filter codegen, `join`, `crud`, `raw` SQL).
-- `repository` implements a trait for `Repo<S>` from its `#[query]` methods.
+- `repository` generates a distinct owned repository and borrowed view from its `#[query]` methods.
 
 ## Feature flags
 

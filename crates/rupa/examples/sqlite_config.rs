@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
         drop(conn);
 
-        let notes = Repo::new(db.clone());
+        let notes = NotesView::new(&db);
         let found = notes.by_id(1).await?.expect("note 1 exists");
         assert_eq!(found.title, "pooled");
         assert_eq!(db.status().max_size, 1);

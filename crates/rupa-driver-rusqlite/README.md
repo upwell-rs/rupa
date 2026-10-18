@@ -6,7 +6,7 @@ Sync SQLite (3.38+) executor and pool on rusqlite and r2d2.
 
 ## Usage
 
-`SqlitePool::connect(&DbConfig::new("sqlite://app.db"))?`, then `Repo::new(pool)`. Usually enabled through a feature of the `rupa` facade.
+`SqlitePool::connect(&DbConfig::new("sqlite://app.db"))?`, then bind a generated repository view to `&pool`. Usually enabled through a feature of the `rupa` facade.
 
 ## Internal role
 

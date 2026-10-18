@@ -12,7 +12,64 @@ use rupa::{
     AsyncExecutor as _, Database, DbConfig, DriverConfig, Pool, PoolConfig, Registry, SqliteOptions,
 };
 use rupa_conformance::{NewNote, Note, SQLITE_ATTACH, SQLITE_DDL};
+use rupa_driver_rusqlite::SqliteError;
 use rupa_driver_rusqlite::{SqliteDriver, SqliteManager, SqlitePool, SqliteTarget};
+
+#[repository]
+trait NoteWrites {
+    #[query(insert)]
+    fn add(&self, note: &NewNote) -> Result<u64, rupa::DynError>;
+}
+
+#[repository]
+trait NoteReads {
+    #[query(order_by = id)]
+    fn all(&self) -> Result<Vec<Note>, rupa::DynError>;
+}
+
+#[test]
+fn repository_views_share_one_owned_transaction() {
+    let note = NewNote {
+        title: "committed".into(),
+        pinned: false,
+    };
+
+    let file = TempDb::new("repo-session");
+    let pool = file.pool(2);
+    let session = NoteWritesView::new(&pool)
+        .begin()
+        .expect("begin transaction from repository");
+    let writes = NoteWritesView::new(&session);
+    let reads = NoteReadsView::new(&session);
+
+    assert_eq!(std::mem::size_of_val(&writes), std::mem::size_of::<&()>());
+    assert_eq!(std::mem::size_of_val(&reads), std::mem::size_of::<&()>());
+    assert_eq!(writes.add(&note).expect("insert note"), 1);
+    assert_eq!(reads.all().expect("read own write")[0].title, "committed");
+    session.commit().expect("commit transaction");
+    let error = writes.add(&note).expect_err("session is closed");
+    assert!(error.downcast_ref::<SqliteError>().is_some());
+    assert_eq!(count(&pool), 1);
+}
+
+#[test]
+fn dropped_repository_session_rolls_back() {
+    let note = NewNote {
+        title: "discarded".into(),
+        pinned: false,
+    };
+
+    let file = TempDb::new("repo-drop");
+    let pool = file.pool(1);
+    let session = rupa::TxSession::new(pool.begin().expect("begin transaction"));
+
+    NoteWritesView::new(&session)
+        .add(&note)
+        .expect("insert note");
+    drop(session);
+
+    assert_eq!(count(&pool), 0);
+}
 
 /// A database file, plus a second one attached as the `conformance` schema;
 /// both removed when the test ends.

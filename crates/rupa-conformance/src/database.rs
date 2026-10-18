@@ -115,7 +115,7 @@ fn note(title: &str) -> NewNote {
 }
 
 async fn titles(db: &Database) -> Vec<String> {
-    let notes = Arc::new(Repo::new(db.clone())) as Arc<dyn Notes>;
+    let notes = Arc::new(NotesRepo::new(db.clone())) as Arc<dyn Notes>;
     notes
         .all()
         .await
@@ -155,7 +155,7 @@ async fn db_dropped_owned_tx_rolls_back_before_reuse(db: &Database) {
 }
 
 async fn db_repository_over_the_pool(db: &Database) {
-    let notes: Arc<dyn Notes> = Arc::new(Repo::new(db.clone()));
+    let notes: Arc<dyn Notes> = Arc::new(NotesRepo::new(db.clone()));
     assert_eq!(notes.add(&note("a")).await.unwrap(), 1);
     assert_eq!(notes.add(&note("b")).await.unwrap(), 1);
     assert_eq!(notes.by_title("b").await.unwrap().unwrap().title, "b");

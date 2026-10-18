@@ -110,7 +110,7 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-/// A repository trait plus its implementation for `Repo<S>`.
+/// A repository trait with a distinct owned type and borrowed view.
 ///
 /// ```ignore
 /// #[repository]
@@ -122,7 +122,7 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     fn active(&self, active: bool) -> Result<Vec<User>, DynError>;  // blocks in place
 /// }
 ///
-/// let users: Arc<dyn UserRepository> = Arc::new(Repo::shared_async(executor));
+/// let users: Arc<dyn UserRepository> = Arc::new(UserRepositoryRepo::shared_async(executor));
 /// ```
 ///
 /// See the `rupa_macros::repository` module docs for the rules on receivers,

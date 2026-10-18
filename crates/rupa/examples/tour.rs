@@ -63,7 +63,7 @@ struct UserPatch {
     active: Option<bool>,
 }
 
-/// A repository: declared queries, implemented for `Repo<S>`. `async` and
+/// A repository: declared queries, implemented for its own view and owned type. `async` and
 /// receivers are the author's choice; this one is dyn-compatible (the
 /// default), so it can be shared as `Arc<dyn UserRepository>`.
 #[repository]
@@ -202,7 +202,8 @@ fn main() {
 fn run_repository(db: MemoryDb) {
     use std::sync::Arc;
 
-    let users: Arc<dyn UserRepository> = Arc::new(Repo::shared_async(db.into_async()));
+    let users: Arc<dyn UserRepository> =
+        Arc::new(UserRepositoryRepo::shared_async(db.into_async()));
     println!(
         "
 Repository behind Arc<dyn UserRepository>:"

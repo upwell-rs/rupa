@@ -109,7 +109,7 @@ impl r2d2::ManageConnection for PgManager {
 }
 
 rupa_core::r2d2_pool! {
-    /// A pool of sync Postgres connections; a [`Pool`](rupa_core::pool::Pool), so `Repo<PgPool>` runs
+    /// A pool of sync Postgres connections; a [`Pool`](rupa_core::pool::Pool), so repository views run
     /// sync `&self` repositories and `pool.begin()?` opens an owned transaction.
     /// Cloning shares the pool.
     pub struct PgPool {

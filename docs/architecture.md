@@ -48,7 +48,8 @@ pub trait Users: Send + Sync {
     fn by_email(&self, email: &str) -> Result<Option<User>, rupa::DynError>;
 }
 
-let users = Repo::new(SqlitePool::connect(&config)?);
+let pool = SqlitePool::connect(&config)?;
+let users = UsersView::new(&pool);
 users.by_email("a@b.c")?;
 ```
 
@@ -59,25 +60,27 @@ users.by_email("a@b.c")?;
 hidden probe per field that `col!(User::email)` uses to find the column's
 type and kind (`rupa-core/src/column/__private.rs`).
 
-`#[repository]` (`rupa-macros/src/repository.rs`) emits the trait as written
-and `impl Users for Repo<__S>`. For each method:
+`#[repository]` (`rupa-macros/src/repository.rs`) emits the trait, a unique
+`UsersKey`, a borrowed `UsersView<'_, S>`, and an owned `UsersRepo<S>`.
+The key prevents unrelated repository traits from accumulating on one
+concrete type. For each method:
 
 - `query::query_body` (`rupa-macros/src/query/mod.rs`) translates
   `#[query(filter = ..)]` into builder calls: `select::<User>().filter(..)
   .optional()`. The filter grammar is parsed by `dsl.rs` and turned into
   `Expr` code by `query/ctx.rs`. The result type (`Option<User>`) picks the
   terminal (`.optional()`) in `query/signature.rs`.
-- `Access` picks how the implementation reaches an executor: `&self` methods
-  check a connection out of an `Acquire` source, `&mut self` methods use the
-  executor directly. Sync or async is decided by whether any method is
-  `async`.
+- An `&self` method acquires from a pool or transaction session. Acquisition
+  and execution errors pass through `DynError`; the declared error type only
+  needs `From<DynError>`. Sync or async
+  is decided by whether any method is `async`.
 
 So the method body is roughly:
 
 ```rust
 let __query = select::<User>().filter(col!(User::email).eq(email)).optional();
-let mut __conn = Acquire::acquire(self.source())?;
-Ok(Executor::run(&mut __conn, __query)?)
+let mut __conn = Acquire::acquire(self.source()).map_err(DynError::new)?;
+Ok(Executor::run(&mut __conn, __query).map_err(DynError::new)?)
 ```
 
 ### 2. Building: a `Query<R>` value, no IO
@@ -136,7 +139,8 @@ most one row, errors on a second (`ResultError::TooManyRows`), and calls
 `User::from_row`. That reads each column by position as its `SqlType`
 (`Row::get`), and the driver converts its own value into a `Value`
 (`rupa-driver-rusqlite/src/value.rs`). Errors come back as the driver's
-`SqliteError`, converted to the method's `E` (`DynError` here) by `?`.
+`SqliteError`, wrapped in `DynError`, then converted to the method's `E` by
+`From<DynError>`.
 
 ## Static and dynamic
 

@@ -180,7 +180,7 @@ impl r2d2::ManageConnection for SqliteManager {
 rupa_core::r2d2_pool! {
     /// A pool of SQLite connections.
     ///
-    /// A sync [`Pool`](rupa_core::pool::Pool): `Repo<SqlitePool>` runs sync `&self` repositories, and
+    /// A sync [`Pool`](rupa_core::pool::Pool): repository views run sync `&self` methods, and
     /// `pool.begin()` opens an owned transaction. Cloning shares the pool.
     pub struct SqlitePool {
         manager: SqliteManager,

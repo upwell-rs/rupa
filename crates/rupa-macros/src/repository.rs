@@ -1,11 +1,10 @@
 //! `#[repository]`: emits the trait as written (with `#[query]` attributes
-//! removed) plus one implementation for `Repo<S>`.
+//! removed), a repository key, a borrowed view, and an owned repository type.
 //!
 //! The author decides everything visible:
 //!
-//! - **Receivers.** All query methods take `&self` (`S` is a connection
-//!   source: `Acquire` / `AcquireAsync`, e.g. `Shared`, a pool), or all take
-//!   `&mut self` (`S` is the executor, e.g. `&mut tx`).
+//! - **Receivers.** Query methods take `&self`; `S` is an `Acquire` or
+//!   `AcquireAsync` source such as a pool or transaction session.
 //! - **Sync or async, per method.** If any query method is `async`, the
 //!   repository runs on an async executor, and its plain `fn` methods block
 //!   in place. Otherwise everything is synchronous.
@@ -18,7 +17,7 @@
 //! `impl Future + Send`, which is zero-cost but not dyn-compatible.
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote, quote_spanned};
+use quote::{ToTokens, format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{
     FnArg, ItemTrait, ReturnType, Signature as FnSignature, TraitItem, TraitItemFn, Type,
@@ -32,20 +31,17 @@ struct Method {
     item: TraitItemFn,
     attr: QueryAttr,
     is_async: bool,
-    mut_receiver: bool,
     /// `R` and `E` of `Result<R, E>`.
     ok: Type,
     err: Type,
 }
 
 /// How the implementation reaches an executor: through a connection source
-/// (`&self`) or the executor itself (`&mut self`), sync or async.
+/// (`&self`), synchronously or asynchronously.
 #[derive(Clone, Copy)]
 enum Access {
     SharedSync,
     SharedAsync,
-    OwnedSync,
-    OwnedAsync,
 }
 
 impl Access {
@@ -54,44 +50,44 @@ impl Access {
     fn of(methods: &[Method]) -> Self {
         let is_async = methods.iter().any(|m| m.is_async);
 
-        match (methods[0].mut_receiver, is_async) {
-            (false, false) => Access::SharedSync,
-            (false, true) => Access::SharedAsync,
-            (true, false) => Access::OwnedSync,
-            (true, true) => Access::OwnedAsync,
+        match is_async {
+            false => Access::SharedSync,
+            true => Access::SharedAsync,
         }
     }
 
     fn is_async(self) -> bool {
-        matches!(self, Access::SharedAsync | Access::OwnedAsync)
+        matches!(self, Access::SharedAsync)
     }
 
-    /// The bound on `Repo<__S>`'s `__S`.
+    /// The bound on the repository source.
     fn bound(self, ms: &TokenStream) -> TokenStream {
         match self {
             Access::SharedSync => quote!(#ms::Acquire),
             Access::SharedAsync => quote!(#ms::AcquireAsync),
-            Access::OwnedSync => quote!(#ms::Executor),
-            Access::OwnedAsync => quote!(#ms::AsyncExecutor),
         }
     }
 
-    /// Runs `__query`, from a checked-out connection or the executor itself.
+    /// Runs `__query` on an acquired connection or transaction guard.
     fn run(self, ms: &TokenStream) -> TokenStream {
         match self {
             Access::SharedAsync => quote! {
-                let mut __conn = #ms::AcquireAsync::acquire(self.source()).await?;
-                ::core::result::Result::Ok(#ms::AsyncExecutor::run(&mut __conn, __query).await?)
-            },
-            Access::OwnedAsync => quote! {
-                ::core::result::Result::Ok(#ms::AsyncExecutor::run(self.source_mut(), __query).await?)
+                let mut __conn = #ms::AcquireAsync::acquire(self.source())
+                    .await
+                    .map_err(#ms::ExecError::into_dyn_error)?;
+                ::core::result::Result::Ok(
+                    #ms::AsyncExecutor::run(&mut __conn, __query)
+                        .await
+                        .map_err(#ms::ExecError::into_dyn_error)?
+                )
             },
             Access::SharedSync => quote! {
-                let mut __conn = #ms::Acquire::acquire(self.source())?;
-                ::core::result::Result::Ok(#ms::Executor::run(&mut __conn, __query)?)
-            },
-            Access::OwnedSync => quote! {
-                ::core::result::Result::Ok(#ms::Executor::run(self.source_mut(), __query)?)
+                let mut __conn = #ms::Acquire::acquire(self.source())
+                    .map_err(#ms::ExecError::into_dyn_error)?;
+                ::core::result::Result::Ok(
+                    #ms::Executor::run(&mut __conn, __query)
+                        .map_err(#ms::ExecError::into_dyn_error)?
+                )
             },
         }
     }
@@ -160,15 +156,15 @@ fn take_method(f: &mut TraitItemFn) -> syn::Result<Option<Method>> {
         ));
     }
 
-    let mut_receiver = match f.sig.inputs.first() {
-        Some(FnArg::Receiver(r)) if r.reference.is_some() => r.mutability.is_some(),
+    match f.sig.inputs.first() {
+        Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_none() => {}
         _ => {
             return Err(syn::Error::new_spanned(
                 &f.sig,
-                "a repository method takes `&self` (shared, e.g. `Arc<dyn Trait>`) or `&mut self` (one executor)",
+                "a repository query method takes `&self`; bind a transaction session for transactional calls",
             ));
         }
-    };
+    }
     let ReturnType::Type(_, ret) = &f.sig.output else {
         return Err(syn::Error::new_spanned(
             &f.sig,
@@ -184,7 +180,6 @@ fn take_method(f: &mut TraitItemFn) -> syn::Result<Option<Method>> {
 
     Ok(Some(Method {
         is_async: f.sig.asyncness.is_some(),
-        mut_receiver,
         ok,
         err,
         attr,
@@ -205,8 +200,7 @@ fn collect_methods(tr: &mut ItemTrait) -> syn::Result<Vec<Method>> {
     Ok(methods)
 }
 
-/// Rejects what the methods can't be implemented with: `async` without the
-/// `async` feature, and a mix of `&self` and `&mut self` receivers.
+/// Rejects async methods without the `async` feature.
 fn check_methods(methods: &[Method]) -> syn::Result<()> {
     if !cfg!(feature = "async")
         && let Some(asyncness) = methods.iter().find_map(|m| m.item.sig.asyncness)
@@ -214,17 +208,6 @@ fn check_methods(methods: &[Method]) -> syn::Result<()> {
         return Err(syn::Error::new_spanned(
             asyncness,
             "async repository methods need the `async` feature of `rupa`",
-        ));
-    }
-
-    if let Some(m) = methods
-        .iter()
-        .find(|m| m.mut_receiver != methods[0].mut_receiver)
-    {
-        return Err(syn::Error::new_spanned(
-            &m.item.sig,
-            "all query methods of a repository take the same receiver: `&self` (through a connection source) \
-             or `&mut self` (through one executor)",
         ));
     }
 
@@ -287,15 +270,17 @@ fn impl_bounds(
     methods: &[Method],
     ms: &TokenStream,
     source_bound: &TokenStream,
+    impl_type: &TokenStream,
+    include_supertraits: bool,
 ) -> Vec<TokenStream> {
     let errors = distinct(methods.iter().map(|m| &m.err))
         .into_iter()
-        .map(|e| quote!(#e: ::core::convert::From<<__S as #source_bound>::Error>));
+        .map(|e| quote!(#e: ::core::convert::From<#ms::DynError>));
     let functions = distinct(methods.iter().flat_map(|m| called_functions(&m.attr)))
         .into_iter()
         .map(|p| quote!(#p: #ms::DslAvailable<<__S as #source_bound>::Dialect>));
     let supertraits = tr.supertraits.iter().filter_map(|b| match b {
-        TypeParamBound::Trait(t) => Some(quote!(#ms::Repo<__S>: #t)),
+        TypeParamBound::Trait(t) if include_supertraits => Some(quote!(#impl_type: #t)),
         _ => None,
     });
 
@@ -354,8 +339,7 @@ fn method_impl(
     })
 }
 
-/// Expands `#[repository]`: the trait, plus its implementation for
-/// `Repo<__S>`.
+/// Expands `#[repository]` into the trait and its distinct bound types.
 pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let ms = quote!(::rupa::__macro_support);
     let static_dispatch = parse_options(args)?;
@@ -379,23 +363,51 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
 
     let access = Access::of(&methods);
     let source_bound = access.bound(&ms);
-    let bounds = impl_bounds(&tr, &methods, &ms, &source_bound);
+    let key = format_ident!("{}Key", tr.ident);
+    let view = format_ident!("{}View", tr.ident);
+    let owned = format_ident!("{}Repo", tr.ident);
+    let visibility = &tr.vis;
+    let old_type = quote!(#ms::Repo<__S, #key>);
+    let bounds = impl_bounds(&tr, &methods, &ms, &source_bound, &old_type, true);
+    let view_type = quote!(#ms::RepoView<'__rupa, #key, __S>);
+    let view_bounds = impl_bounds(&tr, &methods, &ms, &source_bound, &view_type, false);
     let impl_fns = methods
         .iter()
         .map(|m| method_impl(&tr, m, access, &ms, static_dispatch))
         .collect::<syn::Result<Vec<_>>>()?;
     let trait_ident = &tr.ident;
 
+    let view_impl = quote! {
+            impl<'__rupa, __S> #trait_ident for #view_type
+            where
+                __S: #source_bound,
+                #(#view_bounds,)*
+            {
+                #(#impl_fns)*
+            }
+    };
+
     Ok(quote! {
         #tr
 
-        impl<__S> #trait_ident for #ms::Repo<__S>
+        #[doc = "Repository identity generated by `#[repository]`. "]
+        #visibility struct #key;
+
+        #[doc = "A borrowed view of this repository over one execution context. "]
+        #visibility type #view<'__rupa, __S> = #ms::RepoView<'__rupa, #key, __S>;
+
+        #[doc = "An owned instance of this repository. "]
+        #visibility type #owned<__S> = #ms::Repo<__S, #key>;
+
+        impl<__S> #trait_ident for #old_type
         where
             __S: #source_bound,
             #(#bounds,)*
         {
             #(#impl_fns)*
         }
+
+        #view_impl
     })
 }
 

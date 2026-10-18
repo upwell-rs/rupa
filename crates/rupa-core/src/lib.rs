@@ -44,8 +44,9 @@ pub mod __macro_support {
     pub use crate::column::{Column, ColumnMeta, Json, Scalar};
     pub use crate::dialect::{Capability, CapabilityMarker, Dialect, DslAvailable, Supports, caps};
     pub use crate::entity::{Entity, FromRow, IdValues};
-    pub use crate::error::DslError;
     pub use crate::error::ResultError;
+    pub use crate::error::{DslError, DynError};
+    pub use crate::exec::ExecError;
     pub use crate::expr::{Expr, IntoExpr};
     pub use crate::expr::{ExprOps, IntoCondition};
     pub use crate::ir::{BinOp, DslFnDef, ExprNode, TableRef};
@@ -93,9 +94,11 @@ pub use pool::{OwnedTx, Pool, PoolStatus, Pooled};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 #[cfg(all(feature = "dynamic", feature = "async"))]
 pub use registry::{Database, Driver, Registry};
-pub use repo::{Acquire, Repo, Shared};
+pub use repo::{Acquire, Repo, RepoView, SecureTxSession, Shared, TxSession};
 #[cfg(feature = "async")]
-pub use repo::{AcquireAsync, SharedAsync};
+pub use repo::{
+    AcquireAsync, AsyncSecureTxSession, AsyncTransactionSource, AsyncTxSession, SharedAsync,
+};
 pub use row::{Row, RowCursor};
 #[cfg(feature = "async")]
 pub use security::AsyncSecureTransactional;

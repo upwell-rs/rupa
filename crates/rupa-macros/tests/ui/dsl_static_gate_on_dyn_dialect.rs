@@ -13,6 +13,6 @@ pub trait Users: Send + Sync {
     async fn with_prefs(&self, part: serde_json::Value) -> Result<Vec<User>, DynError>;
 }
 fn wire(exec: rupa::BoxAsyncExecutor) -> std::sync::Arc<dyn Users> {
-    std::sync::Arc::new(Repo::shared_async(exec))
+    std::sync::Arc::new(UsersRepo::shared_async(exec))
 }
 fn main() {}

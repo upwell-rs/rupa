@@ -77,7 +77,13 @@ pub struct Comment {
 #[repository]
 pub trait Docs {
     #[query(filter = id > $min, order_by = id)]
-    async fn after(&mut self, min: i64) -> Result<Vec<Doc>, rupa::DynError>;
+    async fn after(&self, min: i64) -> Result<Vec<Doc>, rupa::DynError>;
+}
+
+#[repository]
+pub trait DocCounts {
+    #[query(entity = Doc, filter = id > $min)]
+    async fn any_after(&self, min: i64) -> Result<bool, rupa::DynError>;
 }
 
 fn tenant(id: i64) -> SecurityContext {
@@ -110,6 +116,9 @@ async fn native_row_level_security() {
         .unwrap();
     tokio::spawn(connection);
     client.batch_execute(DDL).await.unwrap();
+    let pool = PgPool::connect(&DbConfig::new(&url).max_connections(2))
+        .await
+        .unwrap();
     let mut db = PgExecutor::new(client);
 
     // Each tenant sees only its rows; the context travels with the tx.
@@ -162,13 +171,24 @@ async fn native_row_level_security() {
     assert_eq!(titles(&mut inner).await, ["b1", "b2"]);
     inner.rollback().await.unwrap();
 
-    // Repositories work inside it unchanged.
-    let found = Repo::new(&mut tx).after(0).await.unwrap();
+    tx.commit().await.unwrap();
+
+    // A repository can open an RLS transaction and share it with other views.
+    let session = DocsView::new(&pool)
+        .begin_async_with_security(TxOptions::default(), tenant(2))
+        .await
+        .unwrap();
+    let docs = DocsView::new(&session);
+    let counts = DocCountsView::new(&session);
+    let found = docs.after(0).await.unwrap();
     assert_eq!(
         found.iter().map(|d| d.title.as_str()).collect::<Vec<_>>(),
         ["b1", "b2"]
     );
-    tx.commit().await.unwrap();
+    assert!(counts.any_after(0).await.unwrap());
+    session.commit().await.unwrap();
+    assert!(docs.after(0).await.is_err());
+    drop(session);
 
     // Settings are transaction-local: nothing leaks to the next transaction.
     // A role without a tenant sees nothing; the superuser (no context) sees all.
@@ -221,9 +241,6 @@ async fn native_row_level_security() {
     );
 
     // Pools open owned secure transactions: statically gated on `PgPool`...
-    let pool = PgPool::connect(&DbConfig::new(&url).max_connections(2))
-        .await
-        .unwrap();
     let mut tx = pool
         .begin_with_security(TxOptions::default(), tenant(1))
         .await
@@ -233,12 +250,21 @@ async fn native_row_level_security() {
 
     // ...and checked at run time on a type-erased `Database`.
     let erased = Database::new(pool);
-    let mut tx = erased
-        .try_begin_with_security(TxOptions::default(), tenant(2))
+    let session = DocsView::new(&erased)
+        .try_begin_async_with_security(TxOptions::default(), tenant(2))
         .await
         .unwrap();
-    assert_eq!(titles(&mut tx).await, ["b1", "b2"]);
-    tx.rollback().await.unwrap();
+    let docs = DocsView::new(&session);
+    assert_eq!(
+        docs.after(0)
+            .await
+            .unwrap()
+            .iter()
+            .map(|doc| doc.title.as_str())
+            .collect::<Vec<_>>(),
+        ["b1", "b2"]
+    );
+    session.rollback().await.unwrap();
 
     // Joins: each table's policy filters its own rows. Tenant 1 sees its
     // docs, and on a1 only its own comment (not tenant 2's).
