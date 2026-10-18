@@ -6,7 +6,7 @@
 //! overhead:
 //!
 //! - `executor`: a `SqliteExecutor`, statically dispatched;
-//! - `repo_shared`: an `Arc<dyn Users>` repository over `Repo::shared`;
+//! - `repo_shared`: an `Arc<dyn Users>` repository over `UsersRepo::shared`;
 //! - `repo_database`: the same repository over a type-erased, pooled
 //!   `Database` (what `rupa::connect` returns).
 
@@ -17,7 +17,7 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use rupa::core::exec::{Blocking, Executor};
 use rupa::prelude::*;
 use rupa::{Database, Pool as _, PoolConfig};
-use rupa_bench::{NewUser, SQLITE_DDL, User, Users, new_users};
+use rupa_bench::{NewUser, SQLITE_DDL, User, Users, UsersRepo, new_users};
 use rupa_driver_memory::MemoryDb;
 use rupa_driver_rusqlite::{SqliteExecutor, SqliteManager, SqlitePool, SqliteTarget};
 
@@ -92,13 +92,13 @@ fn sqlite(c: &mut Criterion) {
     });
     rupa::sql::render_cache().set_capacity(rupa::sql::cache::DEFAULT_CAPACITY);
 
-    let shared: Arc<dyn Users> = Arc::new(Repo::shared(seeded_sqlite()));
+    let shared: Arc<dyn Users> = Arc::new(UsersRepo::shared(seeded_sqlite()));
     let mut next = ids();
     g.bench_function("get_by_id/repo_shared", |b| {
         b.iter(|| pollster::block_on(shared.by_id(next())).unwrap().unwrap())
     });
 
-    let pooled: Arc<dyn Users> = Arc::new(Repo::new(Database::new(Blocking(seeded_pool()))));
+    let pooled: Arc<dyn Users> = Arc::new(UsersRepo::new(Database::new(Blocking(seeded_pool()))));
     let mut next = ids();
     g.bench_function("get_by_id/repo_database", |b| {
         b.iter(|| pollster::block_on(pooled.by_id(next())).unwrap().unwrap())
@@ -152,7 +152,7 @@ fn memory(c: &mut Criterion) {
         )
     });
     let async_db = db.clone().into_async();
-    let erased: Arc<dyn Users> = Arc::new(Repo::new(Database::single(async_db)));
+    let erased: Arc<dyn Users> = Arc::new(UsersRepo::new(Database::single(async_db)));
     let mut next = ids();
     g.bench_function("get_by_id/repo_database", |b| {
         b.iter(|| pollster::block_on(erased.by_id(next())).unwrap().unwrap())

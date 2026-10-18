@@ -12,7 +12,7 @@
 //!   `rupa::connect(..)`).
 //! - A [`Database`] is the result: a cheaply cloneable, type-erased async
 //!   connection pool (`Arc` inside). It is an [`AcquireAsync`](crate::repo::AcquireAsync) source, so
-//!   `Repo<Database>` runs `&self` repositories, and it opens owned,
+//!   repository views run on `Database`, which also opens owned,
 //!   `'static` transactions for request-scoped use.
 //!
 //! Building is always async and fallible (one registry, not mirrored sync
@@ -29,7 +29,7 @@
 //! let registry = rupa::registry();
 //! let primary = registry.connect(&config.primary).await?;
 //! let replica = registry.connect(&config.replica).await?;
-//! let reads: Arc<dyn UserRepository> = Arc::new(Repo::new(replica));
+//! let reads = UserRepositoryView::new(&replica);
 //! ```
 
 mod database;

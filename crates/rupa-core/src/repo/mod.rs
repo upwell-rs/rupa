@@ -1,41 +1,103 @@
 //! Repositories: what `#[repository]` implements its traits for.
 //!
-//! A [`Repo<S>`] runs a repository's queries through `S`. Which `S` works
-//! depends on the methods' receivers, which the trait author chooses:
-//!
-//! - **`&self`** (the default for shared use, e.g. `Arc<dyn Trait>` in DI):
-//!   `S` is a connection *source*. It implements [`Acquire`] (sync) or
-//!   [`AcquireAsync`], and hands out a connection per call: a pool (every
-//!   [`Pool`](crate::pool::Pool) / [`AsyncPool`](crate::pool::AsyncPool), or a
-//!   [`Database`](crate::registry::Database)), or one executor behind a lock
-//!   ([`Shared`], [`SharedAsync`]).
-//! - **`&mut self`**: `S` is the executor itself, e.g. `Repo::new(&mut tx)`
-//!   inside a transaction.
+//! `#[repository]` generates a distinct key and aliases for [`Repo`] and
+//! [`RepoView`]. Both use an [`Acquire`] or [`AcquireAsync`] source: a pool
+//! checks out a connection per query, while a [`TxSession`] or
+//! [`AsyncTxSession`] shares one application-owned transaction.
 
 #[cfg(feature = "async")]
 mod asynchronous;
+mod session;
 
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::dialect::Dialect;
 use crate::exec::{ExecError, Executor, Outcome};
 use crate::ir::Statement;
+use crate::pool::{OwnedTx, Pool};
 use crate::query::Expect;
+use crate::security::{SecureTx, SecurityContext};
+use crate::tx::TxOptions;
 
 #[cfg(feature = "async")]
-pub use asynchronous::{AcquireAsync, SharedAsync, SharedAsyncConn, SharedBlocking};
+pub use asynchronous::AsyncTxSession;
+#[cfg(feature = "async")]
+pub use asynchronous::{
+    AcquireAsync, AsyncSecureTxSession, AsyncTransactionSource, SharedAsync, SharedAsyncConn,
+    SharedBlocking,
+};
+pub use session::{TxSession, TxSessionConn};
 
-/// Runs a repository's queries through `S`.
-#[derive(Debug, Clone, Default)]
-pub struct Repo<S> {
-    source: S,
+/// A repository transaction session with row-level security applied.
+pub type SecureTxSession<T> = TxSession<SecureTx<T>>;
+
+/// A repository-specific, borrowed view of one connection source.
+#[derive(Debug, Clone, Copy)]
+pub struct RepoView<'a, K, S> {
+    source: &'a S,
+    key: PhantomData<fn() -> K>,
 }
 
-impl<S> Repo<S> {
-    /// A repository running its queries through `source`.
+impl<'a, K, S> RepoView<'a, K, S> {
+    /// Binds a repository to `source` without allocating or cloning it.
+    pub const fn new(source: &'a S) -> Self {
+        Self {
+            source,
+            key: PhantomData,
+        }
+    }
+
+    /// The context through which this repository executes queries.
+    pub const fn source(&self) -> &S {
+        self.source
+    }
+}
+
+impl<'a, K, S: Pool> RepoView<'a, K, S> {
+    /// Opens a transaction from this repository's pool for sharing with views.
+    pub fn begin(&self) -> Result<TxSession<OwnedTx<S::Conn>>, <S::Conn as Executor>::Error> {
+        self.begin_with(TxOptions::default())
+    }
+
+    /// Opens a configured transaction from this repository's pool.
+    pub fn begin_with(
+        &self,
+        options: TxOptions,
+    ) -> Result<TxSession<OwnedTx<S::Conn>>, <S::Conn as Executor>::Error> {
+        self.source.begin_with(options).map(TxSession::new)
+    }
+
+    /// Opens a transaction with row-level security applied.
+    pub fn begin_with_security(
+        &self,
+        options: TxOptions,
+        context: SecurityContext,
+    ) -> Result<SecureTxSession<OwnedTx<S::Conn>>, <S::Conn as Executor>::Error>
+    where
+        <S::Conn as Executor>::Dialect: crate::dialect::Supports<crate::dialect::caps::NativeRls>,
+    {
+        self.source
+            .begin_with_security(options, context)
+            .map(TxSession::new)
+    }
+}
+
+/// Owns a source for one repository identity `K`.
+#[derive(Debug, Clone, Default)]
+pub struct Repo<S, K> {
+    source: S,
+    key: PhantomData<fn() -> K>,
+}
+
+impl<S, K> Repo<S, K> {
+    /// A repository owning `source`.
     pub const fn new(source: S) -> Self {
-        Self { source }
+        Self {
+            source,
+            key: PhantomData,
+        }
     }
 
     /// The connection source (or executor).
@@ -54,7 +116,36 @@ impl<S> Repo<S> {
     }
 }
 
-impl<E> Repo<Shared<E>> {
+impl<S: Pool, K> Repo<S, K> {
+    /// Opens a transaction from this repository's pool for sharing with views.
+    pub fn begin(&self) -> Result<TxSession<OwnedTx<S::Conn>>, <S::Conn as Executor>::Error> {
+        self.begin_with(TxOptions::default())
+    }
+
+    /// Opens a configured transaction from this repository's pool.
+    pub fn begin_with(
+        &self,
+        options: TxOptions,
+    ) -> Result<TxSession<OwnedTx<S::Conn>>, <S::Conn as Executor>::Error> {
+        self.source.begin_with(options).map(TxSession::new)
+    }
+
+    /// Opens a transaction with row-level security applied.
+    pub fn begin_with_security(
+        &self,
+        options: TxOptions,
+        context: SecurityContext,
+    ) -> Result<SecureTxSession<OwnedTx<S::Conn>>, <S::Conn as Executor>::Error>
+    where
+        <S::Conn as Executor>::Dialect: crate::dialect::Supports<crate::dialect::caps::NativeRls>,
+    {
+        self.source
+            .begin_with_security(options, context)
+            .map(TxSession::new)
+    }
+}
+
+impl<E, K> Repo<Shared<E>, K> {
     /// A repository sharing one sync executor behind a mutex.
     pub fn shared(executor: E) -> Self {
         Self::new(Shared::new(executor))

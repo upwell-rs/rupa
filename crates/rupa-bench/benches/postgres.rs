@@ -15,7 +15,7 @@ use std::sync::Arc;
 use criterion::{Criterion, criterion_group, criterion_main};
 use rupa::prelude::*;
 use rupa::{AsyncExecutor as _, AsyncPool as _, Database, DbConfig};
-use rupa_bench::{POSTGRES_DDL, User, Users, new_users};
+use rupa_bench::{POSTGRES_DDL, User, Users, UsersRepo, new_users};
 use rupa_driver_tokio_postgres::PgPool;
 
 fn postgres(c: &mut Criterion) {
@@ -55,7 +55,7 @@ fn postgres(c: &mut Criterion) {
     });
     drop(conn);
 
-    let users: Arc<dyn Users> = Arc::new(Repo::new(Database::new(pool)));
+    let users: Arc<dyn Users> = Arc::new(UsersRepo::new(Database::new(pool)));
     g.bench_function("get_by_id/repo_database", |b| {
         b.iter(|| rt.block_on(users.by_id(42)).unwrap().unwrap())
     });

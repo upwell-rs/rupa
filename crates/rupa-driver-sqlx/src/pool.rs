@@ -184,7 +184,7 @@ impl<DB: Backend> managed::Manager for SqlxManager<DB> {
     }
 }
 
-/// A pool of sqlx connections; an [`AsyncPool`], so `Repo<SqlxPool<DB>>`
+/// A pool of sqlx connections; an [`AsyncPool`], so repository views
 /// runs `&self` repositories and `pool.begin().await?` opens an owned
 /// transaction. Cloning shares the pool.
 pub struct SqlxPool<DB: Backend> {

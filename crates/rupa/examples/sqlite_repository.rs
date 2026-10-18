@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .affected(),
     )?;
 
-    let messages = Repo::new(pool);
+    let messages = MessagesView::new(&pool);
     let first = messages.by_id(1)?.expect("message 1 exists");
     assert_eq!(first.body, "hello");
     assert_eq!(messages.with_read_state(true)?[0].id, 2);

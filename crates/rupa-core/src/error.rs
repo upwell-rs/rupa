@@ -131,6 +131,9 @@ impl DslError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TxError {
+    /// A repository tried to use a transaction after commit or rollback.
+    #[error("transaction context is closed")]
+    Closed,
     /// Isolation level and read-only can only be set on a top-level
     /// transaction; nested transactions are savepoints.
     #[error("transaction options (isolation, read-only) cannot be set on a nested transaction")]
@@ -270,5 +273,9 @@ impl From<TxError> for DynError {
 impl ExecError for DynError {
     fn result_error(&self) -> Option<&ResultError> {
         self.result.as_ref()
+    }
+
+    fn into_dyn_error(self) -> DynError {
+        self
     }
 }

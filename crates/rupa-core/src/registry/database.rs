@@ -8,7 +8,7 @@ use crate::erased::{BoxAsyncExecutor, BoxAsyncTx};
 use crate::error::DynError;
 use crate::exec::{Blocking, BoxFuture};
 use crate::pool::{AsyncPool, PoolStatus, SingleConnection};
-use crate::repo::AcquireAsync;
+use crate::repo::{AcquireAsync, AsyncTransactionSource};
 use crate::security::{SecureTx, SecurityContext, apply_security, check_native_rls};
 use crate::tx::{AsyncTx, AsyncTxConnection, TxOptions};
 
@@ -55,12 +55,12 @@ impl<P: AsyncPool> DynPool for P {
 /// let db = rupa::connect(&DbConfig::new("sqlite://app.db")).await?;
 ///
 /// // `&self` repositories: one pooled connection per call.
-/// let users: Arc<dyn UserRepository> = Arc::new(Repo::new(db.clone()));
+/// let users = UserRepositoryView::new(&db);
 ///
 /// // A unit of work: an owned ('static) transaction on one connection.
-/// let mut tx = db.begin().await?;
-/// Repo::new(&mut tx).rename(id, "x").await?;
-/// tx.commit().await?;
+/// let session = UserRepositoryView::new(&db).begin_async().await?;
+/// UserRepositoryView::new(&session).rename(id, "x").await?;
+/// session.commit().await?;
 /// ```
 #[derive(Clone)]
 pub struct Database {
@@ -156,5 +156,20 @@ impl AcquireAsync for Database {
         &self,
     ) -> impl std::future::Future<Output = Result<BoxAsyncExecutor, DynError>> + Send {
         self.pool.get_dyn()
+    }
+}
+
+impl AsyncTransactionSource for Database {
+    type Tx = BoxAsyncTx<'static>;
+
+    fn dialect(&self) -> &DynDialect {
+        &self.dialect
+    }
+
+    fn begin_async_with(
+        &self,
+        options: TxOptions,
+    ) -> impl std::future::Future<Output = Result<Self::Tx, DynError>> + Send {
+        self.begin_with(options)
     }
 }

@@ -150,7 +150,7 @@ impl managed::Manager for PgManager {
     }
 }
 
-/// A pool of Postgres connections; an [`AsyncPool`], so `Repo<PgPool>` runs
+/// A pool of Postgres connections; an [`AsyncPool`], so repository views run
 /// `&self` repositories and `pool.begin().await?` opens an owned
 /// transaction. Cloning shares the pool.
 #[derive(Clone)]

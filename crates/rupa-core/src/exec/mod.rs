@@ -55,6 +55,14 @@ impl fmt::Debug for Outcome {
 pub trait ExecError: StdError + Send + Sync + 'static + From<ResultError> {
     /// The [`ResultError`] this error wraps, if it is one.
     fn result_error(&self) -> Option<&ResultError>;
+
+    /// Wraps this error in the public type-erased error.
+    fn into_dyn_error(self) -> crate::error::DynError
+    where
+        Self: Sized,
+    {
+        crate::error::DynError::new(self)
+    }
 }
 
 #[diagnostic::on_unimplemented(

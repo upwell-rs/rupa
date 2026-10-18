@@ -31,7 +31,9 @@ use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use rupa::prelude::*;
 use rupa::{AsyncExecutor as _, Database, DbConfig};
-use rupa_bench::{MYSQL_DDL, NewUser, POSTGRES_DDL, Prefs, SQLITE_DDL, User, Users, new_users};
+use rupa_bench::{
+    MYSQL_DDL, NewUser, POSTGRES_DDL, Prefs, SQLITE_DDL, User, Users, UsersRepo, new_users,
+};
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::{mysql::Mysql, postgres::Postgres};
@@ -128,7 +130,7 @@ async fn mysql_url(servers: &mut Servers) -> Option<String> {
 fn target(id: &str, db: Database, in_tokio: bool, sync: bool) -> Target {
     Target {
         id: id.to_owned(),
-        users: Arc::new(Repo::new(db.clone())),
+        users: Arc::new(UsersRepo::new(db.clone())),
         db,
         in_tokio,
         sync,

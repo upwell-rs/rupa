@@ -10,7 +10,7 @@ pub use rupa_core::exec::AsyncExecutor;
 pub use rupa_core::exec::Executor;
 #[cfg(feature = "async")]
 pub use rupa_core::repo::AcquireAsync;
-pub use rupa_core::repo::{Acquire, Repo};
+pub use rupa_core::repo::{Acquire, Repo, RepoView};
 
 /// Runs `future` to completion from a sync repository method of an async
 /// repository.

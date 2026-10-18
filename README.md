@@ -44,7 +44,7 @@ pub trait UserRepository: Send + Sync {
 }
 
 let db = PgPool::connect(&DbConfig::new("postgres://app@localhost/app")).await?;   // a pool
-let users: Arc<dyn UserRepository> = Arc::new(Repo::new(db));
+let users = UserRepositoryView::new(&db);
 ```
 
 ## Examples
@@ -58,9 +58,10 @@ no database server, Docker, or database file.
 | [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
 | [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
 | [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |
+| [Repository transaction](crates/rupa/examples/sqlite_repository_tx.rs) | Two repository views sharing one transaction, explicit rollback and commit | `cargo run -p rupa --example sqlite_repository_tx --features sqlite` |
 | [DSL and JSON](crates/rupa/examples/sqlite_dsl.rs) | Custom DSL lowering, JSON paths, dialect rendering, bound parameters | `cargo run -p rupa --example sqlite_dsl --features sqlite` |
 | [Dynamic connection](crates/rupa/examples/sqlite_config.rs) | `DbConfig`, runtime driver selection, raw DDL, async pooled repository | `cargo run -p rupa --example sqlite_config --features sqlite,dynamic` |
-| [Async companion](crates/rupa/examples/sqlite_async.rs) | The same `Task`, insert and get API on an async executor | `cargo run -p rupa --example sqlite_async --features sqlx-sqlite` |
+| [Async companion](crates/rupa/examples/sqlite_async.rs) | The same `Task` and repository view API on an async transaction | `cargo run -p rupa --example sqlite_async --features sqlx-sqlite` |
 
 The main examples use synchronous SQLite. The async companion shows API parity
 with a native async driver; for SQLite workloads, the synchronous driver is
@@ -136,9 +137,9 @@ acquire_timeout = "5s"
 
 ```rust
 let db: rupa::Database = rupa::connect(&config.database).await?;   // `dynamic`
-let mut tx = db.begin().await?;                  // owns its connection: 'static
-Repo::new(&mut tx).rename(id, "x").await?;
-tx.commit().await?;
+let session = UserRepositoryView::new(&db).begin_async().await?;
+UserRepositoryView::new(&session).create(&new_user).await?;
+session.commit().await?;
 ```
 
 `Database` (feature `dynamic`) is a cheaply cloneable, type-erased pool.

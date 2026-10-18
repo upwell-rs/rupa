@@ -59,7 +59,7 @@ async fn dyn_repository_on_postgres() {
             .unwrap();
     }
 
-    let repo: Arc<dyn Notes> = Arc::new(Repo::shared_async(exec));
+    let repo: Arc<dyn Notes> = Arc::new(NotesRepo::shared_async(exec));
     let pinned = repo.pinned(true).await.unwrap();
     assert_eq!(
         pinned.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(),

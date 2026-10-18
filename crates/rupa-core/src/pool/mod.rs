@@ -5,7 +5,7 @@
 //! behind its `pool` cargo feature, and implements [`Pool`] or [`AsyncPool`]
 //! for it. In return the pool gets, from here:
 //!
-//! - [`Acquire`] / [`AcquireAsync`](crate::repo::AcquireAsync), so `Repo<ThePool>` runs `&self`
+//! - [`Acquire`] / [`AcquireAsync`](crate::repo::AcquireAsync), so repository views run queries through the pool
 //!   repositories with one pooled connection per call;
 //! - **owned transactions** (`pool.begin().await?`): an [`AsyncTx`](crate::tx::AsyncTx) that holds
 //!   its pooled connection, so it is `'static` and can live in a request
