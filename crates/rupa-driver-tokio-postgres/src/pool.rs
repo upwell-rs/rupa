@@ -175,7 +175,8 @@ impl PgPool {
     }
 
     /// Builds a pool for a `postgres:` URL with the config's
-    /// [`PostgresOptions`](rupa_core::config::PostgresOptions), without TLS.
+    /// [`PostgresOptions`](rupa_core::config::PostgresOptions). Uses rustls when
+    /// `tls-rustls` is on (the URL's `sslmode` decides), and no TLS otherwise.
     pub async fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
         let (pg, statement_cache_size) = crate::shared::pg_config(config)?;
         #[cfg(feature = "tls-rustls")]

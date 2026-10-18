@@ -11,6 +11,8 @@ use syn::LitStr;
 
 /// Splits raw SQL at `$name` placeholders, outside quotes and comments.
 /// Returns literal fragments interleaved with parameter names.
+/// Backslashes immediately before quotes are rejected: their interpretation
+/// depends on the database and session settings, unknown during expansion.
 pub fn split_sql(sql: &str) -> Result<Vec<SqlPart>, String> {
     let bytes = sql.as_bytes();
     let mut parts = Vec::new();
@@ -21,6 +23,12 @@ pub fn split_sql(sql: &str) -> Result<Vec<SqlPart>, String> {
         let c = bytes[i];
         match state {
             Some(q) => {
+                if c == b'\\' && bytes.get(i + 1) == Some(&q) {
+                    return Err(
+                        "backslash before a quote is dialect-dependent in `#[query(sql)]`; bind the value as a parameter or use doubled SQL quotes".into(),
+                    );
+                }
+
                 if c == q {
                     state = None;
                 }
