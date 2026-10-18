@@ -40,11 +40,22 @@ impl TempDb {
 
     /// A pool whose connections all see the `conformance` schema, with an
     /// empty `notes` table in it.
+    ///
+    /// SQLite has one writer at a time, so concurrent writers wait for the
+    /// lock. Both databases use WAL (`journal_mode` on the manager only
+    /// covers the main one, but the tables live in the attached one), and the
+    /// busy timeout is generous: on a slow CI disk, the 5s default was
+    /// sometimes not enough for 8 threads, and the inserts failed with
+    /// "database is locked".
     fn pool(&self, size: u32) -> SqlitePool {
         let attach = format!("ATTACH DATABASE '{}' AS conformance", self.schema.display());
         let manager = SqliteManager::new(SqliteTarget::parse(&self.url()).unwrap())
             .journal_mode("wal")
-            .on_connect(move |c| c.execute_batch(&attach));
+            .busy_timeout(Some(Duration::from_secs(60)))
+            .on_connect(move |c| {
+                c.execute_batch(&attach)?;
+                c.pragma_update_and_check(Some("conformance"), "journal_mode", "wal", |_| Ok(()))
+            });
         let pool = SqlitePool::new(manager, &PoolConfig::default().max_size(size)).unwrap();
         pool.get()
             .unwrap()
@@ -139,6 +150,8 @@ fn pooled_connections_serve_threads() {
     });
     assert_eq!(count(&pool), 80);
     assert!(pool.status().size <= 4);
+    let wal = PathBuf::from(format!("{}-wal", file.schema.display()));
+    assert!(wal.exists(), "the attached schema is in WAL mode too");
 }
 
 #[test]

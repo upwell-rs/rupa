@@ -67,6 +67,11 @@ jobs:
         run: cargo nextest run --profile ci --workspace --features rupa/full,rupa/nightly -E 'not test(ui)'
       # nextest doesn't run doctests.
       - run: cargo test --doc --workspace --features rupa/full
+      # trybuild's work dir looks like a nested target dir to rust-cache, whose
+      # cleanup then fails on restore (ENOENT on `target/tests/target`). It
+      # isn't worth caching: keep it out of the saved cache.
+      - if: always()
+        run: rm -rf target/tests
 
   upwell:
     name: upwell integration
