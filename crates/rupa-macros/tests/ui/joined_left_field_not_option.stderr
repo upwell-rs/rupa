@@ -1,0 +1,31 @@
+error[E0277]: a field from a left-joined entity must be an `Option`
+  --> tests/ui/joined_left_field_not_option.rs:14:68
+   |
+14 |     let _ = select::<User>().join::<Order>().left().into::<View>().all();
+   |                                                                    ^^^ the trait `Admits<Plain>` is not implemented for `rupa::rupa_core::Left`
+   |
+   = note: the entity's columns are `NULL` when the left join finds no match
+help: the trait `Admits<Plain>` is not implemented for `rupa::rupa_core::Left`
+      but trait `Admits<Opt>` is implemented for it
+  --> $WORKSPACE/crates/rupa-core/src/join.rs
+   |
+   | impl Admits<Opt> for Left {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: for that trait implementation, expected `Opt`, found `Plain`
+note: required for `View` to implement `rupa::rupa_core::Joined<(User, Option<Order>), ((At<0>, rupa::rupa_core::Inner), (At<1>, rupa::rupa_core::Left))>`
+  --> tests/ui/joined_left_field_not_option.rs:10:12
+   |
+ 9 | #[derive(Debug, Joined)]
+   |                 ------ type parameter would need to implement `rupa::rupa_core::Joined<(User, Option<Order>), ((At<0>, rupa::rupa_core::Inner), (At<1>, rupa::rupa_core::Left))>`
+10 | pub struct View { #[from(User::name)] name: String, #[from(Order::total)] total: i64 }
+   |            ^^^^
+   = help: consider manually implementing `rupa::rupa_core::Joined<(User, Option<Order>), ((At<0>, rupa::rupa_core::Inner), (At<1>, rupa::rupa_core::Left))>` to avoid undesired bounds caused by "imperfect derives"
+   = note: to learn more, visit <https://github.com/rust-lang/rust/issues/26925>
+note: required by a bound in `IntoJoined::<R, V>::all`
+  --> $WORKSPACE/crates/rupa-core/src/join.rs
+   |
+   |     pub fn all<M>(self) -> Query<Vec<V>>
+   |            --- required by a bound in this associated function
+   |     where
+   |         V: Joined<R, M>,
+   |            ^^^^^^^^^^^^ required by this bound in `IntoJoined::<R, V>::all`

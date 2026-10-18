@@ -24,6 +24,10 @@ pub struct Field {
     pub kind: Kind,
     /// Whether `#[column(..)]` appeared at all (rejected on companion structs).
     pub has_column_attr: bool,
+    /// `#[column(references = E)]`: the entity whose id this column holds.
+    pub references: Option<Path>,
+    /// `#[column(relation = name)]`: the relation accessor's name.
+    pub relation: Option<Ident>,
 }
 
 impl Field {
@@ -97,6 +101,8 @@ pub fn fields(input: &DeriveInput, what: &str) -> syn::Result<Vec<Field>> {
                 generated: false,
                 kind: Kind::Infer,
                 has_column_attr: false,
+                references: None,
+                relation: None,
             };
             for attr in &f.attrs {
                 if attr.path().is_ident("id") {
@@ -122,13 +128,23 @@ pub fn fields(input: &DeriveInput, what: &str) -> syn::Result<Vec<Field>> {
                             field.kind = Kind::Json;
                         } else if m.path.is_ident("generated") {
                             field.generated = true;
+                        } else if m.path.is_ident("references") {
+                            field.references = Some(m.value()?.parse()?);
+                        } else if m.path.is_ident("relation") {
+                            field.relation = Some(m.value()?.parse()?);
                         } else {
                             return Err(m.error(
-                                "unknown `column` option; expected `name = \"..\"`, `scalar`, `json` or `generated`",
+                                "unknown `column` option; expected `name = \"..\"`, `scalar`, `json`, `generated`, `references = Entity` or `relation = name`",
                             ));
                         }
                         Ok(())
                     })?;
+                    if let (Some(relation), None) = (&field.relation, &field.references) {
+                        return Err(syn::Error::new(
+                            relation.span(),
+                            "`relation` names a `references` relation; add `references = Entity`",
+                        ));
+                    }
                 }
             }
             Ok(field)

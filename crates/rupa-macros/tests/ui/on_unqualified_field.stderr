@@ -1,0 +1,5 @@
+error: name the field's entity: `Entity::user_id`
+  --> tests/ui/on_unqualified_field.rs:10:57
+   |
+10 |     let _ = select::<User>().inner_join_on::<Order>(on!(user_id == User::id));
+   |                                                         ^^^^^^^

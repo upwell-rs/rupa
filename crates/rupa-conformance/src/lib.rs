@@ -7,6 +7,7 @@
 
 pub mod database;
 pub mod fixture;
+mod joins;
 
 use std::fmt::Debug;
 use std::future::Future;
@@ -20,8 +21,8 @@ use rupa::prelude::*;
 
 pub use database::{DatabaseHarness, run_database, run_pool_cases, run_script};
 pub use fixture::{
-    Item, MYSQL_DDL, NewNote, Note, NotePatch, POSTGRES_DDL, SQLITE_ATTACH, SQLITE_DDL, SetPinned,
-    items,
+    Item, MYSQL_DDL, NewNote, Note, NotePatch, POSTGRES_DDL, Review, SQLITE_ATTACH, SQLITE_DDL,
+    SetPinned, items, reviews,
 };
 
 /// Gives the suite a fresh, empty schema per case.
@@ -40,13 +41,14 @@ pub use rupa::core::exec::Blocking;
 /// before it runs, so a failure's captured output says which case it was.
 pub async fn run<H: Harness>(h: &mut H) {
     macro_rules! cases {
-        ($($case:ident),* $(,)?) => {$(
+        ($module:ident: $($case:ident),* $(,)?) => {$(
             h.reset().await;
             eprintln!("conformance {}", stringify!($case));
-            cases::$case(h.exec()).await;
+            $module::$case(h.exec()).await;
         )*};
     }
     cases!(
+        cases:
         case_insert_and_select,
         case_single_row_shapes,
         case_comparisons,
@@ -70,6 +72,20 @@ pub async fn run<H: Harness>(h: &mut H) {
         case_delete_one_and_by_id,
         case_dsl_std_text,
         case_dsl_std_json,
+    );
+    cases!(
+        joins:
+        case_join_on_macro,
+        case_join_declared_relations,
+        case_join_into_merged_struct,
+        case_join_query_attribute,
+        case_join_self_join_aliases,
+        case_join_inner,
+        case_join_left,
+        case_join_filter_and_order_on_joined_columns,
+        case_join_self_left_join_decodes_none,
+        case_join_three_sources,
+        case_join_single_row_shapes_and_exists,
     );
 }
 

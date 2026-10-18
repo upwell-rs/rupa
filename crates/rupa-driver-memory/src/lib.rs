@@ -18,6 +18,8 @@
 #![warn(missing_docs)]
 
 mod eval;
+#[cfg(test)]
+mod join_tests;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -29,7 +31,8 @@ use rupa_core::dialect::Memory;
 use rupa_core::erased::BoxFuture;
 use rupa_core::exec::{AsyncExecutor, ExecError, Executor, Outcome};
 use rupa_core::ir::{
-    ColumnRef, Delete, FromClause, Insert, Select, Statement, TableRef, TxStatement, Update,
+    ColumnRef, Delete, FromClause, Insert, JoinKind, Select, SourceId, Statement, TableRef,
+    TxStatement, Update,
 };
 use rupa_core::registry::{ConnectError, Database, Driver};
 use rupa_core::row::ValueRows;
@@ -46,6 +49,8 @@ pub enum MemoryError {
     NoSuchTable(TableRef),
     /// The table has no such column.
     NoSuchColumn(&'static str),
+    /// A column names a row source the statement doesn't have.
+    NoSuchSource(SourceId),
     /// An insert or update would duplicate a primary key.
     DuplicateKey(TableRef),
     /// `NULL` in a `NOT NULL` column.
@@ -70,6 +75,7 @@ impl fmt::Display for MemoryError {
         match self {
             MemoryError::NoSuchTable(t) => write!(f, "no such table {t:?}"),
             MemoryError::NoSuchColumn(c) => write!(f, "no such column `{c}`"),
+            MemoryError::NoSuchSource(s) => write!(f, "no row source {}", s.0),
             MemoryError::DuplicateKey(t) => write!(f, "duplicate primary key in {t:?}"),
             MemoryError::NotNull(c) => write!(f, "NULL in NOT NULL column `{c}`"),
             MemoryError::Type(m) => write!(f, "type error: {m}"),
@@ -159,7 +165,63 @@ struct RowScope<'a> {
 
 impl Scope for RowScope<'_> {
     fn column(&self, col: ColumnRef) -> Result<Value, MemoryError> {
+        if col.source != SourceId(0) {
+            return Err(MemoryError::NoSuchSource(col.source));
+        }
         Ok(self.row[self.table.index(col.name)?].clone())
+    }
+}
+
+/// One row of a select's sources: a row per source, `None` where a left
+/// join found no match.
+type JoinedRow<'a> = Vec<Option<&'a Vec<Value>>>;
+
+/// The tables a select reads, by source.
+struct Sources<'a>(Vec<&'a Table>);
+
+impl<'a> Sources<'a> {
+    fn new(db: &'a MemoryDb, from: &FromClause) -> Result<Self, MemoryError> {
+        let tables = match from {
+            FromClause::Table(t) => vec![db.table(*t)?],
+            FromClause::Join { base, joins } => std::iter::once(*base)
+                .chain(joins.iter().map(|j| j.table))
+                .map(|t| db.table(t))
+                .collect::<Result<_, _>>()?,
+        };
+        Ok(Self(tables))
+    }
+
+    /// Where `col` lives: its source and its index in that source's rows.
+    fn locate(&self, col: ColumnRef) -> Result<(usize, usize), MemoryError> {
+        let source = usize::from(col.source.0);
+        let table = self
+            .0
+            .get(source)
+            .ok_or(MemoryError::NoSuchSource(col.source))?;
+        Ok((source, table.index(col.name)?))
+    }
+
+    /// `col` of `row`; typed `NULL` for a source a left join left unmatched.
+    /// While a join's `ON` is evaluated, `row` holds only the sources joined so
+    /// far, so a later source is `NoSuchSource` too.
+    fn value(&self, row: &[Option<&Vec<Value>>], col: ColumnRef) -> Result<Value, MemoryError> {
+        let (source, index) = self.locate(col)?;
+        match row.get(source) {
+            None => Err(MemoryError::NoSuchSource(col.source)),
+            Some(Some(r)) => Ok(r[index].clone()),
+            Some(None) => Ok(Value::Null(self.0[source].columns[index].sql_type)),
+        }
+    }
+}
+
+struct JoinScope<'s, 'a> {
+    sources: &'s Sources<'a>,
+    row: &'s [Option<&'a Vec<Value>>],
+}
+
+impl Scope for JoinScope<'_, '_> {
+    fn column(&self, col: ColumnRef) -> Result<Value, MemoryError> {
+        self.sources.value(self.row, col)
     }
 }
 
@@ -246,16 +308,16 @@ impl MemoryDb {
         }
         match statement {
             Statement::Select(s) => {
-                let (table, rows) = self.select_rows(s)?;
-                let idx = s
-                    .projection
-                    .iter()
-                    .map(|c| table.index(c.name))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let (sources, rows) = self.select_rows(s)?;
                 let projected = rows
-                    .into_iter()
-                    .map(|r| idx.iter().map(|&i| r[i].clone()).collect())
-                    .collect();
+                    .iter()
+                    .map(|r| {
+                        s.projection
+                            .iter()
+                            .map(|c| sources.value(r, *c))
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 Ok(Outcome::Rows(Box::new(ValueRows::new(projected))))
             }
             Statement::Exists(s) => {
@@ -291,12 +353,49 @@ impl MemoryDb {
         }
     }
 
-    fn select_rows(&self, s: &Select) -> Result<(&Table, Vec<&Vec<Value>>), MemoryError> {
-        let FromClause::Table(t) = &s.from;
-        let table = self.table(*t)?;
+    /// The source rows a select keeps, ordered and paged. Joins are nested
+    /// loops: each row of the earlier sources pairs with every matching row of
+    /// the joined table, in table order (or one unmatched row for a left join).
+    fn select_rows(&self, s: &Select) -> Result<(Sources<'_>, Vec<JoinedRow<'_>>), MemoryError> {
+        let sources = Sources::new(self, &s.from)?;
+        let mut joined: Vec<JoinedRow<'_>> =
+            sources.0[0].rows.iter().map(|r| vec![Some(r)]).collect();
+        if let FromClause::Join { joins, .. } = &s.from {
+            for (join, table) in joins.iter().zip(&sources.0[1..]) {
+                let mut next = Vec::new();
+                for partial in joined {
+                    let mut matched = false;
+                    for r in &table.rows {
+                        let mut candidate = partial.clone();
+                        candidate.push(Some(r));
+                        let scope = JoinScope {
+                            sources: &sources,
+                            row: &candidate,
+                        };
+                        if keeps(&scope, Some(&join.on))? {
+                            matched = true;
+                            next.push(candidate);
+                        }
+                    }
+                    if !matched && join.kind == JoinKind::Left {
+                        let mut padded = partial;
+                        padded.push(None);
+                        next.push(padded);
+                    }
+                }
+                joined = next;
+            }
+        }
+
         let mut rows = Vec::new();
-        for row in &table.rows {
-            if keeps(&RowScope { table, row }, s.filter.as_ref())? {
+        for row in joined {
+            if keeps(
+                &JoinScope {
+                    sources: &sources,
+                    row: &row,
+                },
+                s.filter.as_ref(),
+            )? {
                 rows.push(row);
             }
         }
@@ -308,7 +407,15 @@ impl MemoryDb {
                     let keys = s
                         .order_by
                         .iter()
-                        .map(|o| eval(&RowScope { table, row }, &o.expr))
+                        .map(|o| {
+                            eval(
+                                &JoinScope {
+                                    sources: &sources,
+                                    row: &row,
+                                },
+                                &o.expr,
+                            )
+                        })
                         .collect::<Result<Vec<_>, _>>()?;
                     Ok((keys, row))
                 })
@@ -350,7 +457,8 @@ impl MemoryDb {
         };
         let offset = count(&s.offset)?.unwrap_or(0);
         let limit = count(&s.limit)?.unwrap_or(usize::MAX);
-        Ok((table, rows.into_iter().skip(offset).take(limit).collect()))
+        let rows = rows.into_iter().skip(offset).take(limit).collect();
+        Ok((sources, rows))
     }
 
     /// Inserts rows and returns them, as stored, in insertion order.

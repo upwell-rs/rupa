@@ -2,8 +2,8 @@
 //! that differ between dialects.
 
 use rupa_core::ir::{
-    BinOp, ColumnRef, Delete, Direction, ExprNode, FromClause, Insert, PathSeg, RawPart, Select,
-    Statement, TableRef, TxStatement, UnOp, Update,
+    BinOp, ColumnRef, Delete, Direction, ExprNode, FromClause, Insert, JoinKind, PathSeg, RawPart,
+    Select, SourceId, Statement, TableRef, TxStatement, UnOp, Update,
 };
 use rupa_core::{Capability, Dialect, SecurityContext};
 use rupa_core::{SqlType, Value};
@@ -111,6 +111,11 @@ pub(crate) struct Writer<'a> {
     /// so the render cache can rebind fresh values to cached SQL.
     sources: Option<Vec<*const Value>>,
     lowering_depth: usize,
+    /// Row sources of the statement being rendered; a column naming any
+    /// other source is an error.
+    source_count: usize,
+    /// Whether columns are qualified by their source's alias (joins).
+    qualify: bool,
 }
 
 /// Binding strength, loosest first. An operand is parenthesized when its
@@ -204,6 +209,8 @@ impl<'a> Writer<'a> {
             params: Vec::new(),
             sources: None,
             lowering_depth: 0,
+            source_count: 1,
+            qualify: false,
         }
     }
 
@@ -256,6 +263,7 @@ impl<'a> Writer<'a> {
     }
 
     fn select(&mut self, s: &Select) -> Result<(), RenderError> {
+        self.enter_from(&s.from);
         self.sql.push_str("SELECT ");
         if s.projection.is_empty() {
             self.sql.push('1');
@@ -264,16 +272,37 @@ impl<'a> Writer<'a> {
             if i > 0 {
                 self.sql.push_str(", ");
             }
-            self.column(*col);
+            self.column(*col)?;
         }
         self.select_tail(s)
     }
 
     /// `FROM ... [WHERE ...] [ORDER BY ...] [LIMIT ...] [OFFSET ...]`
     fn select_tail(&mut self, s: &Select) -> Result<(), RenderError> {
+        self.enter_from(&s.from);
         self.sql.push_str(" FROM ");
         match &s.from {
             FromClause::Table(t) => self.table(*t),
+            FromClause::Join { base, joins } => {
+                self.table(*base);
+                self.alias(SourceId(0));
+                for (n, join) in joins.iter().enumerate() {
+                    self.sql.push_str(match join.kind {
+                        JoinKind::Inner => " INNER JOIN ",
+                        JoinKind::Left => " LEFT JOIN ",
+                    });
+                    self.table(join.table);
+                    let id = u16::try_from(n + 1).map_err(|_| RenderError::TooManySources)?;
+                    self.alias(SourceId(id));
+                    self.sql.push_str(" ON ");
+                    // A condition may use this source and earlier ones only:
+                    // a later alias isn't in scope yet.
+                    let all = std::mem::replace(&mut self.source_count, n + 2);
+                    let on = self.expr(&join.on, prec::ANY);
+                    self.source_count = all;
+                    on?;
+                }
+            }
         }
         self.where_clause(s.filter.as_ref())?;
         for (i, o) in s.order_by.iter().enumerate() {
@@ -380,7 +409,7 @@ impl<'a> Writer<'a> {
                 if n > 0 {
                     self.sql.push_str(", ");
                 }
-                self.column(*c);
+                self.column(*c)?;
             }
         }
         Ok(())
@@ -430,10 +459,37 @@ impl<'a> Writer<'a> {
         self.syntax.quote_ident(ident, &mut self.sql);
     }
 
-    /// Single-source statements render unqualified columns; qualification by
-    /// `SourceId` arrives with joins.
-    fn column(&mut self, c: ColumnRef) {
-        self.ident(c.name);
+    /// Sets up column rendering for a select's sources. Every other statement
+    /// has one source and unqualified columns.
+    fn enter_from(&mut self, from: &FromClause) {
+        self.source_count = from.source_count();
+        self.qualify = matches!(from, FromClause::Join { .. });
+    }
+
+    /// ` AS "t<n>"`: aliases come from the source's position, never from data.
+    fn alias(&mut self, id: SourceId) {
+        self.sql.push_str(" AS ");
+        self.ident(&format!("t{}", id.0));
+    }
+
+    fn column(&mut self, c: ColumnRef) -> Result<(), RenderError> {
+        let mut out = std::mem::take(&mut self.sql);
+        let r = self.write_column(c, &mut out);
+        self.sql = out;
+        r
+    }
+
+    /// Writes `c`, qualified by its source's alias in a join.
+    fn write_column(&self, c: ColumnRef, out: &mut String) -> Result<(), RenderError> {
+        if usize::from(c.source.0) >= self.source_count {
+            return Err(RenderError::UnknownSource(c.source));
+        }
+        if self.qualify {
+            self.syntax.quote_ident(&format!("t{}", c.source.0), out);
+            out.push('.');
+        }
+        self.syntax.quote_ident(c.name, out);
+        Ok(())
     }
 
     fn param(&mut self, v: &Value) {
@@ -474,7 +530,7 @@ impl<'a> Writer<'a> {
             self.sql.push('(');
         }
         match node {
-            ExprNode::Column(c) => self.column(*c),
+            ExprNode::Column(c) => self.column(*c)?,
             ExprNode::Param(v) => self.param(v),
             ExprNode::Unary(UnOp::Not, e) => {
                 self.sql.push_str("NOT ");
@@ -519,7 +575,7 @@ impl<'a> Writer<'a> {
                 as_text,
             } => {
                 let mut col = String::new();
-                self.syntax.quote_ident(column.name, &mut col);
+                self.write_column(*column, &mut col)?;
                 self.syntax.json_path(&col, path, *as_text, &mut self.sql)?;
             }
             ExprNode::Cast(e, ty) => {

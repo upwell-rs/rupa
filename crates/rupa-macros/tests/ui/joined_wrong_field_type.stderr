@@ -1,0 +1,17 @@
+error[E0277]: this field can't hold the column `rupa::Column<User, String, rupa::Scalar>`
+ --> tests/ui/joined_wrong_field_type.rs:7:32
+  |
+6 | #[derive(Debug, Joined)]
+  |                 ------ required by a bound introduced by this call
+7 | pub struct View { #[from(User::name)] name: i64 }
+  |                                ^^^^^^^^^^^^^^^^ the trait `ReadAs<i64>` is not implemented for `rupa::Column<User, String, rupa::Scalar>`
+  |
+  = note: a `#[from(..)]` field has its column's type, or an `Option` of it
+help: `rupa::Column<E, T, K>` implements trait `ReadAs<F>`
+ --> $WORKSPACE/crates/rupa-core/src/column.rs
+  |
+  | impl<E, T, K> ReadAs<T> for Column<E, T, K> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ReadAs<T>`
+...
+  | impl<E, T, K> ReadAs<Option<T>> for Column<E, T, K> {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `ReadAs<Option<T>>`

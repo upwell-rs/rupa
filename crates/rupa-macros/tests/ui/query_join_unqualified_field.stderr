@@ -1,0 +1,5 @@
+error: name the field's entity: `Entity::active`
+ --> tests/ui/query_join_unqualified_field.rs:9:37
+  |
+9 | #[query(left_join = Order, filter = active == true)]
+  |                                     ^^^^^^

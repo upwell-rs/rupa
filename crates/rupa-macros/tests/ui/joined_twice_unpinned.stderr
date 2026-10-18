@@ -1,0 +1,61 @@
+error[E0283]: type annotations needed
+  --> tests/ui/joined_twice_unpinned.rs:14:10
+   |
+14 |         .all();
+   |          ^^^ cannot infer type of the type parameter `M` declared on the method `all`
+   |
+   = note: multiple `impl`s satisfying `(User, Option<User>): PartOf<User, _, _>` found in the `rupa_core` crate:
+           - impl<E, R0> PartOf<E, At<1>, rupa::rupa_core::Left> for (R0, Option<E>);
+           - impl<E, R1> PartOf<E, At<0>, rupa::rupa_core::Inner> for (E, R1);
+note: required for `Pair` to implement `rupa::rupa_core::Joined<(User, Option<User>), ((_, _),)>`
+  --> tests/ui/joined_twice_unpinned.rs:8:12
+   |
+ 7 | #[derive(Debug, Joined)]
+   |                 ------ type parameter would need to implement `rupa::rupa_core::Joined<(User, Option<User>), ((_, _),)>`
+ 8 | pub struct Pair { #[from(User::id)] id: i64 }
+   |            ^^^^
+   = help: consider manually implementing `rupa::rupa_core::Joined<(User, Option<User>), ((_, _),)>` to avoid undesired bounds caused by "imperfect derives"
+   = note: to learn more, visit <https://github.com/rust-lang/rust/issues/26925>
+note: required by a bound in `IntoJoined::<R, V>::all`
+  --> $WORKSPACE/crates/rupa-core/src/join.rs
+   |
+   |     pub fn all<M>(self) -> Query<Vec<V>>
+   |            --- required by a bound in this associated function
+   |     where
+   |         V: Joined<R, M>,
+   |            ^^^^^^^^^^^^ required by this bound in `IntoJoined::<R, V>::all`
+help: consider specifying a concrete type for the type parameter `M`
+   |
+14 |         .all::</* Type */>();
+   |             ++++++++++++++
+
+error[E0283]: type annotations needed
+  --> tests/ui/joined_twice_unpinned.rs:14:10
+   |
+14 |         .all();
+   |          ^^^ cannot infer type of the type parameter `M` declared on the method `all`
+   |
+   = note: multiple `impl`s satisfying `_: Admits<Plain>` found in the `rupa_core` crate:
+           - impl Admits<Plain> for rupa::rupa_core::Inner;
+           - impl Admits<Plain> for rupa::rupa_core::join::NoSlot;
+note: required for `Pair` to implement `rupa::rupa_core::Joined<(User, Option<User>), ((_, _),)>`
+  --> tests/ui/joined_twice_unpinned.rs:8:12
+   |
+ 7 | #[derive(Debug, Joined)]
+   |                 ------ type parameter would need to implement `rupa::rupa_core::Joined<(User, Option<User>), ((_, _),)>`
+ 8 | pub struct Pair { #[from(User::id)] id: i64 }
+   |            ^^^^
+   = help: consider manually implementing `rupa::rupa_core::Joined<(User, Option<User>), ((_, _),)>` to avoid undesired bounds caused by "imperfect derives"
+   = note: to learn more, visit <https://github.com/rust-lang/rust/issues/26925>
+note: required by a bound in `IntoJoined::<R, V>::all`
+  --> $WORKSPACE/crates/rupa-core/src/join.rs
+   |
+   |     pub fn all<M>(self) -> Query<Vec<V>>
+   |            --- required by a bound in this associated function
+   |     where
+   |         V: Joined<R, M>,
+   |            ^^^^^^^^^^^^ required by this bound in `IntoJoined::<R, V>::all`
+help: consider specifying a concrete type for the type parameter `M`
+   |
+14 |         .all::</* Type */>();
+   |             ++++++++++++++

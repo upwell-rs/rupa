@@ -1,0 +1,5 @@
+error: `sql` is a complete query; it cannot be combined with `filter`, joins, `order_by`, `limit` or `offset`
+ --> tests/ui/query_join_with_sql.rs:9:9
+  |
+9 | #[query(sql = "SELECT 1", inner_join = Order)]
+  |         ^^^

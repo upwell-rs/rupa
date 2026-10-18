@@ -233,7 +233,9 @@ fn value_dependent_lowerings_get_separate_shapes() {
             offset: None,
         })
     };
-    let cache = RenderCache::new(8);
+    // Room for both shapes even in one shard: which shard a shape lands in
+    // depends on string addresses, so it changes from run to run.
+    let cache = RenderCache::new(64);
     for v in ["x", "*", "y", "*"] {
         check(&cache, &q(v), &Postgres);
     }

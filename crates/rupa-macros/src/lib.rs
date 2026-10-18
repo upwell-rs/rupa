@@ -13,7 +13,9 @@ mod capability;
 mod dsl;
 mod dsl_fn;
 mod entity;
+mod joined;
 mod model;
+mod on;
 mod query;
 mod repository;
 
@@ -136,6 +138,50 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
             out.extend(repository::strip_query_attrs(item));
             out
         })
+        .into()
+}
+
+/// A struct that joined rows decode into, with fields from several entities.
+///
+/// ```ignore
+/// #[derive(Joined)]
+/// struct OrderLine {
+///     #[from(Order::id)] order_id: i64,
+///     #[from(Coupon::code)] coupon: Option<String>, // left-joined: an Option
+///     #[flatten] user: User,                         // a whole entity
+/// }
+///
+/// let lines: Vec<OrderLine> = select::<Order>()
+///     .join::<User>().inner()
+///     .join::<Coupon>().left()
+///     .into::<OrderLine>()
+///     .all()
+///     .run(&mut db)?;
+/// ```
+///
+/// Every field says where it comes from; nothing is matched by name. Only
+/// these columns are selected. It is read-only: not an `Entity`.
+#[proc_macro_derive(Joined, attributes(from, flatten, rupa))]
+pub fn derive_joined(input: TokenStream) -> TokenStream {
+    run(input, joined::derive)
+}
+
+/// A join condition: `on!(Order::user_id == User::id)`.
+///
+/// ```ignore
+/// select::<User>()
+///     .left_join_on::<Order>(on!(Order::user_id == User::id))
+///     .filter(on!(Order::total > $min && User::active))
+/// ```
+///
+/// The grammar is `#[query(filter = ..)]`'s, with fields written
+/// `Entity::field` (`Entity::field.key` for JSON paths). It expands to a
+/// closure over the join's source handles; each entity must be a source
+/// exactly once. `$name` binds a variable in scope.
+#[proc_macro]
+pub fn on(input: TokenStream) -> TokenStream {
+    on::on(input.into(), quote::quote!(::rupa::__macro_support))
+        .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
 

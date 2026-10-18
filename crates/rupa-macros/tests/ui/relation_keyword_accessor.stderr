@@ -1,0 +1,5 @@
+error: the relation accessor would be named `type`, a keyword; name it: `#[column(references = .., relation = name)]`
+ --> tests/ui/relation_keyword_accessor.rs:7:64
+  |
+7 | pub struct Thing { #[id] id: i64, #[column(references = Type)] type_id: i64 }
+  |                                                                ^^^^^^^

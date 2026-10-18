@@ -375,3 +375,66 @@ fn blocking_wraps_one_sync_executor() {
     let mut repo = Repo::new(Blocking(&mut tx));
     assert!(pollster::block_on(repo.get(1)).unwrap().is_some());
 }
+
+// ---------------------------------------------------------------------------
+// Joins in a repository.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Entity, Insertable)]
+#[entity(table = "posts")]
+pub struct Post {
+    #[id]
+    id: i64,
+    #[column(references = User)]
+    user_id: i64,
+    title: String,
+}
+
+#[derive(Debug, PartialEq, Joined)]
+pub struct Byline {
+    #[from(Post::title)]
+    title: String,
+    #[from(User::email)]
+    author: String,
+}
+
+#[repository]
+pub trait PostRepository: Send + Sync {
+    #[query(left_join = Post, filter = User::active == $active, order_by = User::id, order_by = Post::id)]
+    async fn with_posts(&self, active: bool) -> Result<Vec<(User, Option<Post>)>, DynError>;
+
+    #[query(entity = Post, inner_join = User on User::id == Post::user_id, order_by = Post::id desc)]
+    fn bylines(&self) -> Result<Vec<Byline>, DynError>;
+}
+
+#[test]
+fn joins_in_a_repository() {
+    let mut db = MemoryDb::new();
+    db.register::<User>().register::<Post>();
+    db.run(insert::<User>().values(&users()).affected())
+        .unwrap();
+    let posts =
+        [(10, 1, "hello"), (11, 1, "again"), (12, 2, "hi")].map(|(id, user_id, title)| Post {
+            id,
+            user_id,
+            title: title.into(),
+        });
+    db.run(insert::<Post>().values(&posts).affected()).unwrap();
+    let repo: Arc<dyn PostRepository> = Arc::new(Repo::shared_async(db.into_async()));
+
+    let rows = pollster::block_on(repo.with_posts(true)).unwrap();
+    let ids: Vec<_> = rows
+        .iter()
+        .map(|(u, p)| (u.id, p.as_ref().map(|p| p.id)))
+        .collect();
+    assert_eq!(ids, [(1, Some(10)), (1, Some(11)), (3, None)]);
+
+    let bylines = repo.bylines().unwrap();
+    assert_eq!(
+        bylines,
+        [("hi", "bob@x"), ("again", "ada@x"), ("hello", "ada@x")].map(|(title, author)| Byline {
+            title: title.into(),
+            author: author.into(),
+        })
+    );
+}
