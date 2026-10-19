@@ -1,6 +1,7 @@
 # Adoption, snapshots, and coverage
 
-Status: proposed for owner review, not an implemented or approved API.
+Status: accepted design through owner-reviewed [PR #29](https://github.com/upwell-rs/rupa/pull/29),
+merged into the migration integration branch on 2026-10-19. Not implemented.
 Addresses [#13](https://github.com/upwell-rs/rupa/issues/13), under discovery
 [#4](https://github.com/upwell-rs/rupa/issues/4) and epic
 [#3](https://github.com/upwell-rs/rupa/issues/3). Builds on the accepted
@@ -190,10 +191,10 @@ do not execute arbitrary migration bodies as a production inspection method.
 | Prune once a snapshot exists | Defer; would strand older targets and lose validation evidence |
 | Automatically verify arbitrary adopted schema | Defer; application equivalence includes data and external assumptions |
 
-On approval, #5 owns immutable snapshot metadata and manifests; #6 owns
+Following approval in PR #29, #5 owns immutable snapshot metadata and manifests; #6 owns
 distinct executed/covered/adopted history and planning; #7/#16 own target
 classification and exclusion; #8 owns execution/recovery and reverse boundaries;
 #9 owns explicit adoption, replay selection, and reports; #11 owns equivalence
 and interruption fixtures. #18 must explicitly decide which of these
-capabilities ship initially. Keep #13 open until owner review records the
-decisions; this proposal alone does not authorize an implementation contract.
+capabilities ship initially. Issue #13 is complete; remaining discovery
+decisions are consolidated in [the migration contract](migrations-contract.md).
