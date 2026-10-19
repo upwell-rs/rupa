@@ -1,4 +1,5 @@
-use rupa::migrate::{Catalog, Session, VersionScheme};
+use rupa::migrate::sync::Session;
+use rupa::migrate::{Catalog, VersionScheme};
 use rupa_conformance::migrations::fixture::body;
 
 use super::memory_runner;

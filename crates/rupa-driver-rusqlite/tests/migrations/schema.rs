@@ -1,5 +1,6 @@
 use rupa::migrate::schema::{ColumnDef, ColumnType};
-use rupa::migrate::{Catalog, Error, Planned, RunError, Session, ValidationError, VersionScheme};
+use rupa::migrate::sync::Session;
+use rupa::migrate::{Catalog, Error, Planned, RunError, ValidationError, VersionScheme};
 use rupa_conformance::migrations::fixture::{Plans, Post, add_pinned, create_tables, planned};
 use rupa_driver_rusqlite::SqliteExecutor;
 

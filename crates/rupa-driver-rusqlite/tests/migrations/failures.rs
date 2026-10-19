@@ -1,4 +1,5 @@
-use rupa::migrate::{Catalog, Error, RunError, Session, StateError, VersionScheme};
+use rupa::migrate::sync::Session;
+use rupa::migrate::{Catalog, Error, RunError, StateError, VersionScheme};
 use rupa_conformance::migrations::fixture::body;
 use rupa_driver_rusqlite::SqliteError;
 

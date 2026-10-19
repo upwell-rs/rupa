@@ -4,6 +4,39 @@ Enable `migrations` and a supported driver: `sqlite` (bundled SQLite),
 `sqlite-unbundled` (system SQLite) or `postgres-sync` (the sync `postgres`
 crate). Neither async nor runtime driver selection is required.
 
+## Execution modes
+
+Execution comes in two modes with identical names, selected by import, as
+with Diesel's sync and async query traits: `rupa::migrate::sync` (feature
+`sync`) and `rupa::migrate::asynchronous` (feature `async`). Each holds
+`Session`, `Migration`, `Context` and `Apply`; catalogs, plans, metadata,
+errors and reports are shared at `rupa::migrate`. Neither mode is a default:
+sync-only drivers (`sqlite`, `sqlite-unbundled`, `postgres-sync`, `mysql`)
+enable `sync`, async drivers enable `async`, and a crate that only owns
+migrations enables the mode its Rust bodies are written for.
+
+```rust,ignore
+use rupa::migrate::sync::Apply;
+let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
+
+use rupa::migrate::asynchronous::Apply;
+let report = catalog.apply(connection).await?;
+```
+
+With exactly one mode enabled, its four names are also re-exported at
+`rupa::migrate` and the facade prelude brings `Apply` and `Session` into scope.
+With both enabled, neither is re-exported, so the two `apply` methods can never
+be ambiguous; import from the mode module. Because Cargo unifies features
+across a build, a dependency that enables the other mode removes the root
+names: libraries, and code built in workspaces that enable both, should import
+from the mode modules.
+
+Planned and SQL migrations (`Planned<T>`) and `migration_catalog!` catalogs
+implement every enabled mode. A scripted Rust body implements the mode it is
+written for; implementing both is the same body with `.await` added.
+`Blocking(connection)` runs any sync session through the async contracts with
+no added locking, for async applications on sync-only drivers.
+
 ```sh
 cargo run -p rupa-example-app
 cargo run -p rupa-example-app -- app.db
@@ -34,6 +67,7 @@ pub mod migrations {
 }
 
 // app: the catalog is engine-independent and can be applied from any crate
+use rupa::migrate::sync::Apply;
 db::migrations::catalog()?.apply(SqliteExecutor::open("app.db")?)?;
 ```
 
@@ -56,8 +90,8 @@ when the directory changes, so added or removed files never leave a stale catalo
 A Rust migration is one of two kinds, decided by the trait its type
 implements:
 
-- **Scripted** (`Migration<S>`): imperative code with arbitrary steps between
-  queries. It is opaque, so its checksum covers its source files.
+- **Scripted** (`sync::Migration<S>` or `asynchronous::Migration<S>`):
+  imperative code with arbitrary steps between queries. It is opaque, so its checksum covers its source files.
 - **Planned** (`PlannedMigration`): a pure `plan()` returning SQL scripts and
   [schema operations](#schema-operations). The plan is evaluated once when the
   catalog is built; its checksum covers the plan itself, and exactly that plan
@@ -144,6 +178,8 @@ offered; write them as SQL.
 ## Applying a catalog
 
 ```rust,ignore
+use rupa::migrate::sync::Apply;
+
 let entries = application_migrations();
 let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries)?;
 let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
@@ -162,6 +198,8 @@ including failure and unwind. Use a separate connection for the runtime pool,
 with separate credentials where supported. Do not wrap application transactions
 or manually assemble runner/session handles. The driver's `Session` trait is a
 control contract for adapters; ordinary application code uses `catalog.apply`.
+Sync and async runs share one runner body, so history, exclusion and failure
+handling are identical in both modes.
 
 The initial apply path is strict: transactional incremental migrations only.
 Unsupported policy/kind is rejected before initialization. A nonempty unmanaged
@@ -193,7 +231,7 @@ Dollar-quoted bodies are opaque to it; the session's lock and transaction checks
 below catch what they do to the runner.
 
 Without `rupa-build`, a hand-written Rust module exports a type implementing
-`MigrationInfo` and either `Migration<S>` or `PlannedMigration`. A scripted
+`MigrationInfo` and either a mode's `Migration<S>` or `PlannedMigration`. A scripted
 migration's static `Metadata.inputs` must embed the module and every local
 executable helper/input with stable logical paths; a planned one declares no
 inputs, wrapped as `Planned<T>` in the catalog. Source and helper declarations
@@ -266,7 +304,7 @@ ownership; a supported recovery command is a later slice. Do not delete history
 or clear a claim merely because a client timeout elapsed. This first slice
 reports uncertainty and blocks further apply instead of guessing.
 
-Async adapters (tokio-postgres, sqlx), MySQL, snapshots/adoption, authored down
+Native async sessions (tokio-postgres, sqlx), MySQL, snapshots/adoption, authored down
 migrations, nontransactional work (such as `CREATE INDEX CONCURRENTLY`), allowed
 late application and operator recovery are not yet implemented. Their accepted
 design is in [the migration contract](design/migrations-contract.md).

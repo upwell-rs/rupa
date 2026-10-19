@@ -1,9 +1,10 @@
 //! Migration bodies shared by the cases and by driver-specific migration tests.
 
+use rupa::migrate::schema::SchemaOp;
 use rupa::migrate::schema::{ColumnDef, ColumnDefault, ColumnType, Index, Table};
 use rupa::migrate::{
-    ArtifactInput, Context, Error, Metadata, Migration, MigrationInfo, MigrationKind, Plan,
-    Planned, PlannedMigration, Policy, Session,
+    ArtifactInput, Error, Metadata, MigrationInfo, MigrationKind, Plan, Planned, PlannedMigration,
+    Policy,
 };
 use rupa::{raw, select};
 
@@ -31,14 +32,6 @@ pub struct Body(pub &'static Metadata);
 impl MigrationInfo for Body {
     fn info(&self) -> &'static Metadata {
         self.0
-    }
-}
-
-impl<S: Session> Migration<S> for Body {
-    type Error = Error<S::Error>;
-
-    fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
-        context.script(self.0.inputs[0].contents)
     }
 }
 
@@ -110,29 +103,6 @@ impl MigrationInfo for Normalize {
     fixture_info!("2", "normalize note titles in Rust");
 }
 
-impl<S: Session> Migration<S> for Normalize {
-    type Error = Error<S::Error>;
-
-    fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
-        let notes = context.run(select::<Note>().all())?;
-
-        for note in notes {
-            let title = note.title.trim().to_uppercase();
-
-            context.run(
-                raw()
-                    .sql("UPDATE notes SET title = ")
-                    .bind(title)
-                    .sql(" WHERE id = ")
-                    .bind(note.id)
-                    .execute::<u64>(),
-            )?;
-        }
-
-        Ok(())
-    }
-}
-
 rupa::migrate::migration_catalog! {
     /// A statically dispatched SQL/Rust catalog.
     pub enum Mixed, error MixedError {
@@ -146,14 +116,6 @@ pub struct ApplicationFailure;
 
 impl MigrationInfo for ApplicationFailure {
     fixture_info!("2", "application error");
-}
-
-impl<S: Session> Migration<S> for ApplicationFailure {
-    type Error = std::io::Error;
-
-    fn up(&self, _: &mut Context<'_, S>) -> Result<(), Self::Error> {
-        Err(std::io::Error::other("application rejected migration"))
-    }
 }
 
 rupa::migrate::migration_catalog! {
@@ -171,32 +133,11 @@ impl MigrationInfo for RawCommit {
     fixture_info!("1", "raw control");
 }
 
-impl<S: Session> Migration<S> for RawCommit {
-    type Error = Error<S::Error>;
-
-    fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
-        context.script("CREATE TABLE marker(id INTEGER)")?;
-        context.run(raw().sql("COMMIT").execute::<u64>())?;
-
-        Ok(())
-    }
-}
-
 /// Panics after transactional DDL to exercise rollback on session destruction.
 pub struct Interrupted;
 
 impl MigrationInfo for Interrupted {
     fixture_info!("1", "interruption");
-}
-
-impl<S: Session> Migration<S> for Interrupted {
-    type Error = Error<S::Error>;
-
-    fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
-        context.script("CREATE TABLE lost(id INTEGER)")?;
-
-        panic!("injected migration interruption");
-    }
 }
 
 /// The author shape the schema migrations below create.
@@ -237,4 +178,106 @@ pub fn add_pinned() -> Plan {
                 .default(ColumnDefault::Value(rupa::core::Value::Bool(false))),
         )
         .sql("INSERT INTO authors (name) VALUES ('ada'); INSERT INTO posts (author_id, title) VALUES (1, 'hello');")
+}
+
+/// A scripted migration mixing schema operations with arbitrary steps.
+pub struct Scripted(pub &'static Metadata);
+
+impl MigrationInfo for Scripted {
+    fn info(&self) -> &'static Metadata {
+        self.0
+    }
+}
+
+/// Emits every fixture body for one mode: `.await` follows each context call
+/// in async mode only, so both modes run identical bodies.
+macro_rules! bodies {
+    ([$($async:tt)*] [$($await:tt)*]) => {
+        impl<S: Session> Migration<S> for Body {
+            type Error = Error<S::Error>;
+
+            $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                context.script(self.0.inputs[0].contents) $($await)*
+            }
+        }
+
+        impl<S: Session> Migration<S> for Normalize {
+            type Error = Error<S::Error>;
+
+            $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                let notes = context.run(select::<Note>().all()) $($await)*?;
+
+                for note in notes {
+                    let title = note.title.trim().to_uppercase();
+
+                    context.run(
+                        raw()
+                            .sql("UPDATE notes SET title = ")
+                            .bind(title)
+                            .sql(" WHERE id = ")
+                            .bind(note.id)
+                            .execute::<u64>(),
+                    ) $($await)*?;
+                }
+
+                Ok(())
+            }
+        }
+
+        impl<S: Session> Migration<S> for ApplicationFailure {
+            type Error = std::io::Error;
+
+            $($async)* fn up(&self, _: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                Err(std::io::Error::other("application rejected migration"))
+            }
+        }
+
+        impl<S: Session> Migration<S> for RawCommit {
+            type Error = Error<S::Error>;
+
+            $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                context.script("CREATE TABLE marker(id INTEGER)") $($await)*?;
+                context.run(raw().sql("COMMIT").execute::<u64>()) $($await)*?;
+
+                Ok(())
+            }
+        }
+
+        impl<S: Session> Migration<S> for Interrupted {
+            type Error = Error<S::Error>;
+
+            $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                context.script("CREATE TABLE lost(id INTEGER)") $($await)*?;
+
+                panic!("injected migration interruption");
+            }
+        }
+
+        impl<S: Session> Migration<S> for Scripted {
+            type Error = Error<S::Error>;
+
+            $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                context.schema(&SchemaOp::CreateTable(Table::of::<Author>())) $($await)*?;
+                context.script("INSERT INTO authors (name) VALUES ('grace')") $($await)*
+            }
+        }
+    };
+}
+
+/// The fixtures' sync bodies.
+mod sync_bodies {
+    use rupa::migrate::sync::{Context, Migration, Session};
+
+    use super::*;
+
+    bodies!([] []);
+}
+
+/// The fixtures' async bodies.
+mod async_bodies {
+    use rupa::migrate::asynchronous::{Context, Migration, Session};
+
+    use super::*;
+
+    bodies!([async] [.await]);
 }

@@ -5,7 +5,8 @@ mod postgres_cases;
 
 use std::time::Duration;
 
-use rupa_conformance::migrations::{MigrationHarness, run_migrations};
+use rupa_conformance::migrations::asynchronous::{self, Blocked};
+use rupa_conformance::migrations::sync::{self, Harness, Target};
 use rupa_driver_postgres::PgExecutor;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::SyncRunner;
@@ -21,15 +22,17 @@ impl Pg {
     }
 }
 
-impl MigrationHarness for Pg {
+impl Harness for Pg {
     type Session = PgExecutor;
-
-    fn reset(&mut self) {
-        self.execute("DROP SCHEMA IF EXISTS public, tenant CASCADE; CREATE SCHEMA public;");
-    }
 
     fn connect(&self) -> PgExecutor {
         PgExecutor::new(self.client()).with_migration_lock_timeout(Duration::from_millis(250))
+    }
+}
+
+impl Target for Pg {
+    fn reset(&mut self) {
+        self.execute("DROP SCHEMA IF EXISTS public, tenant CASCADE; CREATE SCHEMA public;");
     }
 
     fn execute(&self, sql: &str) {
@@ -78,6 +81,10 @@ fn migrations() {
         ),
     };
 
-    run_migrations(&mut pg);
-    postgres_cases::run(&mut pg);
+    sync::run(&mut pg);
+
+    let mut blocked = Blocked(pg);
+
+    asynchronous::run(&mut blocked);
+    postgres_cases::run(&mut blocked.0);
 }

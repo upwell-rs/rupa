@@ -1,11 +1,12 @@
 use std::time::Duration;
 
 use rupa::core::exec::Executor;
+use rupa::migrate::sync::{Apply, Session};
 use rupa::migrate::{
-    Catalog, Engine, Error, MigrationInfo, RunError, Session, StateError, Target, VersionScheme,
+    Catalog, Engine, Error, MigrationInfo, RunError, StateError, Target, VersionScheme,
 };
-use rupa_conformance::migrations::MigrationHarness;
 use rupa_conformance::migrations::fixture::body;
+use rupa_conformance::migrations::sync::{Harness, Target as _};
 use rupa_driver_postgres::PgError;
 
 use super::Pg;

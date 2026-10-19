@@ -8,7 +8,7 @@ publish = false
 description = "Example persistence crate: entities and a discovered migration directory"
 
 [dependencies]
-rupa = { path = "../../../crates/rupa", default-features = false, features = ["migrations"] }
+rupa = { path = "../../../crates/rupa", default-features = false, features = ["migrations", "sync"] }
 
 [build-dependencies]
 rupa-build.workspace = true

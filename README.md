@@ -86,6 +86,7 @@ is a cargo feature of `rupa`:
 
 | feature | adds |
 |---|---|
+| `sync` | sync execution where a mode split exists (so far migrations: `rupa::migrate::sync`); enabled by sync drivers |
 | `async` | async executors, transactions, pools and `async fn` repository methods (no runtime by itself) |
 | `dynamic` | run-time driver selection and type erasure: `rupa::connect`, `rupa::registry()`, `Database`, boxed executors |
 | `tokio` | sync methods of async repositories block with tokio's `block_in_place` |

@@ -132,4 +132,10 @@ pub mod prelude {
     pub use rupa_macros::{
         Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository,
     };
+    #[cfg(feature = "migrations")]
+    #[allow(
+        unused_imports,
+        reason = "empty unless exactly one migration mode is enabled"
+    )]
+    pub use rupa_migrate::prelude::*;
 }

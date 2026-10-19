@@ -7,7 +7,8 @@ mod schema;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rupa_conformance::migrations::{MigrationHarness, run_migrations};
+use rupa_conformance::migrations::asynchronous::{self, Blocked};
+use rupa_conformance::migrations::sync::{self, Harness, Target};
 use rupa_driver_rusqlite::SqliteExecutor;
 
 /// A disposable file target shared by independent SQLite connections.
@@ -41,15 +42,17 @@ impl Drop for DatabaseFile {
     }
 }
 
-impl MigrationHarness for DatabaseFile {
+impl Harness for DatabaseFile {
     type Session = SqliteExecutor;
-
-    fn reset(&mut self) {
-        *self = Self::new();
-    }
 
     fn connect(&self) -> SqliteExecutor {
         self.session()
+    }
+}
+
+impl Target for DatabaseFile {
+    fn reset(&mut self) {
+        *self = Self::new();
     }
 
     fn execute(&self, sql: &str) {
@@ -89,5 +92,10 @@ fn memory_runner() -> SqliteExecutor {
 
 #[test]
 fn conformance() {
-    run_migrations(&mut DatabaseFile::new());
+    sync::run(&mut DatabaseFile::new());
+}
+
+#[test]
+fn conformance_async_through_blocking() {
+    asynchronous::run(&mut Blocked(DatabaseFile::new()));
 }
