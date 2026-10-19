@@ -45,9 +45,10 @@ build time with the same rules the runtime applies. Output goes to
 changes, so added or removed files never leave a stale catalog.
 
 Rust migrations are parsed with `syn` and must stay inside their own files: no
-`crate::` paths, no `super::` above the migration root, no `#[path]`, no
-out-of-line modules in single-file migrations, and no `include*!` outside the
-migration directory. Otherwise a later change to shared application code would
+`crate::` paths (attribute and macro arguments included), no `super::` above the
+migration root, no `#[path]`, no out-of-line modules or `include*!` in
+single-file migrations, and no includes that leave a directory migration or name
+an unhashed dotfile. Otherwise a later change to shared application code would
 silently change an applied migration that its checksum still reports as
 unchanged. Migrations declare the row shapes they need locally instead.
 

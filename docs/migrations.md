@@ -56,7 +56,9 @@ it, migration 2 would select a column that does not yet exist on every fresh
 database, while its checksum still reported no change. `rupa-build` therefore
 rejects Rust migrations that reach outside their own files: `crate::` paths,
 `super::` above the migration root, `#[path]`, out-of-line modules in
-single-file migrations and `include*!` outside the migration directory.
+single-file migrations, any `include*!` in a single-file migration, and
+includes that leave a directory migration or name an unhashed dotfile.
+Attribute arguments such as `#[derive(crate::Entity)]` are checked too.
 
 Declare the row shape a migration needs locally, as a private
 `#[derive(rupa::Entity)]` struct, and keep helpers inside a directory migration.

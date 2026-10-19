@@ -174,6 +174,14 @@ impl Checker<'_> {
 impl<'ast> Visit<'ast> for Checker<'_> {
     fn visit_visibility(&mut self, _: &'ast syn::Visibility) {}
 
+    fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
+        if let syn::Meta::List(list) = &attr.meta {
+            self.tokens(list.tokens.clone());
+        }
+
+        visit::visit_attribute(self, attr);
+    }
+
     fn visit_path(&mut self, path: &'ast syn::Path) {
         let idents: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
 
@@ -246,7 +254,8 @@ fn path_separator(trees: &[TokenTree], index: usize) -> bool {
     colon(index) && colon(index + 1)
 }
 
-/// Whether an `include*!` path, relative to the including file, stays within the migration.
+/// Whether an `include*!` path, relative to the including file, stays within the
+/// migration's hashed files; dotfiles are never hashed, so they count as outside.
 fn stays_inside(relative: &[String], include: &str) -> bool {
     let mut stack: Vec<&str> = relative[..relative.len() - 1]
         .iter()
@@ -265,6 +274,7 @@ fn stays_inside(relative: &[String], include: &str) -> bool {
                     return false;
                 }
             }
+            name if name.starts_with('.') => return false,
             name => stack.push(name),
         }
     }

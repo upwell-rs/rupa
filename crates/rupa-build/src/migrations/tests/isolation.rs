@@ -93,6 +93,24 @@ fn reaching_application_code_or_foreign_files_is_rejected() {
             Violation::CratePath("crate::Note".into()),
         ),
         (
+            "#[derive(crate::Entity)]\nstruct Note;",
+            Layout::File,
+            Violation::CratePath("crate::Entity".into()),
+        ),
+        (
+            "#[app::audited(crate::db::Note)]\nfn up() {}",
+            Layout::File,
+            Violation::CratePath("crate::db::Note".into()),
+        ),
+        (
+            "const S: &str = include_str!(\".words.txt\");",
+            Layout::Directory {
+                depth: 1,
+                relative: &nested,
+            },
+            Violation::Include(".words.txt".into()),
+        ),
+        (
             "macro_rules! m { () => { $crate::Note } }",
             Layout::File,
             Violation::CratePath("crate::Note".into()),
