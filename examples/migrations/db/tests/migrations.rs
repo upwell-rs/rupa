@@ -17,7 +17,7 @@ fn discovered_catalog_applies_sql_single_file_and_directory_migrations_in_order(
             .iter()
             .map(ToString::to_string)
             .collect::<Vec<_>>(),
-        ["1", "2", "3"]
+        ["1", "2", "3", "4"]
     );
 
     let (title, slug): (String, String) = connection
@@ -29,6 +29,17 @@ fn discovered_catalog_applies_sql_single_file_and_directory_migrations_in_order(
 
     assert_eq!(title, "HELLO; WORLD");
     assert_eq!(slug, "hello-world");
+
+    let tagged: String = connection
+        .connection()
+        .query_row(
+            "SELECT \"table\" || '.' || \"to\" FROM pragma_foreign_key_list('tags')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("tags reference notes");
+
+    assert_eq!(tagged, "notes.id");
 }
 
 #[test]
@@ -41,7 +52,12 @@ fn descriptions_come_from_file_headers_and_inputs_exclude_them() {
             "Create the notes table with a seed row.",
             "Trim and uppercase note titles in Rust.",
             "Add a slug column derived from each title.",
+            "Create the tags table from its entity and index note slugs.",
         ]
+    );
+    assert!(
+        infos[3].inputs.is_empty(),
+        "a planned migration is identified by its plan, not its source"
     );
     assert_eq!(
         infos[2].inputs.iter().map(|i| i.path).collect::<Vec<_>>(),

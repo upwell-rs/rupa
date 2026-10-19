@@ -31,8 +31,8 @@ grammar. The migrations can equally live in a dedicated `db-migrations` crate;
 the generated catalog never assumes where it is applied.
 
 Entries are `<version>_<snake_name>.sql`, `<version>_<snake_name>.rs` (a unit
-struct named `<SnakeName>` implementing `Migration<S>`), or a
-`<version>_<snake_name>/` directory whose `mod.rs` is the root and whose other
+struct named `<SnakeName>` implementing `Migration<S>` or `PlannedMigration`), or
+a `<version>_<snake_name>/` directory whose `mod.rs` is the root and whose other
 files are private helpers. Leading `--` or `//!` lines are the description and
 are excluded from the checksum. Anything else fails the build; dotfiles are
 ignored.
@@ -44,7 +44,10 @@ build time with the same rules the runtime applies. Output goes to
 `OUT_DIR/rupa-migrations/<stream>.rs`; the build reruns when the directory
 changes, so added or removed files never leave a stale catalog.
 
-Rust migrations are parsed with `syn` and must stay inside their own files: no
+Rust migration roots are parsed with `syn`. One whose type implements
+`PlannedMigration` is wrapped in `Planned<..>` and declares no inputs: its plan
+is its checksummed identity, so it may use shared entities. Implementing both
+traits fails the build. Scripted migrations must stay inside their own files: no
 `crate::` paths (attribute and macro arguments included), no `super::` above the
 migration root, no `#[path]`, no out-of-line modules or `include*!` in
 single-file migrations, and no includes that leave a directory migration or name

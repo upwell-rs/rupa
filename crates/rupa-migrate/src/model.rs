@@ -1,3 +1,7 @@
+use rupa_core::schema::SchemaOp;
+
+use crate::Plan;
+
 /// An immutable named file in the artifact's executable source closure.
 #[derive(Debug, Clone, Copy)]
 pub struct ArtifactInput {
@@ -52,26 +56,34 @@ pub trait MigrationInfo {
     /// Static artifact metadata, including its declared source closure.
     fn info(&self) -> &'static Metadata;
 
-    /// Exact static operations for planned execution; imperative bodies remain opaque.
-    fn planned_operations(&self) -> Option<&'static [Operation]> {
+    /// The plan of a planned migration; imperative bodies remain opaque.
+    fn planned(&self) -> Option<Plan> {
         None
     }
 }
 
-/// A static plan operation whose result is intentionally discarded.
-#[derive(Debug, Clone, Copy)]
+/// A plan operation whose result is intentionally discarded.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Operation {
     /// A dialect-native script on the runner-owned session.
     Sql(&'static str),
+    /// A portable schema change, rendered for the session's dialect.
+    Schema(SchemaOp),
 }
 
-/// A pure, statically inspectable migration; use [`Planned`] to execute it.
+/// A pure, inspectable migration; use [`Planned`] to execute it.
+///
+/// [`plan`](Self::plan) runs once, when the catalog is built. The returned
+/// plan is the migration's identity (its checksum) and exactly what is
+/// executed, so it must not depend on the clock, the environment or a
+/// database. It may use shared entities: if one changes an applied plan,
+/// the changed checksum is reported instead of the plan silently diverging.
 pub trait PlannedMigration: MigrationInfo {
     /// Ordered forward operations.
-    const UP: &'static [Operation];
+    fn plan(&self) -> Plan;
 }
 
-/// Explicit interpretation of a static plan, preserving custom execution on `T`.
+/// Explicit interpretation of a plan, preserving custom execution on `T`.
 #[derive(Debug, Clone, Copy)]
 pub struct Planned<T>(pub T);
 
@@ -80,7 +92,7 @@ impl<T: PlannedMigration> MigrationInfo for Planned<T> {
         self.0.info()
     }
 
-    fn planned_operations(&self) -> Option<&'static [Operation]> {
-        Some(T::UP)
+    fn planned(&self) -> Option<Plan> {
+        Some(self.0.plan())
     }
 }

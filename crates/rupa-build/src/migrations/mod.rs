@@ -2,6 +2,7 @@ mod discover;
 mod error;
 mod header;
 mod isolation;
+mod kind;
 mod render;
 
 use std::path::{Path, PathBuf};

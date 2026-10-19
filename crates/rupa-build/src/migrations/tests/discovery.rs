@@ -236,3 +236,66 @@ fn stream_names_must_be_safe_file_names() {
         assert!(matches!(error, Error::Stream(_)), "{stream:?}: {error}");
     }
 }
+
+#[test]
+fn planned_rust_migrations_are_identified_by_their_plan() {
+    let fixture = Fixture::new(&[
+        (
+            "4_index_slugs.rs",
+            "//! Index slugs.\nuse crate::Note;\npub struct IndexSlugs;\nimpl rupa::migrate::PlannedMigration for IndexSlugs { fn plan(&self) -> rupa::migrate::Plan { todo!() } }\n",
+        ),
+        (
+            "5_tags/mod.rs",
+            "use super::super::Tag;\nmod helper;\npub struct Tags;\nimpl PlannedMigration for Tags { fn plan(&self) -> Plan { helper::plan() } }\n",
+        ),
+        ("5_tags/helper.rs", "pub fn plan() {}\n"),
+    ]);
+
+    let artifacts = fixture
+        .discover(VersionScheme::Numbered)
+        .expect("planned migrations may use shared code");
+    let source = Migrations::new("primary")
+        .generate(fixture.path())
+        .expect("generated catalog");
+
+    for artifact in &artifacts {
+        assert!(
+            matches!(&artifact.body, Body::Rust { planned: true, inputs, .. } if inputs.is_empty()),
+            "{artifact:?}"
+        );
+    }
+
+    assert_eq!(artifacts[0].description, "Index slugs.");
+
+    for expected in [
+        "V4IndexSlugs(__rupa_migrate::Planned<m4_index_slugs::IndexSlugs>),",
+        "Migrations::V5Tags(__rupa_migrate::Planned(m5_tags::Tags)),",
+        "inputs: &[],",
+    ] {
+        assert!(
+            source.contains(expected),
+            "missing {expected:?} in:\n{source}"
+        );
+    }
+}
+
+#[test]
+fn scripted_migrations_stay_isolated_and_kinds_do_not_mix() {
+    let scripted = Fixture::new(&[(
+        "1_scripted.rs",
+        "use crate::Note;\npub struct Scripted;\nimpl<S> Migration<S> for Scripted {}\n",
+    )]);
+    let mixed = Fixture::new(&[(
+        "1_mixed.rs",
+        "pub struct Mixed;\nimpl PlannedMigration for Mixed {}\nimpl<S> Migration<S> for Mixed {}\n",
+    )]);
+
+    assert!(matches!(
+        scripted.discover(VersionScheme::Numbered),
+        Err(Error::Isolation { .. })
+    ));
+    assert!(matches!(
+        mixed.discover(VersionScheme::Numbered),
+        Err(Error::MixedKinds(path)) if path == "1_mixed.rs"
+    ));
+}

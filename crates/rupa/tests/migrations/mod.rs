@@ -55,10 +55,11 @@ fn mixed_sql_rust_apply_records_history_and_never_replays() {
 mod authorization;
 mod concurrency;
 mod failures;
+mod schema;
 
 use rupa::migrate::{
-    ArtifactInput, Context, Error, Metadata, Migration, MigrationInfo, MigrationKind, Policy,
-    Session,
+    ArtifactInput, Context, Error, Metadata, Migration, MigrationInfo, MigrationKind, Plan,
+    PlannedMigration, Policy, Session,
 };
 
 /// A declared script fixture using the same immutable closure as its body.
@@ -87,6 +88,32 @@ fn body(version: &'static str, sql: &'static str) -> Body {
         kind: MigrationKind::Incremental,
         inputs: Box::leak(vec![ArtifactInput::new("body.sql", sql)].into_boxed_slice()),
     })))
+}
+
+/// A planned fixture whose plan comes from a function; wrap it in `Planned`.
+struct Plans(&'static Metadata, fn() -> Plan);
+
+impl MigrationInfo for Plans {
+    fn info(&self) -> &'static Metadata {
+        self.0
+    }
+}
+
+impl PlannedMigration for Plans {
+    fn plan(&self) -> Plan {
+        (self.1)()
+    }
+}
+
+/// Metadata of a planned Rust migration: no inputs, its plan is its identity.
+fn planned(version: &'static str) -> &'static Metadata {
+    Box::leak(Box::new(Metadata {
+        version,
+        description: "planned fixture",
+        policy: Policy::TransactionalRequired,
+        kind: MigrationKind::Incremental,
+        inputs: &[],
+    }))
 }
 
 fn memory_runner() -> SqliteExecutor {

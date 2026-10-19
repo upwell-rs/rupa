@@ -363,6 +363,11 @@ impl<E, T, K> Column<E, T, K> {
         self.sql_type
     }
 
+    /// Whether the column admits `NULL`.
+    pub const fn nullable(&self) -> bool {
+        self.nullable
+    }
+
     /// The row source this handle refers to.
     pub const fn source(&self) -> SourceId {
         self.source

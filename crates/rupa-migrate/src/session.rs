@@ -1,9 +1,10 @@
 use rupa_core::dialect::Dialect;
 use rupa_core::exec::Executor;
 use rupa_core::query::{Query, QueryResult};
+use rupa_core::schema::SchemaOp;
 
 use crate::{
-    Catalog, CatalogEntry, Checksum, MigrationInfo, Operation, Planned, PlannedMigration,
+    Catalog, CatalogEntry, Checksum, MigrationInfo, Operation, Plan, Planned, PlannedMigration,
     ValidationError, VersionScheme,
 };
 
@@ -83,6 +84,8 @@ pub trait Session: Executor {
 /// Exclusive query/script access without transaction, connection or lock escape hatches.
 pub struct Context<'a, S: Session> {
     pub(crate) session: &'a mut S,
+    /// The checksummed plan of the running entry, if it is planned.
+    pub(crate) plan: Option<&'a Plan>,
 }
 
 impl<S: Session> Context<'_, S> {
@@ -98,6 +101,14 @@ impl<S: Session> Context<'_, S> {
 
         self.session.script(&normalized)
     }
+
+    /// Runs a schema operation, rendered for the session's dialect.
+    pub fn schema(&mut self, op: &SchemaOp) -> Result<(), Error<S::Error>> {
+        let sql = rupa_sql::render_schema(op, self.session.dialect())
+            .map_err(|e| Error::Validation(e.into()))?;
+
+        self.session.script(&sql)
+    }
 }
 
 /// A compiled sync migration body. Its error remains statically typed.
@@ -109,13 +120,22 @@ pub trait Migration<S: Session>: MigrationInfo {
     fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error>;
 }
 
+/// Executes the plan the catalog checksummed when the entry was built, not a
+/// fresh call to `plan()`, so what runs is exactly what was verified.
 impl<S: Session, T: PlannedMigration> Migration<S> for Planned<T> {
     type Error = Error<S::Error>;
 
     fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
-        for operation in T::UP {
+        let Some(plan) = context.plan else {
+            return Err(Error::History(
+                "a planned migration ran without its catalog plan".into(),
+            ));
+        };
+
+        for operation in plan.operations() {
             match operation {
                 Operation::Sql(sql) => context.script(sql)?,
+                Operation::Schema(op) => context.schema(op)?,
             }
         }
 

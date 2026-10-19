@@ -109,7 +109,7 @@ pub(crate) fn apply<S: Session, M: Migration<S>>(
     }
 
     catalog
-        .validate_scripts(session.dialect().id())
+        .validate_plans(session.dialect().id())
         .map_err(|e| RunError::infrastructure(Error::Validation(e)))?;
     session
         .acquire(catalog.stream, catalog.scheme)
@@ -189,6 +189,7 @@ fn apply_locked<S: Session, M: Migration<S>>(
 
         let mut context = Context {
             session: &mut *session,
+            plan: entry.plan.as_ref(),
         };
         if let Err(source) = catalog.migrations[entry.index].up(&mut context) {
             let mut error = RunError::migration(entry.version, source);

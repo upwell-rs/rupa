@@ -322,6 +322,7 @@ fn relation(
 
         impl #ident {
             #[doc = #doc]
+            #[allow(dead_code, reason = "a derived accessor exists for every relation, used or not")]
             #vis const fn #name() -> #ms::Rel<#marker> {
                 #ms::Rel::new()
             }
