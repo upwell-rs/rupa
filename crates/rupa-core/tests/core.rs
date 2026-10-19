@@ -8,7 +8,7 @@ use rupa_core::ir::{BinOp, ColumnRef, ExprNode, FromClause, SourceId, Statement}
 use rupa_core::prelude::*;
 use rupa_core::query::Output;
 use rupa_core::row::ValueRows;
-use rupa_core::{ColumnKind, Dialect, Expect, ResultError, SqlType, Src, Value};
+use rupa_core::{Dialect, Expect, ResultError, SqlType, Src, Value};
 
 fn rows(rows: Vec<Vec<Value>>) -> ValueRows {
     ValueRows::new(rows)
@@ -227,16 +227,11 @@ fn decode_errors_name_the_column() {
     assert_eq!(e.column, Some("email"));
 }
 
-// --- column kinds of hand-written handles ------------------------------------
+// --- hand-written JSON handles (kind inference is tested on derived entities) --
 
 #[test]
-fn hand_written_handles_carry_their_kinds() {
-    assert_eq!(User::EMAIL.kind(), ColumnKind::Scalar);
-    assert_eq!(User::NICKNAME.kind(), ColumnKind::Scalar);
-    assert_eq!(User::PREFS.kind(), ColumnKind::Json);
-    assert_eq!(User::OLD_PREFS.kind(), ColumnKind::Json);
+fn hand_written_json_handles_encode_and_filter() {
     assert_eq!(User::OLD_PREFS.encode(&None), Value::Null(SqlType::Json));
-    let _: Column<User, Prefs, Json> = User::PREFS;
     let _ = select::<User>()
         .filter(User::EMAIL.eq("x"))
         .filter(User::PREFS.path("beta").cast::<bool>().eq(true));
