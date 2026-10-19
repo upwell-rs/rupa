@@ -1,5 +1,5 @@
 //! Asynchronous migration execution, with the same names as
-//! [`sync`](crate::sync); the import selects the mode. Futures are `Send` and
+//! `sync`; the import selects the mode. Futures are `Send` and
 //! unboxed.
 
 #[cfg(feature = "sync")]
@@ -15,7 +15,7 @@ use crate::{
 
 /// Driver-owned dedicated physical migration connection, awaited.
 ///
-/// The async counterpart of [`sync::Session`](crate::sync::Session), with the
+/// The async counterpart of `sync::Session`, with the
 /// same obligations. A dropped future cannot await cleanup, so the session
 /// must close its dedicated connection when dropped mid-run.
 pub trait Session: Connection {

@@ -68,7 +68,8 @@ metadata is not a claim that this slice executes them.
 | `sync` | `sync::{Session, Migration, Context, Apply}` |
 | `async` | `asynchronous::{Session, Migration, Context, Apply}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
 
-Neither is default. With exactly one enabled, its names are re-exported at the
-crate root and through `prelude`; with both, use the mode modules. The facade
+Neither is default. With exactly one enabled, all four of its names are
+re-exported at the crate root, and `prelude` brings its method traits (`Apply`,
+`Session`) into scope anonymously; with both, use the mode modules. The facade
 gates the crate with `migrations` and forwards its own `sync`/`async`; driver
 adapters have their own optional `migrations` feature.

@@ -1,5 +1,5 @@
 //! Synchronous migration execution. The same names exist in
-//! [`asynchronous`](crate::asynchronous); the import selects the mode.
+//! `asynchronous`; the import selects the mode.
 
 use rupa_core::sync::Connection;
 

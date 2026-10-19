@@ -1,7 +1,7 @@
 //! Explicit migration catalogs, history and execution, independent of drivers.
 //!
 //! Execution comes in two modes with identical names, selected by import:
-//! [`sync`] (feature `sync`) and [`asynchronous`] (feature `async`). With
+//! `sync` (feature `sync`) and `asynchronous` (feature `async`). With
 //! exactly one mode enabled, its `Session`, `Migration`, `Context` and `Apply`
 //! are also re-exported here; with both enabled, import them from the mode
 //! module to avoid ambiguity.

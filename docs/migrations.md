@@ -17,9 +17,13 @@ migrations enables the mode its Rust bodies are written for.
 
 ```rust,ignore
 use rupa::migrate::sync::Apply;
-let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
 
+let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
+```
+
+```rust,ignore
 use rupa::migrate::asynchronous::Apply;
+
 let report = catalog.apply(connection).await?;
 ```
 
