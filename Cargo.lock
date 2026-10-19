@@ -2521,6 +2521,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rupa-build"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "rupa-migrate",
+ "syn 2.0.119",
+ "thiserror",
+]
+
+[[package]]
 name = "rupa-conformance"
 version = "0.1.0"
 dependencies = [
@@ -2666,6 +2676,22 @@ dependencies = [
  "rupa-macros",
  "rupa-sql",
  "serde_json",
+]
+
+[[package]]
+name = "rupa-example-app"
+version = "0.0.0"
+dependencies = [
+ "rupa",
+ "rupa-example-db",
+]
+
+[[package]]
+name = "rupa-example-db"
+version = "0.0.0"
+dependencies = [
+ "rupa",
+ "rupa-build",
 ]
 
 [[package]]

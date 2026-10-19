@@ -1,6 +1,5 @@
 #![cfg(all(feature = "migrations", feature = "sqlite-unbundled"))]
 
-#[path = "../../examples/migrations/mod.rs"]
 mod application;
 
 use application::entries;
