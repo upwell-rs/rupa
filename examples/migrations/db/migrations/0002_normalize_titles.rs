@@ -1,6 +1,7 @@
 //! Trim and uppercase note titles in Rust.
 
-use rupa::migrate::{Context, Error, Migration, Session};
+use rupa::migrate::Error;
+use rupa::migrate::sync::{Context, Migration, Session};
 use rupa::{raw, select};
 
 /// The note shape as of version 2, frozen with this migration.

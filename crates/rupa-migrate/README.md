@@ -14,7 +14,7 @@ Enable `rupa/migrations` and a supported driver: native synchronous SQLite
 ```rust,ignore
 let entries = application_migrations();
 let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries)?;
-let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
+let report = catalog.apply(SqliteExecutor::open("app.db")?)?; // sync::Apply
 ```
 
 The catalog takes a dedicated native connection and closes it after the run.
@@ -36,7 +36,10 @@ migration directory. See `examples/migrations` and `docs/migrations.md`.
 
 Owns version validation, canonical SHA-256 artifact digests (including the
 canonical encoding of schema operations), plan inspection, strict ordering, the
-apply engine, typed errors and driver session contracts. Schema operations are
+apply engine, typed errors and driver session contracts. One internal
+`macro_rules!` emits the runner, `Context` methods and `Planned<T>` adapter for
+each enabled mode, so sync and async share every step. Sessions bind to
+`rupa_core::{sync, asynchronous}::Connection`. Schema operations are
 rendered with `rupa-sql` for the session's dialect, and every plan is rendered
 before the target is acquired.
 Drivers implement `Session` on their native executor and keep lock/history
@@ -53,12 +56,20 @@ a failed later body rolls back without undoing earlier commits. SQLite uses a
 durable cooperative claim across commits, PostgreSQL a session advisory lock;
 interruption can require explicit reconciliation. There is no automatic takeover or replay.
 
-Async/dynamic adapters, MySQL, nontransactional work, snapshots, adoption, authored reversal,
+Native async driver sessions, dynamic adapters, MySQL, nontransactional work, snapshots, adoption, authored reversal,
 out-of-order permission and operator recovery remain subsequent implementation
 slices. Declaring their
 metadata is not a claim that this slice executes them.
 
 ## Feature flags
 
-None. The crate provides only native static sync contracts. The facade gates it
-with `migrations`; driver adapters have their own optional `migrations` feature.
+| feature | adds |
+|---|---|
+| `sync` | `sync::{Session, Migration, Context, Apply}` |
+| `async` | `asynchronous::{Session, Migration, Context, Apply}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
+
+Neither is default. With exactly one enabled, all four of its names are
+re-exported at the crate root, and `prelude` brings its method traits (`Apply`,
+`Session`) into scope anonymously; with both, use the mode modules. The facade
+gates the crate with `migrations` and forwards its own `sync`/`async`; driver
+adapters have their own optional `migrations` feature.

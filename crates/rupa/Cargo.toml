@@ -35,10 +35,14 @@ uuid = [
     "rupa-driver-memory?/uuid",
 ]
 
+# Sync execution where a mode split exists (so far migrations:
+# `rupa::migrate::sync`). Sync-only drivers enable it; neither mode is default.
+sync = ["rupa-migrate?/sync"]
 # Async executors, transactions, pools and repositories (`async fn` in
 # `#[repository]`). Runtime-agnostic: no runtime is compiled in by this alone.
 async = [
     "rupa-core/async",
+    "rupa-migrate?/async",
     "rupa-macros/async",
     "dep:pollster",
     "rupa-driver-memory?/async",
@@ -65,13 +69,13 @@ dynamic = [
 # Async Postgres (tokio-postgres + deadpool).
 postgres = ["async", "dep:rupa-driver-tokio-postgres", "rupa-driver-tokio-postgres/pool"]
 # Sync Postgres (postgres + r2d2); cannot run inside a tokio runtime.
-postgres-sync = ["dep:rupa-driver-postgres", "rupa-driver-postgres/pool"]
+postgres-sync = ["sync", "dep:rupa-driver-postgres", "rupa-driver-postgres/pool"]
 # SQLite (rusqlite + r2d2), compiled from source.
 sqlite = ["sqlite-unbundled", "rupa-driver-rusqlite/bundled"]
 # SQLite (rusqlite + r2d2), linking the system SQLite (3.38+).
-sqlite-unbundled = ["dep:rupa-driver-rusqlite", "rupa-driver-rusqlite/pool"]
+sqlite-unbundled = ["sync", "dep:rupa-driver-rusqlite", "rupa-driver-rusqlite/pool"]
 # Sync MySQL 8 (mysql + r2d2).
-mysql = ["dep:rupa-driver-mysql", "rupa-driver-mysql/pool"]
+mysql = ["sync", "dep:rupa-driver-mysql", "rupa-driver-mysql/pool"]
 # The in-memory backend (tests, prototypes).
 memory = ["dep:rupa-driver-memory"]
 # Async drivers on sqlx (+ deadpool).

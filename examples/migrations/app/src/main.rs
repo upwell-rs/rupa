@@ -1,6 +1,7 @@
 //! Applies the `db` crate's generated migration catalog on a dedicated connection.
 
 use rupa::drivers::sqlite::SqliteExecutor;
+use rupa::migrate::sync::Apply;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let catalog = db::migrations::catalog()?;

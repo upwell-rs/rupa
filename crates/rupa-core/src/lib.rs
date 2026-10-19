@@ -3,6 +3,8 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "async")]
+pub mod asynchronous;
 pub mod builder;
 pub mod capability;
 #[cfg(feature = "chrono")]
@@ -29,6 +31,7 @@ pub mod row;
 pub mod schema;
 pub mod security;
 pub mod sem;
+pub mod sync;
 pub mod tx;
 pub mod value;
 
