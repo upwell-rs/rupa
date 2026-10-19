@@ -1,0 +1,53 @@
+# rupa-migrate
+
+## Role
+
+Standalone migration catalog and execution contracts. SQL and compiled Rust
+migrations share one immutable history, without requiring async, dynamic
+dispatch, a pool, or Upwell.
+
+## Usage
+
+Enable `rupa/migrations` and a supported driver. The initial implementation is
+native synchronous SQLite (`sqlite` or `sqlite-unbundled`):
+
+```rust,ignore
+let entries = application_migrations();
+let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries)?;
+let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
+```
+
+The catalog takes a dedicated native connection and closes it after the run.
+Callers do not construct runner/session wrappers. A connection already in an
+application transaction is rejected. Migration bodies receive `Context` for
+scripts and typed queries; it exposes no connection, transaction or lock control.
+
+`sql_migration!` embeds a `.sql` file in a zero-sized planned type;
+`migration_catalog!` generates a closed enum and typed error enum for a mixed
+catalog. `Planned<T>` explicitly interprets static operations. Rust bodies
+implement `Migration<S>` and declare their source/helper closure in `Metadata`.
+See the facade's `sqlite_migrations` example and `docs/migrations.md`.
+
+## Internal role
+
+Owns version validation, canonical SHA-256 artifact digests, static inspection,
+strict ordering, the apply engine, typed errors and driver session contracts.
+Drivers implement `Session` on their native executor and keep lock/history
+machinery private. No boxed body errors or erased catalog dispatch is required.
+
+The first slice applies transactional incrementals. Changed/missing applied
+artifacts, duplicate versions, late arrivals and unsupported policies fail
+explicitly. Each successful body commits with history and attempt completion;
+a failed later body rolls back without undoing earlier commits. SQLite uses a
+durable cooperative claim across commits; interruption can require explicit
+reconciliation. There is no automatic takeover or replay.
+
+Async/dynamic adapters, other engines, generated manifest discovery/build
+helpers, snapshots, adoption, authored reversal, out-of-order permission and
+operator recovery remain subsequent implementation slices. Declaring their
+metadata is not a claim that this slice executes them.
+
+## Feature flags
+
+None. The crate provides only native static sync contracts. The facade gates it
+with `migrations`; driver adapters have their own optional `migrations` feature.

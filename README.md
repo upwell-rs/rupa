@@ -61,6 +61,7 @@ no database server, Docker, or database file.
 
 | Example | What it shows | Run |
 |---|---|---|
+| [SQL/Rust migrations](crates/rupa/examples/sqlite_migrations.rs) | Immutable history, typed Rust data steps, per-migration transactions | `cargo run -p rupa --example sqlite_migrations --features migrations,sqlite` |
 | [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
 | [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
 | [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |
@@ -89,7 +90,8 @@ is a cargo feature of `rupa`:
 | `dynamic` | run-time driver selection and type erasure: `rupa::connect`, `rupa::registry()`, `Database`, boxed executors |
 | `tokio` | sync methods of async repositories block with tokio's `block_in_place` |
 | `tls-rustls` | TLS on rustls (ring) for every enabled networked driver |
-| `full` | every driver, plus `dynamic` |
+| `migrations` | explicit SQL/Rust migrations; native SQLite apply ([guide](docs/migrations.md)) |
+| `full` | every driver, plus `dynamic` and `migrations` |
 
 Most applications know their database: use its pool directly
 (`rupa::drivers::sqlite::SqlitePool`, `rupa::drivers::postgres::PgPool`), which

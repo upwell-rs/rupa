@@ -8,6 +8,7 @@ license.workspace = true
 description = "Rust Unified Persistence API: explicit, attribute-driven repositories over any SQL database"
 
 [features]
+migrations = ["dep:rupa-migrate", "rupa-driver-rusqlite?/migrations"]
 default = ["chrono", "uuid"]
 
 # Column types. Each is forwarded to every enabled driver.
@@ -86,6 +87,7 @@ tls-rustls = [
 ]
 # Every driver, with run-time selection.
 full = [
+    "migrations",
     "postgres",
     "postgres-sync",
     "sqlite",
@@ -101,6 +103,7 @@ full = [
 upwell = ["dep:rupa-upwell"]
 
 [dependencies]
+rupa-migrate = { workspace = true, optional = true }
 rupa-core.workspace = true
 rupa-macros.workspace = true
 rupa-sql.workspace = true
@@ -151,3 +154,7 @@ required-features = ["sqlite", "dynamic"]
 [[example]]
 name = "sqlite_async"
 required-features = ["sqlx-sqlite"]
+
+[[example]]
+name = "sqlite_migrations"
+required-features = ["sqlite-unbundled", "migrations"]
