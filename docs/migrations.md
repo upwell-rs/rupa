@@ -43,7 +43,9 @@ There is no silent reordering, checksum replacement or automatic body retry.
 Use `sql_migration!` for a zero-sized type backed by an explicitly named SQL file,
 then put `Planned<ThatType>` in `migration_catalog!`. Native SQLite parses scripts,
 so quoted/comment semicolons are not split manually. Planned SQL is normalized
-and lexically checked before the catalog can execute it.
+and checksummed independently of any dialect; `apply` lexically checks it with
+the session dialect's grammar before acquiring the target. Only SQLite has a
+script grammar so far; other dialects reject scripts explicitly.
 
 A Rust module exports a type implementing `MigrationInfo` and `Migration<S>`.
 Its static `Metadata.inputs` must embed the module and every local executable
@@ -88,7 +90,9 @@ Before dispatching a body, its attempt is durable. Schema/data effects, installe
 history and attempt completion commit together. If a body fails, acknowledged
 rollback records a failed attempt and releases the claim. Earlier completed
 migrations remain installed. Errors preserve the failed version, typed body or
-driver cause, and additional cleanup failures.
+driver cause, the versions this invocation already committed (`applied()`), and
+additional cleanup failures. Misusing a SQLite migration connection outside a
+runner-owned transaction fails with `SqliteError::Migration`.
 
 On interruption or an uncertain commit, a claim/running attempt can remain.
 There is no safe automatic timeout takeover. Stop the old runner, inspect history
