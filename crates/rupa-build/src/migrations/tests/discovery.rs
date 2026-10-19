@@ -1,6 +1,9 @@
 use super::discover::Body;
 use super::*;
 
+/// Fixture files paired with the error they must produce.
+type RejectedCase = (&'static [(&'static str, &'static str)], fn(&Error) -> bool);
+
 fn versions(artifacts: &[discover::Artifact]) -> Vec<String> {
     artifacts.iter().map(|a| a.version.to_string()).collect()
 }
@@ -73,6 +76,49 @@ fn malformed_entries_fail_instead_of_being_skipped() {
             "{files:?}: {error}"
         );
     }
+}
+
+#[test]
+fn names_and_inputs_the_runtime_would_reject_fail_the_build() {
+    let cases: [RejectedCase; 4] = [
+        (&[("1_self.sql", "SELECT 1;")], |e| {
+            matches!(e, Error::ReservedName(_))
+        }),
+        (&[("1_self.rs", "pub struct S;")], |e| {
+            matches!(e, Error::ReservedName(_))
+        }),
+        (
+            &[
+                ("2_data/mod.rs", "pub struct Data;"),
+                ("2_data/we:ird.txt", "x"),
+            ],
+            |e| matches!(e, Error::InputPath(p) if p == "2_data/we:ird.txt"),
+        ),
+        (&[("3_lone_cr.sql", "SELECT 1;\rSELECT 2;")], |e| {
+            matches!(e, Error::CarriageReturn(_))
+        }),
+    ];
+
+    for (files, expected) in cases {
+        let fixture = Fixture::new(files);
+
+        let error = fixture
+            .discover(VersionScheme::Numbered)
+            .expect_err("rejected input");
+
+        assert!(expected(&error), "{files:?}: {error}");
+    }
+}
+
+#[test]
+fn crlf_sources_remain_valid() {
+    let fixture = Fixture::new(&[("1_crlf.sql", "-- Windows checkout\r\nSELECT 1;\r\n")]);
+
+    let artifacts = fixture
+        .discover(VersionScheme::Numbered)
+        .expect("CRLF is normalized at runtime");
+
+    assert_eq!(artifacts[0].description, "Windows checkout");
 }
 
 #[test]

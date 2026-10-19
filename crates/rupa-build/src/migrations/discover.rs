@@ -11,6 +11,7 @@ use super::isolation::{self, Layout};
 const SQL_MARKER: &str = "--";
 const RUST_MARKER: &str = "//!";
 const RUST_ROOT: &str = "mod.rs";
+const RESERVED_NAME: &str = "self";
 
 /// One discovered migration with the exact bytes its checksum covers.
 #[derive(Debug)]
@@ -36,6 +37,25 @@ pub(super) enum Body {
 pub(super) struct Input {
     pub(super) path: String,
     pub(super) contents: String,
+}
+
+impl Input {
+    /// Applies the runtime catalog's input rules at build time, so a malformed
+    /// entry fails the build instead of every later `catalog()` call.
+    fn new(path: String, contents: &str, source: &Path) -> Result<Self, Error> {
+        if path.split('/').any(|c| c.contains([':', '\\'])) {
+            return Err(Error::InputPath(path));
+        }
+
+        if contents.replace("\r\n", "\n").contains('\r') {
+            return Err(Error::CarriageReturn(source.to_path_buf()));
+        }
+
+        Ok(Self {
+            path,
+            contents: contents.to_owned(),
+        })
+    }
 }
 
 /// The shape of a directory entry, decided by its name and file type.
@@ -133,6 +153,10 @@ fn parse(path: &Path, scheme: VersionScheme) -> Result<(Version, String, Entry),
         return Err(invalid());
     }
 
+    if name == RESERVED_NAME {
+        return Err(Error::ReservedName(path.to_path_buf()));
+    }
+
     let canonical = match scheme {
         VersionScheme::Numbered => digits.trim_start_matches('0'),
         VersionScheme::UtcTimestamp => digits,
@@ -154,10 +178,7 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
         Entry::Sql => {
             let source = read(path)?;
             let Split { description, body } = header::split(&source, SQL_MARKER);
-            let input = Input {
-                path: file_name.to_owned(),
-                contents: body.to_owned(),
-            };
+            let input = Input::new(file_name.to_owned(), body, path)?;
 
             (description, Body::Sql(input))
         }
@@ -219,10 +240,7 @@ fn rust_dir(dir: &Path, prefix: &str) -> Result<(Option<String>, Body), Error> {
         } else {
             let contents = read(&path)?;
 
-            inputs.push(Input {
-                path: logical,
-                contents,
-            });
+            inputs.push(Input::new(logical, &contents, &path)?);
         }
     }
 
@@ -239,10 +257,7 @@ fn rust_input(
     isolation::check(&logical, &source, layout)?;
 
     let Split { description, body } = header::split(&source, RUST_MARKER);
-    let input = Input {
-        path: logical,
-        contents: body.to_owned(),
-    };
+    let input = Input::new(logical, body, path)?;
 
     Ok((description, input))
 }

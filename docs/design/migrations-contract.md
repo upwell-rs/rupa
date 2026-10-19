@@ -384,7 +384,8 @@ paths are included, so changing an input path may change checksum despite the
 artifact key remaining stable. Execute the normalized SQL bytes that were
 hashed. No SQL formatting, comment removal, or language-level normalization,
 except that discovery removes a leading description header (consecutive `--`
-lines in SQL, `//!` lines in Rust) from both the hashed and the executed body.
+lines in SQL, `//!` lines in Rust) from the hashed inputs and from the executed
+SQL. Compiled Rust keeps its inert `//!` lines; only its hashed bytes exclude them.
 
 Rust is compiled code, not a filesystem runtime script. The migration directory
 is the manifest (amended in #35): `<version>_<snake_name>.sql`,
@@ -411,7 +412,8 @@ fixtures are required; future automatic dependency analysis is deferred.
 Discovered Rust migrations must not reach outside their own files: the build
 helper rejects `crate::` paths (including inside macro tokens), `super::` above
 the migration root, `#[path]`, out-of-line modules in single-file migrations and
-`include*!` paths that leave the migration directory. Application entities and
+every `include*!` in single-file migrations, and includes that leave a
+directory migration or name an unhashed dotfile. Application entities and
 repositories evolve after a migration is applied, and are neither hashed nor
 frozen with it; migrations declare the row shapes they need locally. External
 crates remain allowed as explicit dependencies, covered by the crate-helper rule

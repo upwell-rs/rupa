@@ -32,6 +32,15 @@ pub enum Error {
         "{0}: expected `<version>_<snake_name>.sql`, `<version>_<snake_name>.rs` or a `<version>_<snake_name>/` directory containing `mod.rs`"
     )]
     Name(PathBuf),
+    /// `self` would generate the reserved type name `Self`.
+    #[error("{0}: `self` cannot name a migration because its type would be `Self`")]
+    ReservedName(PathBuf),
+    /// A logical input path the runtime catalog would reject.
+    #[error("{0:?} is not a portable input path; components must not contain ':' or '\\'")]
+    InputPath(String),
+    /// A lone carriage return the runtime catalog would reject.
+    #[error("{0} contains a lone carriage return")]
+    CarriageReturn(PathBuf),
     /// The file name's version is invalid for the configured scheme.
     #[error("{path}: {source}")]
     Version {
