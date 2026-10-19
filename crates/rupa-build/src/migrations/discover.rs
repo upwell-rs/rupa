@@ -7,6 +7,7 @@ use rupa_migrate::{Version, VersionScheme};
 use super::Error;
 use super::header::{self, Split};
 use super::isolation::{self, Layout};
+use super::kind;
 use super::render::pascal;
 
 const SQL_MARKER: &str = "--";
@@ -29,8 +30,13 @@ pub(super) struct Artifact {
 pub(super) enum Body {
     /// A planned script; its single input is the executed SQL.
     Sql(Input),
-    /// A compiled module rooted at `module`, with its whole file closure.
-    Rust { module: PathBuf, inputs: Vec<Input> },
+    /// A compiled module rooted at `module`. A scripted migration carries its
+    /// whole file closure; a planned one is identified by its plan instead.
+    Rust {
+        module: PathBuf,
+        inputs: Vec<Input>,
+        planned: bool,
+    },
 }
 
 /// A logical input path and its hashed contents.
@@ -183,6 +189,10 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
 
             (description, Body::Sql(input))
         }
+        Entry::RustFile if planned(path, file_name, &name)? => planned_body(path, path)?,
+        Entry::RustDir if planned(&path.join(RUST_ROOT), file_name, &name)? => {
+            planned_body(&path.join(RUST_ROOT), path)?
+        }
         Entry::RustFile => {
             let (description, input) = rust_input(path, file_name.to_owned(), Layout::File)?;
             let module = path.to_path_buf();
@@ -192,6 +202,7 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
                 Body::Rust {
                     module,
                     inputs: vec![input],
+                    planned: false,
                 },
             )
         }
@@ -245,7 +256,44 @@ fn rust_dir(dir: &Path, prefix: &str) -> Result<(Option<String>, Body), Error> {
         }
     }
 
-    Ok((description, Body::Rust { module, inputs }))
+    Ok((
+        description,
+        Body::Rust {
+            module,
+            inputs,
+            planned: false,
+        },
+    ))
+}
+
+/// Whether the Rust migration rooted at `root` is planned. A directory
+/// without `mod.rs` is left to [`rust_dir`] to reject.
+fn planned(root: &Path, logical: &str, name: &str) -> Result<bool, Error> {
+    if !root.is_file() {
+        return Ok(false);
+    }
+
+    kind::planned(logical, &read(root)?, &pascal(name))
+}
+
+/// A planned Rust migration: its root's description, and no hashed inputs.
+fn planned_body(root: &Path, module: &Path) -> Result<(Option<String>, Body), Error> {
+    let source = read(root)?;
+    let description = header::split(&source, RUST_MARKER).description;
+    let module = if module.is_dir() {
+        root.to_path_buf()
+    } else {
+        module.to_path_buf()
+    };
+
+    Ok((
+        description,
+        Body::Rust {
+            module,
+            inputs: Vec::new(),
+            planned: true,
+        },
+    ))
 }
 
 fn rust_input(

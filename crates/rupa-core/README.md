@@ -16,6 +16,8 @@ traits: `Executor` / `AsyncExecutor` (run one statement), `TxConnection` /
 
 - `builder`, `expr`, `column`, `join` build `Query<R>` values; `ir` is what
   they produce and what renderers and the memory backend consume.
+- `schema` is the dialect-free DDL model (tables, columns, keys, indexes)
+  that migration plans hold, with builders from literals or entity metadata.
 - `exec`, `tx`, `pool`, `repo`, `security` are the runtime contracts. Each has
   a sync half and, behind `async`, an `asynchronous` submodule.
 - `erased` and `registry` (behind `dynamic`) erase executors and pools for

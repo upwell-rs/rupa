@@ -36,7 +36,8 @@ schema synchronization.
 | Dependency DAG and multiple streams per invocation | Deferred; linear order is sufficient initially; never infer cross-stream dependencies |
 | Reference data | Included as ordinary versioned SQL/Rust work |
 | Long-running resumable backfills and external-effect orchestration | Deferred; neither lexical statements nor Rust steps prove safe checkpoints |
-| Portable schema builder and entity diff generation | Deferred; SQL/Rust execution does not require a DDL abstraction |
+| Portable schema operations | Included (amended in #40): dialect-free DDL in plans, rendered per session dialect, unsupported forms rejected before acquisition |
+| Entity diff generation and introspection | Deferred; generated changes must be reviewable artifacts, never automatic synchronization |
 | Pruning and automatic schema equivalence | Deferred as accepted in #13; retain historical sources |
 | Tenant fleets and automatic down on reload | Excluded; target selection and reversal remain explicit |
 | Release milestone | Unassigned; do not infer a Rupa release from Upwell's version |
@@ -88,10 +89,10 @@ first implementation's compile tests:
 | Contract | Responsibility |
 |---|---|
 | `MigrationInfo` | Static identity, description, execution policy, checksum, capabilities and source diagnostics |
-| `PlannedMigration` | Static `UP` and optional `DOWN` operation arrays; no runtime plan-discovery callback |
+| `PlannedMigration` | A pure `plan()` of SQL and schema operations, evaluated once at catalog construction; that plan is checksummed and executed (amended in #40: entity-derived tables cannot be static arrays) |
 | `Migration<S>` | Sync body over an exclusive restricted sync context for session `S` |
 | `AsyncMigration<S>` | Async body over an exclusive restricted async context, returning a `Send` future |
-| `Planned<T>` | Implements the applicable sync/async execution contracts by interpreting `T`'s static operations |
+| `Planned<T>` | Implements the applicable sync/async execution contracts by executing the plan its catalog entry recorded |
 
 Illustrative authoring forms below are design examples, not compiling public
 API signatures. All three carry the same identity/checksum metadata.
@@ -409,7 +410,15 @@ source hash proves transitive semantic identity across compilers, dependency
 resolution, runtime environment, or undeclared helper code. A closure audit and
 fixtures are required; future automatic dependency analysis is deferred.
 
-Discovered Rust migrations must not reach outside their own files: the build
+A planned Rust migration's identity is its plan (amended in #40): the checksum
+covers the ordered operations, schema operations as canonical tagged records,
+and it declares no source inputs. Refactoring its source without changing the
+plan keeps the checksum. It may use shared entities: if one changes an applied
+plan, the checksum mismatch blocks apply instead of the plan silently diverging,
+and replacing the entity with the literal definition it produced restores the
+recorded plan. Changing the canonical encoding requires a new checksum format.
+
+Discovered scripted Rust migrations must not reach outside their own files: the build
 helper rejects `crate::` paths (including inside macro tokens), `super::` above
 the migration root, `#[path]`, out-of-line modules in single-file migrations and
 every `include*!` in single-file migrations, and includes that leave a
@@ -445,7 +454,10 @@ SQL inputs, with duplicate-key validation across both sources.
 | Different driver or facade feature selection | Same checksum for the same complete declared closure |
 | Declared executable feature/dependency input changes | Checksum changes; never hide a different body behind one artifact checksum |
 | Add/remove migration file in the discovered directory | Build reruns; the catalog follows the directory, and unrecognized entries fail the build |
-| Rust migration references application code (`crate::`, escaping `super::`/`include*!`/`#[path]`) | Build fails before the catalog exists |
+| Scripted Rust migration references application code (`crate::`, escaping `super::`/`include*!`/`#[path]`) | Build fails before the catalog exists |
+| Planned migration's shared entity changes its applied plan | Checksum changes; apply refuses before running pending work |
+| Planned migration's source refactored to the same plan | Same checksum |
+| Schema operation the session dialect cannot express | Apply fails before acquiring the target |
 | Different Rust source on disk after binary build | Binary retains its compiled source metadata; no runtime Rust reload |
 | Undeclared helper behavior changes | Outside checksum guarantee; documented author error, never a semantic-integrity claim |
 

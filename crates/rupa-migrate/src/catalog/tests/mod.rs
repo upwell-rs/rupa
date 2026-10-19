@@ -1,5 +1,9 @@
+mod plans;
+
 use super::*;
-use crate::{ArtifactInput, Metadata, MigrationInfo, MigrationKind, Policy};
+use crate::{
+    ArtifactInput, Metadata, MigrationInfo, MigrationKind, Planned, PlannedMigration, Policy,
+};
 
 #[derive(Debug)]
 struct Entry(&'static Metadata);
@@ -7,6 +11,29 @@ impl MigrationInfo for Entry {
     fn info(&self) -> &'static Metadata {
         self.0
     }
+}
+
+/// A planned migration whose plan comes from a function.
+struct Fixed(&'static Metadata, fn() -> Plan);
+
+impl MigrationInfo for Fixed {
+    fn info(&self) -> &'static Metadata {
+        self.0
+    }
+}
+
+impl PlannedMigration for Fixed {
+    fn plan(&self) -> Plan {
+        (self.1)()
+    }
+}
+
+/// The checksum of the only entry of a one-migration catalog.
+fn digest<M: MigrationInfo>(migration: M) -> Result<Checksum, ValidationError> {
+    let migrations = [migration];
+    let catalog = Catalog::new("primary", VersionScheme::Numbered, &migrations)?;
+
+    Ok(catalog.entries[0].checksum)
 }
 
 fn metadata(version: &'static str, text: &'static str) -> &'static Metadata {
@@ -101,71 +128,29 @@ fn checksum_rejects_ambiguous_inputs_and_does_not_hash_description() {
 
 #[test]
 fn planned_operation_order_and_adapter_selection_are_checksummed() {
-    use crate::{Operation, Planned, PlannedMigration};
-
-    struct Forward(&'static Metadata);
-    struct Reverse(&'static Metadata);
-    impl MigrationInfo for Forward {
-        fn info(&self) -> &'static Metadata {
-            self.0
-        }
-    }
-    impl MigrationInfo for Reverse {
-        fn info(&self) -> &'static Metadata {
-            self.0
-        }
-    }
-    impl PlannedMigration for Forward {
-        const UP: &'static [Operation] = &[Operation::Sql("SELECT 1"), Operation::Sql("SELECT 2")];
-    }
-    impl PlannedMigration for Reverse {
-        const UP: &'static [Operation] = &[Operation::Sql("SELECT 2"), Operation::Sql("SELECT 1")];
-    }
     let info = metadata("1", "declared shared source");
-    let forward = [Planned(Forward(info))];
-    let reverse = [Planned(Reverse(info))];
-    let imperative = [Forward(info)];
-
-    let forward = Catalog::new("primary", VersionScheme::Numbered, &forward).expect("forward plan");
-    let reverse = Catalog::new("primary", VersionScheme::Numbered, &reverse).expect("reverse plan");
-    let imperative =
-        Catalog::new("primary", VersionScheme::Numbered, &imperative).expect("imperative entry");
-    let digest = |catalog: &[CatalogEntry]| catalog[0].checksum;
+    let forward = digest(Planned(Fixed(info, || {
+        Plan::new().sql("SELECT 1").sql("SELECT 2")
+    })));
+    let reverse = digest(Planned(Fixed(info, || {
+        Plan::new().sql("SELECT 2").sql("SELECT 1")
+    })));
+    let imperative = digest(Fixed(info, Plan::new));
 
     assert_ne!(
-        digest(&forward.entries),
-        digest(&reverse.entries),
+        forward.as_ref().expect("forward plan"),
+        reverse.as_ref().expect("reverse plan"),
         "operation order changes executable work"
     );
     assert_ne!(
-        digest(&forward.entries),
-        digest(&imperative.entries),
+        forward.as_ref().expect("forward plan"),
+        imperative.as_ref().expect("imperative entry"),
         "selecting a plan versus imperative execution changes the artifact"
     );
 }
 
 #[test]
 fn checksum_separates_operation_records_from_input_records() {
-    use crate::{Operation, Planned, PlannedMigration};
-
-    struct One(&'static Metadata);
-    struct Two(&'static Metadata);
-    impl MigrationInfo for One {
-        fn info(&self) -> &'static Metadata {
-            self.0
-        }
-    }
-    impl MigrationInfo for Two {
-        fn info(&self) -> &'static Metadata {
-            self.0
-        }
-    }
-    impl PlannedMigration for One {
-        const UP: &'static [Operation] = &[Operation::Sql("SELECT 1")];
-    }
-    impl PlannedMigration for Two {
-        const UP: &'static [Operation] = &[Operation::Sql("SELECT 1"), Operation::Sql("SELECT 2")];
-    }
     let base = metadata("1", "same");
     let one_info = Box::leak(Box::new(Metadata {
         inputs: Box::leak(
@@ -181,14 +166,15 @@ fn checksum_separates_operation_records_from_input_records() {
         inputs: Box::leak(vec![ArtifactInput::new("z.rs", "same")].into_boxed_slice()),
         ..*base
     }));
-    let one = [Planned(One(one_info))];
-    let two = [Planned(Two(two_info))];
 
-    let one = Catalog::new("primary", VersionScheme::Numbered, &one).expect("one operation");
-    let two = Catalog::new("primary", VersionScheme::Numbered, &two).expect("two operations");
+    let one = digest(Planned(Fixed(one_info, || Plan::new().sql("SELECT 1"))));
+    let two = digest(Planned(Fixed(two_info, || {
+        Plan::new().sql("SELECT 1").sql("SELECT 2")
+    })));
 
     assert_ne!(
-        one.entries[0].checksum, two.entries[0].checksum,
+        one.expect("one operation"),
+        two.expect("two operations"),
         "a source named sql must not alias another operation"
     );
 }

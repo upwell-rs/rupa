@@ -26,6 +26,7 @@ pub mod query;
 pub mod registry;
 pub mod repo;
 pub mod row;
+pub mod schema;
 pub mod security;
 pub mod sem;
 pub mod tx;

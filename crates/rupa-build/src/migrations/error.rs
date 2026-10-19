@@ -32,6 +32,11 @@ pub enum Error {
         "{0}: expected `<version>_<snake_name>.sql`, `<version>_<snake_name>.rs` or a `<version>_<snake_name>/` directory containing `mod.rs`"
     )]
     Name(PathBuf),
+    /// The migration type implements both `Migration` and `PlannedMigration`.
+    #[error(
+        "{0}: implement either `PlannedMigration` (a plan) or `Migration` (a script), not both"
+    )]
+    MixedKinds(String),
     /// The name would generate the reserved type name `Self`.
     #[error("{0}: this name cannot be used because its migration type would be `Self`")]
     ReservedName(PathBuf),

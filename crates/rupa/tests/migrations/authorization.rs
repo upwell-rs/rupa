@@ -102,6 +102,21 @@ fn ordinary_table_and_column_renames_work_with_native_sqlite_parsing() {
 }
 
 #[test]
+fn ordinary_indexes_can_be_created_and_dropped() {
+    let entries = [body(
+        "1",
+        "CREATE TABLE notes(title TEXT); INSERT INTO notes VALUES ('a'); CREATE UNIQUE INDEX notes_title ON notes(title); REINDEX notes_title; DROP INDEX notes_title;",
+    )];
+    let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries).expect("catalog");
+
+    let mut connection = memory_runner();
+
+    connection
+        .apply(&catalog)
+        .expect("SQLite authorizes CREATE INDEX as a reindex of the new index");
+}
+
+#[test]
 fn renaming_a_user_table_into_reserved_metadata_cannot_commit() {
     let entries = [body(
         "1",

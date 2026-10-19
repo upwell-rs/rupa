@@ -27,7 +27,9 @@ macro_rules! sql_migration {
         }
 
         impl $crate::PlannedMigration for $name {
-            const UP: &'static [$crate::Operation] = &[$crate::Operation::Sql(::std::include_str!($path))];
+            fn plan(&self) -> $crate::Plan {
+                $crate::Plan::new().sql(::std::include_str!($path))
+            }
         }
     };
 }
@@ -63,8 +65,8 @@ macro_rules! migration_catalog {
                 match self { $( Self::$variant(value) => $crate::MigrationInfo::info(value), )+ }
             }
 
-            fn planned_operations(&self) -> Option<&'static [$crate::Operation]> {
-                match self { $( Self::$variant(value) => $crate::MigrationInfo::planned_operations(value), )+ }
+            fn planned(&self) -> Option<$crate::Plan> {
+                match self { $( Self::$variant(value) => $crate::MigrationInfo::planned(value), )+ }
             }
         }
 

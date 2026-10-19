@@ -64,7 +64,9 @@ pub(super) fn catalog(
 
     for artifact in artifacts {
         let value = match artifact.body {
-            Body::Sql(_) => format!("{RUNTIME}::Planned({})", type_path(artifact)),
+            Body::Sql(_) | Body::Rust { planned: true, .. } => {
+                format!("{RUNTIME}::Planned({})", type_path(artifact))
+            }
             Body::Rust { .. } => type_path(artifact),
         };
 
@@ -114,15 +116,15 @@ fn artifact_module(out: &mut String, artifact: &Artifact) -> Result<(), Error> {
             }
 
             emit!(out, "    impl {runtime}::PlannedMigration for {name} {{");
-            emit!(
-                out,
-                "        const UP: &'static [{runtime}::Operation] = &[{runtime}::Operation::Sql(SQL)];"
-            );
+            emit!(out, "        fn plan(&self) -> {runtime}::Plan {{");
+            emit!(out, "            {runtime}::Plan::new().sql(SQL)");
+            emit!(out, "        }}");
             emit!(out, "    }}\n}}\n");
         }
         Body::Rust {
             module: path,
             inputs,
+            ..
         } => {
             let path = path.to_str().ok_or_else(|| Error::Utf8(path.clone()))?;
             let inputs = inputs
@@ -191,7 +193,9 @@ fn type_path(artifact: &Artifact) -> String {
 
 fn entry_type(artifact: &Artifact) -> String {
     match artifact.body {
-        Body::Sql(_) => format!("{RUNTIME}::Planned<{}>", type_path(artifact)),
+        Body::Sql(_) | Body::Rust { planned: true, .. } => {
+            format!("{RUNTIME}::Planned<{}>", type_path(artifact))
+        }
         Body::Rust { .. } => type_path(artifact),
     }
 }

@@ -1,10 +1,14 @@
+mod encode;
+
 use std::fmt;
 
-use rupa_core::dialect::DialectId;
+use rupa_core::dialect::{DialectId, DynDialect};
+use rupa_sql::RenderError;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    Metadata, MigrationInfo, MigrationKind, Operation, Policy, Version, VersionError, VersionScheme,
+    Metadata, MigrationInfo, MigrationKind, Operation, Plan, Policy, Version, VersionError,
+    VersionScheme,
 };
 
 /// Canonical artifact encoding and digest algorithm identity.
@@ -54,9 +58,18 @@ pub enum ValidationError {
     /// A declared source contains a lone carriage return.
     #[error("artifact input {0:?} contains a lone carriage return")]
     Source(String),
-    /// Executable Rust sources/helpers must be explicitly included.
+    /// Imperative Rust sources/helpers must be explicitly included.
     #[error("migration {0} has no declared artifact inputs")]
     NoInputs(String),
+    /// A planned migration whose plan has no operations, such as a truncated
+    /// builder chain; recording it would make the completed plan a changed
+    /// checksum wherever the empty one already ran.
+    #[error("planned migration {0} has no operations")]
+    EmptyPlan(String),
+    /// A schema operation the session's dialect cannot express. Boxed to keep
+    /// run errors small.
+    #[error(transparent)]
+    Schema(Box<RenderError>),
     /// Unsupported source grammar, detected before script dispatch.
     #[error("unterminated SQL quote or comment at byte {0}")]
     Sql(usize),
@@ -68,6 +81,12 @@ pub enum ValidationError {
     Unsupported(String),
 }
 
+impl From<RenderError> for ValidationError {
+    fn from(error: RenderError) -> Self {
+        Self::Schema(Box::new(error))
+    }
+}
+
 /// Validated static metadata, checksum and numeric order for one catalog member.
 #[derive(Debug)]
 pub struct CatalogEntry {
@@ -77,8 +96,9 @@ pub struct CatalogEntry {
     pub checksum: Checksum,
     /// Metadata retained for inspection without running the body.
     pub metadata: &'static Metadata,
-    /// Exact ordered SQL for planned entries; `None` denotes an opaque Rust body.
-    pub operations: Option<&'static [Operation]>,
+    /// The exact plan of a planned entry, as checksummed and executed;
+    /// `None` denotes an opaque Rust body.
+    pub plan: Option<Plan>,
     pub(crate) index: usize,
 }
 
@@ -105,14 +125,14 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         for (index, migration) in migrations.iter().enumerate() {
             let metadata = migration.info();
             let version = scheme.parse(metadata.version)?;
-            let operations = migration.planned_operations();
-            let checksum = checksum(stream, scheme, metadata, operations)?;
+            let plan = migration.planned();
+            let checksum = checksum(stream, scheme, metadata, plan.as_ref())?;
 
             entries.push(CatalogEntry {
                 version,
                 checksum,
                 metadata,
-                operations,
+                plan,
                 index,
             });
         }
@@ -144,13 +164,23 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         crate::runner::apply(&mut connection, self)
     }
 
-    /// Lexically checks every planned script with the session dialect's grammar.
-    /// Runs before acquisition so a rejected script never touches the target.
-    pub(crate) fn validate_scripts(&self, dialect: DialectId) -> Result<(), ValidationError> {
-        for operation in self.entries.iter().filter_map(|e| e.operations).flatten() {
+    /// Lexically checks every planned script with the session dialect's
+    /// grammar, and renders every planned schema operation for it. Runs
+    /// before acquisition, so a rejected plan never touches the target.
+    pub(crate) fn validate_plans(&self, dialect: DialectId) -> Result<(), ValidationError> {
+        let operations = self
+            .entries
+            .iter()
+            .filter_map(|e| e.plan.as_ref())
+            .flat_map(Plan::operations);
+
+        for operation in operations {
             match operation {
                 Operation::Sql(sql) => {
                     crate::script::validate(&normalize(sql, "planned SQL")?, dialect)?
+                }
+                Operation::Schema(op) => {
+                    rupa_sql::render_schema(op, &DynDialect::new(dialect))?;
                 }
             }
         }
@@ -176,11 +206,15 @@ pub(crate) fn normalize(source: &str, path: &str) -> Result<String, ValidationEr
     Ok(normalized)
 }
 
+/// The artifact checksum. A planned entry's identity is its plan plus any
+/// declared inputs (an SQL file's source); a planned Rust migration declares
+/// none, so source refactors that keep its plan keep its checksum. An
+/// imperative body is opaque, so its declared source closure is required.
 fn checksum(
     stream: &str,
     scheme: VersionScheme,
     metadata: &Metadata,
-    operations: Option<&[Operation]>,
+    plan: Option<&Plan>,
 ) -> Result<Checksum, ValidationError> {
     let mut hash = Sha256::new();
     let mut inputs: Vec<_> = metadata.inputs.iter().collect();
@@ -193,8 +227,12 @@ fn checksum(
         Policy::NonTransactional => "nontransactional",
     };
 
-    if inputs.is_empty() {
+    if inputs.is_empty() && plan.is_none() {
         return Err(ValidationError::NoInputs(metadata.version.into()));
+    }
+
+    if plan.is_some_and(|plan| plan.operations().is_empty()) {
+        return Err(ValidationError::EmptyPlan(metadata.version.into()));
     }
 
     for field in [
@@ -209,16 +247,22 @@ fn checksum(
         hash_field(&mut hash, field.as_bytes());
     }
 
-    match operations {
+    match plan.map(Plan::operations) {
         Some(operations) => {
             hash_field(&mut hash, b"planned");
             hash_field(&mut hash, &(operations.len() as u64).to_be_bytes());
+
             for operation in operations {
                 match operation {
                     Operation::Sql(sql) => {
                         let sql = normalize(sql, "planned SQL")?;
+
                         hash_field(&mut hash, b"sql");
                         hash_field(&mut hash, sql.as_bytes());
+                    }
+                    Operation::Schema(op) => {
+                        hash_field(&mut hash, b"schema");
+                        encode::Encoder(&mut hash).schema(op);
                     }
                 }
             }

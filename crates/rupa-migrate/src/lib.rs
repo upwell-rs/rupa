@@ -5,6 +5,7 @@
 mod catalog;
 mod macros;
 mod model;
+mod plan;
 mod runner;
 mod script;
 mod session;
@@ -15,6 +16,8 @@ pub use model::{
     ArtifactInput, Metadata, MigrationInfo, MigrationKind, Operation, Planned, PlannedMigration,
     Policy,
 };
+pub use plan::Plan;
 pub use runner::{ApplyReport, RunError};
+pub use rupa_core::schema;
 pub use session::{Context, Error, HistoryEntry, Migration, Session};
 pub use version::{Version, VersionError, VersionScheme};

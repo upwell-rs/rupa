@@ -225,23 +225,11 @@ fn unsupported_policy_is_rejected_before_bootstrap() {
 
 #[test]
 fn malformed_planned_sql_is_rejected_with_the_session_dialect_before_bootstrap() {
-    use rupa::migrate::{Operation, Planned, PlannedMigration, ValidationError};
+    use rupa::migrate::{Planned, ValidationError};
 
-    struct Unterminated(&'static Metadata);
-
-    impl MigrationInfo for Unterminated {
-        fn info(&self) -> &'static Metadata {
-            self.0
-        }
-    }
-
-    impl PlannedMigration for Unterminated {
-        const UP: &'static [Operation] = &[Operation::Sql("INSERT INTO t VALUES ('oops")];
-    }
-
-    let entries = [Planned(Unterminated(
-        body("1", "INSERT INTO t VALUES ('oops").0,
-    ))];
+    let entries = [Planned(Plans(planned("1"), || {
+        Plan::new().sql("INSERT INTO t VALUES ('oops")
+    }))];
     let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries)
         .expect("lexing is deferred to the session dialect");
 

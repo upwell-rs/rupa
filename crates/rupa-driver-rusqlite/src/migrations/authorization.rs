@@ -70,6 +70,7 @@ fn authorize(context: AuthContext<'_>) -> Authorization {
             AuthAction::CreateView { view_name } | AuthAction::DropView { view_name } => {
                 !reserved(view_name)
             }
+            AuthAction::Reindex { index_name } => !reserved(index_name),
             AuthAction::Function { function_name } => {
                 !function_name.eq_ignore_ascii_case("load_extension")
             }
