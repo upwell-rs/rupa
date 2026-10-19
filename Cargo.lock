@@ -2496,6 +2496,7 @@ dependencies = [
  "rupa-driver-tokio-postgres",
  "rupa-dsl-std",
  "rupa-macros",
+ "rupa-migrate",
  "rupa-sql",
  "rupa-upwell",
  "serde",
@@ -2602,6 +2603,7 @@ dependencies = [
  "rupa-conformance",
  "rupa-core",
  "rupa-driver-rusqlite",
+ "rupa-migrate",
  "rupa-sql",
  "rusqlite",
  "serde_json",
@@ -2682,6 +2684,15 @@ dependencies = [
  "serde_json",
  "syn 2.0.119",
  "trybuild",
+]
+
+[[package]]
+name = "rupa-migrate"
+version = "0.1.0"
+dependencies = [
+ "rupa-core",
+ "sha2 0.11.0",
+ "thiserror",
 ]
 
 [[package]]

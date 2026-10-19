@@ -50,6 +50,8 @@
 #[cfg(feature = "dynamic")]
 mod driver;
 mod error;
+#[cfg(feature = "migrations")]
+mod migrations;
 #[cfg(feature = "pool")]
 pub mod pool;
 mod value;
@@ -80,6 +82,8 @@ pub struct SqliteExecutor {
     conn: rusqlite::Connection,
     dialect: Sqlite,
     pending: PendingRollback,
+    #[cfg(feature = "migrations")]
+    migration: migrations::State,
 }
 
 impl SqliteExecutor {
@@ -91,6 +95,8 @@ impl SqliteExecutor {
             conn,
             dialect: Sqlite,
             pending: PendingRollback::default(),
+            #[cfg(feature = "migrations")]
+            migration: migrations::State::default(),
         })
     }
 
@@ -167,6 +173,11 @@ impl Executor for SqliteExecutor {
     }
 
     fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqliteError> {
+        #[cfg(feature = "migrations")]
+        if self.migration.owner.is_some() || self.migration.poisoned {
+            return self.execute_migration_statement(statement, expect);
+        }
+
         self.run(statement, expect)
     }
 }

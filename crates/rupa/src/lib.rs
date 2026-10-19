@@ -12,7 +12,8 @@
 //! | `dynamic` | run-time driver selection and type erasure ([`registry()`], [`connect`], `Database`) |
 //! | `postgres`, `postgres-sync`, `sqlite`, `sqlite-unbundled`, `mysql`, `memory`, `sqlx-*` | drivers |
 //! | `tls-rustls` | TLS for every enabled networked driver |
-//! | `full` | every driver, plus `dynamic` |
+//! | `migrations` | explicit SQL/Rust migration catalogs and native SQLite apply |
+//! | `full` | every driver, plus `dynamic` and `migrations` |
 //!
 //! # Statically typed (the default)
 //!
@@ -45,6 +46,8 @@ mod registry;
 pub use rupa_core as core;
 pub use rupa_dsl_std as dsl_std;
 pub use rupa_macros as macros;
+#[cfg(feature = "migrations")]
+pub use rupa_migrate as migrate;
 pub use rupa_sql as sql;
 
 #[cfg(feature = "dynamic")]

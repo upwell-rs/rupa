@@ -11,6 +11,8 @@ license = "Apache-2.0"
 repository = "https://github.com/upwell-rs/rupa"
 
 [workspace.dependencies]
+rupa-migrate = { path = "crates/rupa-migrate", version = "=0.1.0" }
+sha2 = "0.11"
 # Intra-workspace crates are pinned exactly: macros emit paths into rupa-core's
 # hidden API, so mismatched versions must be impossible to resolve.
 rupa-core = { path = "crates/rupa-core", version = "=0.1.0", default-features = false }
