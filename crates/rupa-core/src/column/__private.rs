@@ -65,9 +65,9 @@ pub const fn select_encoding<T>(
     }
 }
 
-/// Whether a selected encoding stores JSON; `false` when none was selected,
+/// Whether the selected encoding stores JSON; `false` when none was selected,
 /// so only the handle's value reports the unstorable type.
-pub const fn selects_json<T>(encoding: Option<Encoding<T>>) -> bool {
+pub const fn is_json_encoding<T>(encoding: Option<Encoding<T>>) -> bool {
     match encoding {
         Some(encoding) => encoding.is_json(),
         None => false,
