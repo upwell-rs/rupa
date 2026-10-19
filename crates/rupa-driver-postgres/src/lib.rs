@@ -63,7 +63,7 @@ pub struct PgExecutor {
     pending: PendingRollback,
     statements: StatementCache,
     #[cfg(feature = "migrations")]
-    migration: migrations::State,
+    migration: rupa_driver_tokio_postgres::migrations::State,
 }
 
 impl PgExecutor {
@@ -75,7 +75,7 @@ impl PgExecutor {
             pending: PendingRollback::default(),
             statements: StatementCache::default(),
             #[cfg(feature = "migrations")]
-            migration: migrations::State::default(),
+            migration: rupa_driver_tokio_postgres::migrations::State::default(),
         }
     }
 

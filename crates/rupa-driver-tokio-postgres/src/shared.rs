@@ -17,7 +17,7 @@ rupa_sql::driver_error! {
         /// Postgres (or the connection) reported an error.
         Db(tokio_postgres::Error),
         /// A migration connection was used outside a runner-owned artifact transaction.
-        #[cfg(feature = "migrations")]
+        #[cfg(feature = "migration-protocol")]
         Migration(rupa_migrate::StateError),
     }
 }

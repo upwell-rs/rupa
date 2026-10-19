@@ -28,6 +28,8 @@ pub(super) fn run(pg: &mut Pg) {
         schemas_are_independent_targets,
         lost_advisory_lock_poisons_instead_of_committing,
         unbounded_lock_timeouts_are_clamped,
+        sync_and_async_drivers_share_one_lock_and_history,
+        an_abandoned_pooled_session_is_discarded,
     );
 }
 
@@ -189,5 +191,91 @@ fn unbounded_lock_timeouts_are_clamped(pg: &mut Pg) {
             .applied
             .len(),
         1
+    );
+}
+
+fn sync_and_async_drivers_share_one_lock_and_history(pg: &mut Pg) {
+    use rupa::migrate::asynchronous::Session as AsyncSession;
+
+    let first = [body("1", "CREATE TABLE first_rows (id INTEGER);")];
+    let both = [
+        first[0],
+        body("2", "CREATE TABLE second_rows (id INTEGER);"),
+    ];
+    let runtime = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    let mut native = runtime.block_on(async {
+        let (client, connection) = tokio_postgres::connect(&pg.url, tokio_postgres::NoTls)
+            .await
+            .expect("async connect");
+
+        tokio::spawn(connection);
+
+        rupa_driver_tokio_postgres::PgExecutor::new(client)
+    });
+    runtime
+        .block_on(AsyncSession::acquire(
+            &mut native,
+            "primary",
+            VersionScheme::Numbered,
+        ))
+        .expect("async runner acquires");
+
+    assert!(
+        matches!(
+            numbered(&first).apply(pg.connect()),
+            Err(RunError::Infrastructure {
+                source: Error::Busy,
+                ..
+            })
+        ),
+        "the sync driver derives the same lock key"
+    );
+
+    runtime
+        .block_on(AsyncSession::release(&mut native))
+        .expect("async runner releases");
+    numbered(&first)
+        .apply(pg.connect())
+        .expect("sync runner applies after release");
+
+    let report = runtime
+        .block_on(AsyncSession::apply(&mut native, &numbered(&both)))
+        .expect("async runner continues the sync history");
+
+    assert_eq!(
+        report
+            .applied
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["2"]
+    );
+    assert_eq!(pg.count("SELECT count(*) FROM _rupa_migration_history"), 2);
+}
+
+fn an_abandoned_pooled_session_is_discarded(pg: &mut Pg) {
+    use rupa::core::pool::Pool;
+    use rupa_conformance::migrations::fixture::Interrupted;
+
+    let entries = [Interrupted];
+    let catalog = numbered(&entries);
+    let config = rupa::DbConfig::new(&pg.url).max_connections(1);
+    let pool = rupa_driver_postgres::PgPool::connect(&config).expect("pool");
+
+    let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut conn = pool.get().expect("pooled connection");
+        let _ = conn.apply(&catalog);
+    }));
+    let mut replacement = pool.get().expect("replacement connection");
+
+    assert!(interrupted.is_err());
+    assert!(
+        Executor::run(
+            &mut *replacement,
+            rupa::raw().sql("SELECT 1").execute::<u64>()
+        )
+        .is_ok(),
+        "the pool replaced the abandoned connection"
     );
 }

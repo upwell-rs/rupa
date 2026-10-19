@@ -91,7 +91,7 @@ is a cargo feature of `rupa`:
 | `dynamic` | run-time driver selection and type erasure: `rupa::connect`, `rupa::registry()`, `Database`, boxed executors |
 | `tokio` | sync methods of async repositories block with tokio's `block_in_place` |
 | `tls-rustls` | TLS on rustls (ring) for every enabled networked driver |
-| `migrations` | explicit SQL/Rust migrations; native SQLite and sync PostgreSQL apply ([guide](docs/migrations.md)) |
+| `migrations` | explicit SQL/Rust migrations; native SQLite, and PostgreSQL on sync and tokio-postgres drivers ([guide](docs/migrations.md)) |
 | `full` | every driver, plus `dynamic` and `migrations` |
 
 Most applications know their database: use its pool directly

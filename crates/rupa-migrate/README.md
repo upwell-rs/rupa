@@ -43,7 +43,9 @@ each enabled mode, so sync and async share every step. Sessions bind to
 rendered with `rupa-sql` for the session's dialect, and every plan is rendered
 before the target is acquired.
 Drivers implement `Session` on their native executor and keep lock/history
-machinery private. Shared driver support also lives here: per-dialect script
+machinery private. The runner holds a drop guard that calls `Session::abandon`
+when a run ends without returning (a dropped future or a panic), so a retained
+session refuses further use. Shared driver support also lives here: per-dialect script
 grammars (`validate_script`, refusing runner-owned statements on engines without
 a native authorizer), the canonical target identity (`Target`) that derives
 lock keys independently of driver and URL, and the typed `StateError` drivers

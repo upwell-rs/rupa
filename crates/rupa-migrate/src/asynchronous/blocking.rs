@@ -46,4 +46,8 @@ impl<S: sync::Session + Send> Session for Blocking<S> {
     async fn script(&mut self, sql: &str) -> Result<(), Error<S::Error>> {
         self.0.script(sql)
     }
+
+    fn abandon(&mut self) {
+        self.0.abandon();
+    }
 }

@@ -1,8 +1,9 @@
 # Migrations
 
 Enable `migrations` and a supported driver: `sqlite` (bundled SQLite),
-`sqlite-unbundled` (system SQLite) or `postgres-sync` (the sync `postgres`
-crate). Neither async nor runtime driver selection is required.
+`sqlite-unbundled` (system SQLite), `postgres-sync` (the sync `postgres`
+crate) or `postgres` (async, tokio-postgres). Sync drivers need neither async
+nor runtime driver selection.
 
 ## Execution modes
 
@@ -205,6 +206,16 @@ control contract for adapters; ordinary application code uses `catalog.apply`.
 Sync and async runs share one runner body, so history, exclusion and failure
 handling are identical in both modes.
 
+A run that ends without returning (a dropped `apply` future, or a panic
+unwinding through it) abandons its session: the runner's drop guard calls the
+non-blocking `Session::abandon`, and a retained session then refuses every
+statement with `StateError::Poisoned` (and a new run with `Error::History`).
+Pools discard a connection a run left in this or any other unfinished state,
+instead of handing it out again. A consumed connection is simply
+closed, which on PostgreSQL rolls back the open transaction and releases the
+lock; the journaled attempt stays running and blocks the next apply until it is
+reconciled. Nothing an abandoned body did is committed.
+
 The initial apply path is strict: transactional incremental migrations only.
 Unsupported policy/kind is rejected before initialization. A nonempty unmanaged
 target is refused; absence of a history table is not proof of freshness.
@@ -277,7 +288,9 @@ cooperative runner cannot take over between commits or during first bootstrap.
 The writer-lock timeout is configurable using
 `SqliteExecutor::with_migration_lock_timeout`; an existing owner fails immediately.
 
-On PostgreSQL `apply` takes a session advisory lock before creating or
+On PostgreSQL, the sync (`postgres`) and async (`tokio-postgres`) drivers run
+one shared session protocol, so they exclude each other and continue each
+other's history. `apply` takes a session advisory lock before creating or
 reading history (standalone `Session::history()` inspection reads without it),
 holds it across the separately committed migration
 transactions and checks it before every write phase. The key is derived from
@@ -285,7 +298,8 @@ the canonical target (`rupa_migrate::Target`: engine, `current_database()`,
 `current_schema()`), never from the driver, credentials or URL, so every runner
 of one schema contends for the same lock and different schemas are independent
 targets. `PgExecutor::with_migration_lock_timeout` bounds the wait (zero tries
-once; longer than PostgreSQL's `lock_timeout` maximum is clamped); a timeout reports `Error::Busy` with no user work done. A connection that
+once; longer than PostgreSQL's `lock_timeout` maximum is clamped); a timeout
+reports `Error::Busy` with no user work done. A connection that
 loses the lock, or whose artifact transaction was committed or replaced, is
 poisoned instead of recording completion. Closing the connection releases the
 lock, so a dropped or crashed runner leaves only its running attempt behind,
@@ -308,7 +322,7 @@ ownership; a supported recovery command is a later slice. Do not delete history
 or clear a claim merely because a client timeout elapsed. This first slice
 reports uncertainty and blocks further apply instead of guessing.
 
-Native async sessions (tokio-postgres, sqlx), MySQL, snapshots/adoption, authored down
+sqlx sessions, MySQL, snapshots/adoption, authored down
 migrations, nontransactional work (such as `CREATE INDEX CONCURRENTLY`), allowed
 late application and operator recovery are not yet implemented. Their accepted
 design is in [the migration contract](design/migrations-contract.md).

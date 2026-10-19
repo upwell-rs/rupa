@@ -30,6 +30,14 @@ impl Default for State {
     }
 }
 
+impl State {
+    /// Whether a run left state on the connection: owned, mid-attempt or
+    /// poisoned. Pools must discard such connections.
+    pub(super) fn is_active(&self) -> bool {
+        self.owner.is_some() || self.attempt.is_some() || self.poisoned
+    }
+}
+
 impl SqliteExecutor {
     /// Bounds migration writer-lock acquisition. An existing durable owner fails immediately.
     pub fn with_migration_lock_timeout(mut self, timeout: Duration) -> Self {
