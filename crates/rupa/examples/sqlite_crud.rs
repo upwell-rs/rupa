@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .affected(),
     )?;
     assert_eq!(
-        conn.run(select::<Task>().filter(col!(Task::done).eq(true)).all())?
+        conn.run(select::<Task>().filter(Task::DONE.eq(true)).all())?
             .len(),
         1
     );

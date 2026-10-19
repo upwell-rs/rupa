@@ -110,9 +110,7 @@ async fn statement_cache_size_is_configurable() {
     let mut conn = pool.get().await.unwrap();
     for n in 1..=4i64 {
         let ids: Vec<i64> = (0..n).collect();
-        let q = rupa::core::select::<Note>()
-            .filter(rupa::col!(Note::id).in_(ids))
-            .all();
+        let q = rupa::core::select::<Note>().filter(Note::ID.in_(ids)).all();
         rupa::core::exec::AsyncExecutor::run(&mut conn, q)
             .await
             .unwrap();

@@ -1,5 +1,7 @@
 # Milestone 1: spike report, open decisions, design note
 
+> **Superseded (#39):** the derive no longer infers kinds with autoref specialization. It selects each field's encoding in a constant through associated-constant shadowing, and emits typed handle constants (`User::EMAIL`) and a constant `Entity::COLUMNS`. See `rupa-core/src/column/__private.rs`.
+
 Status: **implemented.** All open questions in section 5 were accepted as proposed (2026-10-03).
 License: `MIT OR Apache-2.0`. Releases: release-plz, with one `version_group` for all crates.
 
@@ -37,7 +39,7 @@ field: *"`Opaque` cannot be stored in a column"*. Without this, rustc reports
 - `#[column(scalar)]` and `#[column(json)]` override inference by naming the
   codec directly, with no probe.
 - **The kind is available at type level in expression context.**
-  `col!(User::prefs)` has type `Column<User, Prefs, Json>`, so
+  `User::PREFS` has type `Column<User, Prefs, Json>`, so
   `.path("theme")` compiles. On a scalar column it fails with *"JSON path
   access requires a JSON column, but this column's kind is `Scalar`"*. That's
   enough for `#[query]` JSON paths, because all macro output is expressions.
@@ -45,7 +47,7 @@ field: *"`Opaque` cannot be stored in a column"*. Without this, rustc reports
 ### Limitations (none are blockers, but they shape the API)
 1. **Inference can't happen in a type position.** The derive can't emit
    `pub const PREFS: Column<User, Prefs, ?>`. Typed column handles therefore
-   come from an expression: `col!(User::prefs)`, or a prelude-trait variant
+   come from an expression: `User::PREFS`, or a prelude-trait variant
    decided in M3. Once you have a handle, you can still name its type by hand.
    For the same reason, `Entity::columns()` metadata is computed once into a
    `static` (a `OnceLock`) rather than being a `const`.

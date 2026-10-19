@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use rupa::core::exec::Executor;
-use rupa::core::{ColumnKind, Entity as _, SqlType, Value};
+use rupa::core::{ColumnKind, Entity as _, Generated, SqlType, Value};
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
 use serde::{Deserialize, Serialize};
@@ -93,7 +93,7 @@ fn entity_metadata() {
         rupa::core::ir::TableRef::with_schema("app", "users")
     );
     assert_eq!(User::ID_COLUMNS, ["id"]);
-    let cols = User::columns();
+    let cols = User::COLUMNS;
     let names: Vec<_> = cols.iter().map(|c| c.name).collect();
     assert_eq!(
         names,
@@ -119,13 +119,21 @@ fn entity_metadata() {
         ColumnKind::Json,
         "#[column(json)] overrides scalar inference"
     );
-    assert!(kind("id").generated && kind("version").generated && !kind("email").generated);
     assert_eq!(
-        col!(User::raw_label).kind(),
-        ColumnKind::Json,
-        "col! respects the override too"
+        (
+            kind("id").generated,
+            kind("version").generated,
+            kind("email").generated
+        ),
+        (Some(Generated::Identity), Some(Generated::Database), None)
     );
-    assert_eq!(col!(User::created_at).name(), "created");
+    assert!(kind("id").primary_key && !kind("email").primary_key);
+    assert_eq!(
+        User::RAW_LABEL.kind(),
+        ColumnKind::Json,
+        "the column handle respects the override too"
+    );
+    assert_eq!(User::CREATED_AT.name(), "created");
 }
 
 #[test]
@@ -249,9 +257,4 @@ fn entities_without_capabilities_are_readable() {
 #[test]
 fn ui() {
     trybuild::TestCases::new().compile_fail("tests/ui/*.rs");
-}
-
-// `User::ID` used above: a hand-written handle next to the derived ones.
-impl User {
-    const ID: Column<User, i64, Scalar> = Column::scalar("id");
 }

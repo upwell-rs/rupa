@@ -14,14 +14,7 @@ const USERS: TableRef = TableRef::new("users");
 const ORDERS: TableRef = TableRef::new("orders");
 
 fn meta(name: &'static str, sql_type: SqlType, nullable: bool) -> ColumnMeta {
-    ColumnMeta {
-        field: name,
-        name,
-        kind: ColumnKind::Scalar,
-        sql_type,
-        nullable,
-        generated: false,
-    }
+    ColumnMeta::new(name, name, ColumnKind::Scalar, sql_type, nullable)
 }
 
 fn insert(db: &mut MemoryDb, table: TableRef, columns: &[&'static str], rows: Vec<Vec<Value>>) {

@@ -56,9 +56,13 @@ users.by_email("a@b.c")?;
 ### 1. Compile time: the macros write builder code
 
 `#[derive(Entity)]` (`rupa-macros/src/entity.rs`) implements `Entity`
-(table, columns, ids) and `FromRow` (decode by position) for `User`, plus a
-hidden probe per field that `col!(User::email)` uses to find the column's
-type and kind (`rupa-core/src/column/__private.rs`).
+(table, ids and the constant `COLUMNS` metadata: kind, SQL type,
+nullability, primary key, generation and foreign-key target) and `FromRow`
+(decode by position) for `User`, plus one typed column handle constant per
+field, such as `User::EMAIL: Column<User, String, Scalar>`. Each handle's kind
+is selected at compile time from the field type
+(`rupa-core/src/column/__private.rs`): scalar for `ScalarColumn` types,
+nullable JSON for `Option` of a serde type, JSON for any other serde type.
 
 `#[repository]` (`rupa-macros/src/repository.rs`) emits the trait, a unique
 `UsersKey`, a borrowed `UsersView<'_, S>`, and an owned `UsersRepo<S>`.
@@ -88,7 +92,7 @@ For each method:
 So the method body is roughly:
 
 ```rust
-let __query = select::<User>().filter(col!(User::email).eq(email)).optional();
+let __query = select::<User>().filter(User::EMAIL.eq(email)).optional();
 let mut __conn = Acquire::acquire(self.source()).map_err(ExecError::into_dyn_error)?;
 Ok(Executor::run(&mut __conn, __query).map_err(ExecError::into_dyn_error)?)
 ```
@@ -96,7 +100,7 @@ Ok(Executor::run(&mut __conn, __query).map_err(ExecError::into_dyn_error)?)
 ### 2. Building: a `Query<R>` value, no IO
 
 `select::<User>()` (`rupa-core/src/builder.rs`) starts an
-`ir::Select` with the entity's table and projection. `col!(User::email)
+`ir::Select` with the entity's table and projection. `User::EMAIL
 .eq(email)` builds an `Expr<bool>` (`expr.rs`) whose node is
 `ExprNode::Binary(Eq, Column(email), Param(Value::Text(..)))`. Values only
 ever enter the IR as `ExprNode::Param`, so they are always bound, never

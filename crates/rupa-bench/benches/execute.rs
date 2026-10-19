@@ -64,8 +64,8 @@ fn sqlite(c: &mut Criterion) {
     g.bench_function("active_page_50/executor", |b| {
         b.iter(|| {
             let q = select::<User>()
-                .filter(col!(User::active).eq(true))
-                .order_by(col!(User::id).asc())
+                .filter(User::ACTIVE.eq(true))
+                .order_by(User::ID.asc())
                 .limit(50)
                 .all();
             exec.run(q).unwrap()

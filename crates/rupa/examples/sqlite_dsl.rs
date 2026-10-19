@@ -58,8 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     let query = select::<Profile>()
-        .filter(same_name_ci(col!(Profile::name), "ADA"))
-        .filter(col!(Profile::settings).path("theme").text().eq("dark"))
+        .filter(same_name_ci(Profile::NAME, "ADA"))
+        .filter(Profile::SETTINGS.path("theme").text().eq("dark"))
         .all();
     let rendered = rupa::sql::render_query(&query, &rupa::core::Sqlite)?;
     assert_eq!(rendered.params.len(), 2);

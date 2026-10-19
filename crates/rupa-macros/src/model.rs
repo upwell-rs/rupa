@@ -2,7 +2,7 @@
 //! `#[id]`, `#[column(..)]` and `#[rupa(crate = ..)]`.
 
 use proc_macro2::{Span, TokenStream};
-use quote::{format_ident, quote, quote_spanned};
+use quote::{quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Fields, GenericArgument, Ident, LitStr, Path, PathArguments, Type};
 
@@ -21,6 +21,8 @@ pub struct Field {
     pub column: LitStr,
     pub id: bool,
     pub generated: bool,
+    /// `#[id(generated)]`: an identity key, rather than a database default.
+    pub identity: bool,
     pub kind: Kind,
     /// Whether `#[column(..)]` appeared at all (rejected on companion structs).
     pub has_column_attr: bool,
@@ -100,6 +102,7 @@ pub fn fields(input: &DeriveInput, what: &str) -> syn::Result<Vec<Field>> {
                 ty: f.ty.clone(),
                 id: false,
                 generated: false,
+                identity: false,
                 kind: Kind::Infer,
                 has_column_attr: false,
                 references: None,
@@ -112,6 +115,7 @@ pub fn fields(input: &DeriveInput, what: &str) -> syn::Result<Vec<Field>> {
                         attr.parse_nested_meta(|m| {
                             if m.path.is_ident("generated") {
                                 field.generated = true;
+                                field.identity = true;
                                 Ok(())
                             } else {
                                 Err(m.error("unknown `id` option; expected `generated`"))
@@ -176,25 +180,26 @@ pub fn option_inner(ty: &Type) -> Option<&Type> {
     }
 }
 
-/// The hidden struct of field probes a derived entity exposes.
-pub fn fields_struct_ident(entity: &Ident) -> Ident {
-    format_ident!("__RupaFields{}", entity)
+/// The name of the column handle constant `#[derive(Entity)]` emits for
+/// `field`: `created_at` becomes `CREATED_AT`. It keeps the field's span, so
+/// go-to-definition on a use lands on the field.
+pub fn const_ident(field: &Ident) -> Ident {
+    let name = field.to_string();
+
+    Ident::new(&name.trim_start_matches("r#").to_uppercase(), field.span())
 }
 
-/// An expression evaluating to the typed `Column` handle of `entity`'s field
-/// `field`, resolved through the entity's probe for that field.
-pub fn column_expr(
-    ms: &TokenStream,
-    entity: &TokenStream,
-    field: &Ident,
-    span: Span,
-) -> TokenStream {
-    quote_spanned! {span=> {
-        #[allow(unused_imports)]
-        use #ms::{JsonLevel as _, NullableJsonLevel as _, ScalarLevel as _};
-        let probe = <#entity>::__rupa_fields().#field;
-        #ms::column_from_probe(&probe, (&&&probe).__rupa_codec())
-    }}
+/// The typed `Column` handle of `entity`'s field `field`: its constant.
+///
+/// The constant's name resolves with macro hygiene but keeps the field's
+/// location, so a misspelled field is reported there without rustc offering
+/// the constant's uppercase name as a replacement for the field.
+pub fn column_path(entity: &TokenStream, field: &Ident) -> TokenStream {
+    let mut handle = const_ident(field);
+
+    handle.set_span(field.span().resolved_at(Span::call_site()));
+
+    quote_spanned!(field.span()=> <#entity>::#handle)
 }
 
 /// Reads `#[<name>(entity = Path)]`, used by capability derives on companion structs.
