@@ -1,6 +1,6 @@
 use rupa::migrate::sync::Session;
 use rupa::migrate::{Catalog, Error, RunError, StateError, VersionScheme};
-use rupa_conformance::migrations::fixture::body;
+use rupa_conformance::migrations::fixture::{Interrupted, body};
 use rupa_driver_rusqlite::SqliteError;
 
 use super::DatabaseFile;
@@ -72,4 +72,28 @@ fn names_merely_resembling_sqlite_internals_make_a_target_unmanaged() {
             ..
         })
     ));
+}
+
+#[test]
+fn a_panicking_run_poisons_a_retained_session() {
+    let file = DatabaseFile::new();
+    let entries = [Interrupted];
+    let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries).expect("catalog");
+
+    let mut session = file.session();
+    let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = session.apply(&catalog);
+    }));
+
+    assert!(interrupted.is_err());
+    assert!(
+        matches!(
+            rupa::core::exec::Executor::run(
+                &mut session,
+                rupa::raw().sql("SELECT 1").execute::<u64>()
+            ),
+            Err(SqliteError::Migration(StateError::Poisoned))
+        ),
+        "a retained session refuses use after a run unwound"
+    );
 }

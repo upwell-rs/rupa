@@ -12,6 +12,7 @@ migrations = [
     "dep:rupa-migrate",
     "rupa-driver-rusqlite?/migrations",
     "rupa-driver-postgres?/migrations",
+    "rupa-driver-tokio-postgres?/migrations",
 ]
 default = ["chrono", "uuid"]
 

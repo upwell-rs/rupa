@@ -10,7 +10,7 @@ Async Postgres executor and pool on tokio-postgres and deadpool.
 
 ## Internal role
 
-Keeps server-side prepared statements per connection in an LRU (`StatementCache`, on `hashlink`). `shared` is reused by the sync driver.
+Keeps server-side prepared statements per connection in an LRU (`StatementCache`, on `hashlink`). `shared` is reused by the sync driver, as is `migrations`: the migration session protocol, with its IO steps written once in an internal macro that each driver instantiates for its mode.
 
 ## Feature flags
 
@@ -19,5 +19,6 @@ Keeps server-side prepared statements per connection in an LRU (`StatementCache`
 | `chrono`, `uuid` (default) | date/time and UUID columns |
 | `pool` | `PgPool` on deadpool (tokio) |
 | `dynamic` | `PgDriver` (`postgres`), the registry entry (implies `pool`) |
-| `migrations` | the `PgError::Migration` state error shared with the sync driver's migration session |
+| `migration-protocol` | the PostgreSQL migration session protocol shared with the sync driver (no async migration code) |
+| `migrations` | `rupa_migrate::asynchronous::Session` on `PgExecutor` (implies `migration-protocol`) |
 | `tls-rustls` | TLS on rustls (ring, webpki roots), as the URL's `sslmode` asks |

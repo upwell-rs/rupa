@@ -59,6 +59,12 @@ pub trait Session: Connection {
     /// Executes an authorized user script on this session's current transaction.
     fn script(&mut self, sql: &str) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
 
+    /// Marks the session unusable after a run ended without returning (a
+    /// dropped future or an unwinding panic). Called from `Drop`, so it must
+    /// not block or perform IO; dropping the session must then close its
+    /// connection, which ends any transaction or session lock.
+    fn abandon(&mut self);
+
     /// Applies a catalog while retaining this session for driver-level inspection.
     /// Applications normally use [`Apply::apply`], which owns cleanup.
     fn apply<M: Migration<Self> + Send + Sync>(

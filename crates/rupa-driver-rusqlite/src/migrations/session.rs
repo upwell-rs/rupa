@@ -191,4 +191,8 @@ impl Session for SqliteExecutor {
             .execute_batch(sql)
             .map_err(db)
     }
+
+    fn abandon(&mut self) {
+        self.migration.poisoned = true;
+    }
 }

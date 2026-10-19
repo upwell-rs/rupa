@@ -2603,6 +2603,8 @@ dependencies = [
  "rupa-migrate",
  "rupa-sql",
  "testcontainers-modules",
+ "tokio",
+ "tokio-postgres",
 ]
 
 [[package]]

@@ -210,15 +210,37 @@ macro_rules! mode {
 
             crate::runner::preflight(catalog, rupa_core::dialect::Dialect::id(session.dialect()))
                 .map_err(|e| crate::RunError::infrastructure(crate::Error::Validation(e)))?;
-            session
-                .acquire(catalog.stream, catalog.scheme)
-                $($await)*
-                .map_err(crate::RunError::infrastructure)?;
 
-            let result = apply_locked(session, catalog, &mut applied) $($await)*;
-            let released = session.release() $($await)*;
+            let mut guard = RunGuard { session, armed: true };
+            let acquired = guard.session.acquire(catalog.stream, catalog.scheme) $($await)*;
+
+            if let Err(source) = acquired {
+                guard.armed = false;
+
+                return Err(crate::RunError::infrastructure(source));
+            }
+
+            let result = apply_locked(&mut *guard.session, catalog, &mut applied) $($await)*;
+            let released = guard.session.release() $($await)*;
+
+            guard.armed = false;
 
             crate::runner::finish(result, released, applied)
+        }
+
+        /// Abandons the session unless disarmed: the run ended without
+        /// returning, through a dropped future or an unwinding panic.
+        struct RunGuard<'a, S: Session> {
+            session: &'a mut S,
+            armed: bool,
+        }
+
+        impl<S: Session> Drop for RunGuard<'_, S> {
+            fn drop(&mut self) {
+                if self.armed {
+                    self.session.abandon();
+                }
+            }
         }
 
         $($async)* fn apply_locked<S: Session, M: Migration<S> $($bound)*>(
