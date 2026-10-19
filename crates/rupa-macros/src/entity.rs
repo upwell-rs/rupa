@@ -11,10 +11,11 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::spanned::Spanned;
 use syn::{DeriveInput, Ident, LitStr};
 
-use crate::model::{self, Kind, const_ident, option_inner};
+use crate::model::{self, Kind, const_ident, known_scalar, option_inner};
 
-/// Hidden associated constants the derive emits next to the column handles.
-const RESERVED: [&str; 1] = ["__RUPA_INSERT_REQUIRED"];
+/// Prefix of the hidden associated constants the derive emits next to the
+/// column handles.
+const RESERVED: &str = "__RUPA_";
 
 pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     model::reject_generics(&input, "Entity")?;
@@ -46,7 +47,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     for f in &fields {
         let handle = const_ident(&f.ident).to_string();
 
-        if RESERVED.contains(&handle.as_str()) {
+        if handle.starts_with(RESERVED) {
             return Err(syn::Error::new(
                 f.ident.span(),
                 format!(
@@ -205,11 +206,14 @@ fn handle(
     let (ty, column, name) = (&f.ty, &f.column, &f.name);
     let handle = const_ident(&f.ident);
     let doc = format!("The `{name}` column.");
+    let scalar = (
+        quote!(#ms::Scalar),
+        quote!(#ms::Encoding::of::<#ms::ScalarCodec<#ty>>()),
+    );
+    let mut selection = TokenStream::new();
     let (kind, encoding) = match (f.kind, option_inner(ty)) {
-        (Kind::Scalar, _) => (
-            quote!(#ms::Scalar),
-            quote!(#ms::Encoding::of::<#ms::ScalarCodec<#ty>>()),
-        ),
+        (Kind::Scalar, _) => scalar,
+        (Kind::Infer, _) if known_scalar(ty) => scalar,
         (Kind::Json, Some(inner)) => (
             quote!(#ms::Json),
             quote!(#ms::Encoding::of::<#ms::NullableJsonCodec<#inner>>()),
@@ -219,24 +223,31 @@ fn handle(
             quote!(#ms::Encoding::of::<#ms::JsonCodec<#ty>>()),
         ),
         (Kind::Infer, _) => {
-            let selected = quote_spanned! {ty.span()=> {
-                #[allow(unused_imports)]
-                use #ms::NoEncoding as _;
-                #ms::select_encoding(
-                    <#ms::ScalarSelect<#ty>>::ENCODING,
-                    <#ms::NullableJsonSelect<#ty>>::ENCODING,
-                    <#ms::JsonSelect<#ty>>::ENCODING,
-                )
-            }};
+            let selected = format_ident!("{RESERVED}{handle}_ENCODING", span = f.ident.span());
             let message = format!(
                 "field `{name}` of `{entity}` can't be stored in a column: its type must implement \
                  `ScalarColumn` (a scalar column) or `Serialize + DeserializeOwned` (a JSON column)"
             );
 
+            selection = quote_spanned! {ty.span()=>
+                #[doc(hidden)]
+                #[allow(dead_code, reason = "read by the handle's type and value")]
+                #vis const #selected: #ms::Option<#ms::Encoding<#ty>> = {
+                    #[allow(unused_imports)]
+                    use #ms::NoEncoding as _;
+
+                    #ms::select_encoding(
+                        <#ms::ScalarSelect<#ty>>::ENCODING,
+                        <#ms::NullableJsonSelect<#ty>>::ENCODING,
+                        <#ms::JsonSelect<#ty>>::ENCODING,
+                    )
+                };
+            };
+
             (
-                quote_spanned!(ty.span()=> <#ms::Stored<{ #ms::selects_json(#selected) }> as #ms::Kinded>::Kind),
+                quote_spanned!(ty.span()=> <#ms::Stored<{ #ms::is_json_encoding(#entity::#selected) }> as #ms::Kinded>::Kind),
                 quote_spanned! {ty.span()=>
-                    match #selected {
+                    match #entity::#selected {
                         #ms::Option::Some(encoding) => encoding,
                         #ms::Option::None => ::core::panic!(#message),
                     }
@@ -246,6 +257,8 @@ fn handle(
     };
 
     quote_spanned! {f.ident.span()=>
+        #selection
+
         #[doc = #doc]
         #[allow(dead_code, reason = "a derived handle exists for every field, used or not")]
         #vis const #handle: #ms::Column<#entity, #ty, #kind> = #ms::Column::with_encoding(#column, #encoding);

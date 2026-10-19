@@ -180,6 +180,58 @@ pub fn option_inner(ty: &Type) -> Option<&Type> {
     }
 }
 
+/// Field types `ScalarColumn` is implemented for, recognized by name so the
+/// derive can write `Scalar` directly: an exact type that rust-analyzer
+/// resolves, unlike a kind selected by evaluating a constant. Other types keep
+/// the compile-time selection. A user type shadowing one of these names
+/// fails with the scalar codec's "not a scalar column type" error, which
+/// `#[column(json)]` resolves.
+pub fn known_scalar(ty: &Type) -> bool {
+    const PLAIN: [&str; 11] = [
+        "bool",
+        "i16",
+        "i32",
+        "i64",
+        "f32",
+        "f64",
+        "String",
+        "Uuid",
+        "NaiveDate",
+        "NaiveTime",
+        "NaiveDateTime",
+    ];
+
+    if let Some(inner) = option_inner(ty) {
+        return known_scalar(inner);
+    }
+
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    let Some(last) = path.path.segments.last() else {
+        return false;
+    };
+    let name = last.ident.to_string();
+    let argument = |expected: &str| match &last.arguments {
+        PathArguments::AngleBracketed(args) if args.args.len() == 1 => matches!(
+            args.args.first(),
+            Some(GenericArgument::Type(Type::Path(arg)))
+                if arg.qself.is_none() && arg.path.segments.last().is_some_and(|s| s.ident == expected)
+        ),
+        _ => false,
+    };
+
+    if path.qself.is_some() {
+        return false;
+    }
+
+    match name.as_str() {
+        "Vec" => argument("u8"),
+        "DateTime" => argument("Utc"),
+        name => PLAIN.contains(&name) && last.arguments.is_none(),
+    }
+}
+
 /// The name of the column handle constant `#[derive(Entity)]` emits for
 /// `field`: `created_at` becomes `CREATED_AT`. It keeps the field's span, so
 /// go-to-definition on a use lands on the field.
@@ -232,3 +284,6 @@ pub fn reject_column_attrs(fields: &[Field], what: &str) -> syn::Result<()> {
         None => Ok(()),
     }
 }
+
+#[cfg(test)]
+mod tests;
