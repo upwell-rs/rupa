@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use rupa::core::exec::Executor;
 use rupa::migrate::{
     Catalog, Engine, Error, MigrationInfo, RunError, Session, StateError, Target, VersionScheme,
@@ -24,6 +26,7 @@ pub(super) fn run(pg: &mut Pg) {
         advisory_lock_uses_the_canonical_target_identity,
         schemas_are_independent_targets,
         lost_advisory_lock_poisons_instead_of_committing,
+        unbounded_lock_timeouts_are_clamped,
     );
 }
 
@@ -169,6 +172,21 @@ fn lost_advisory_lock_poisons_instead_of_committing(pg: &mut Pg) {
     assert_eq!(pg.count("SELECT count(*) FROM _rupa_migration_history"), 0);
     assert_eq!(
         pg.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'running'"),
+        1
+    );
+}
+
+fn unbounded_lock_timeouts_are_clamped(pg: &mut Pg) {
+    let entries = [body("1", "CREATE TABLE kept (id INTEGER);")];
+
+    let session = pg.connect().with_migration_lock_timeout(Duration::MAX);
+
+    assert_eq!(
+        numbered(&entries)
+            .apply(session)
+            .expect("a wait beyond lock_timeout's maximum still acquires")
+            .applied
+            .len(),
         1
     );
 }

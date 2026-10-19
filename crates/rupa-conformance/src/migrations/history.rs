@@ -132,7 +132,7 @@ pub(super) fn case_missing_source_and_late_arrival_are_rejected<H: MigrationHarn
 pub(super) fn case_unmanaged_objects_are_never_a_fresh_target<H: MigrationHarness>(h: &mut H) {
     let entries = [body("1", "CREATE TABLE migration_body (id INTEGER);")];
 
-    h.execute("CREATE TABLE sqlitex_owned (id INTEGER)");
+    h.execute("CREATE TABLE unmanaged_owned (id INTEGER)");
 
     assert!(matches!(
         h.connect().apply(&catalog(&entries)),

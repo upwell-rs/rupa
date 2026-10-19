@@ -184,8 +184,9 @@ connection must have it on) and keeps standard and `E''` strings, quoted
 identifiers, nested block comments and dollar-quoted bodies whole. PostgreSQL
 has no client-side authorizer, so statements the runner owns are refused before
 dispatch (`ScriptError::Forbidden` with a `ScriptRule`): transaction control,
-session-level `SET`/`RESET`/`DISCARD`/`LISTEN` (`SET LOCAL` and `SET
-CONSTRAINTS` are allowed), psql backslash commands and `COPY` from stdin,
+session-level `SET`, `set_config`, `RESET`, `DISCARD`, `LISTEN` and `UNLISTEN`
+(`SET LOCAL`, `SET CONSTRAINTS` and `SET TRANSACTION` are allowed), psql
+backslash commands and `COPY` from stdin or to stdout,
 advisory lock functions, `_rupa_`-prefixed names and `BEGIN ATOMIC` bodies (use a
 dollar-quoted body instead). Typed raw queries are checked by the same grammar.
 Dollar-quoted bodies are opaque to it; the session's lock and transaction checks
@@ -234,14 +235,15 @@ cooperative runner cannot take over between commits or during first bootstrap.
 The writer-lock timeout is configurable using
 `SqliteExecutor::with_migration_lock_timeout`; an existing owner fails immediately.
 
-On PostgreSQL the driver takes a session advisory lock before creating or
-reading history, holds it across the separately committed migration
+On PostgreSQL `apply` takes a session advisory lock before creating or
+reading history (standalone `Session::history()` inspection reads without it),
+holds it across the separately committed migration
 transactions and checks it before every write phase. The key is derived from
 the canonical target (`rupa_migrate::Target`: engine, `current_database()`,
 `current_schema()`), never from the driver, credentials or URL, so every runner
 of one schema contends for the same lock and different schemas are independent
 targets. `PgExecutor::with_migration_lock_timeout` bounds the wait (zero tries
-once); a timeout reports `Error::Busy` with no user work done. A connection that
+once; longer than PostgreSQL's `lock_timeout` maximum is clamped); a timeout reports `Error::Busy` with no user work done. A connection that
 loses the lock, or whose artifact transaction was committed or replaced, is
 poisoned instead of recording completion. Closing the connection releases the
 lock, so a dropped or crashed runner leaves only its running attempt behind,

@@ -51,7 +51,8 @@ struct Connection {
 
 impl PgExecutor {
     /// Bounds how long a runner waits for another runner's advisory lock.
-    /// Zero tries once without waiting.
+    /// Zero tries once without waiting; waits beyond PostgreSQL's
+    /// `lock_timeout` maximum (about 24.8 days) are clamped to it.
     pub fn with_migration_lock_timeout(mut self, timeout: Duration) -> Self {
         self.migration.lock_timeout = timeout;
 

@@ -76,6 +76,10 @@ impl Statement {
             return Err(forbidden(ScriptRule::ReservedName, at));
         }
 
+        if lower == "set_config" {
+            return Err(forbidden(ScriptRule::SessionState, at));
+        }
+
         if lower.starts_with("pg_advisory") || lower.starts_with("pg_try_advisory") {
             return Err(forbidden(ScriptRule::AdvisoryLock, at));
         }
@@ -100,7 +104,10 @@ impl Statement {
 
     fn follow(&self, keyword: &str) -> Result<(), ScriptError> {
         let rule = match self.leading {
-            Leading::Set if self.words == 1 && !matches!(keyword, "local" | "constraints") => {
+            Leading::Set
+                if self.words == 1
+                    && !matches!(keyword, "local" | "constraints" | "transaction") =>
+            {
                 Some(ScriptRule::SessionState)
             }
             Leading::Prepare if self.words == 1 && keyword == "transaction" => {

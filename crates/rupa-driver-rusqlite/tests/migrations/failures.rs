@@ -1,4 +1,4 @@
-use rupa::migrate::{Catalog, Session, StateError, VersionScheme};
+use rupa::migrate::{Catalog, Error, RunError, Session, StateError, VersionScheme};
 use rupa_conformance::migrations::fixture::body;
 use rupa_driver_rusqlite::SqliteError;
 
@@ -52,4 +52,23 @@ fn failed_commit_releases_sqlite_writer_lock_before_returning() {
         ),
         "a poisoned migration connection refuses statements with a typed state error"
     );
+}
+
+#[test]
+fn names_merely_resembling_sqlite_internals_make_a_target_unmanaged() {
+    let file = DatabaseFile::new();
+    let entries = [body("1", "CREATE TABLE migration_body (id INTEGER);")];
+    let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries).expect("catalog");
+
+    file.connection()
+        .execute_batch("CREATE TABLE sqlitex_owned (id INTEGER)")
+        .expect("user table with a sqlite-like prefix");
+
+    assert!(matches!(
+        file.session().apply(&catalog),
+        Err(RunError::Infrastructure {
+            source: Error::Unmanaged,
+            ..
+        })
+    ));
 }

@@ -17,7 +17,7 @@ pub enum ScriptError {
     Forbidden {
         /// The refused statement class.
         rule: ScriptRule,
-        /// Byte offset of the offending token.
+        /// Byte offset of the offending statement or token.
         at: usize,
     },
     /// The session's dialect has no migration script grammar yet.
@@ -31,7 +31,7 @@ pub enum ScriptError {
 pub enum ScriptRule {
     /// `BEGIN`, `COMMIT`, `ROLLBACK`, savepoints and prepared transactions.
     TransactionControl,
-    /// Session-level `SET`, `RESET`, `DISCARD`, `LISTEN` and `UNLISTEN`.
+    /// Session-level `SET`, `set_config`, `RESET`, `DISCARD`, `LISTEN` and `UNLISTEN`.
     SessionState,
     /// Client commands such as psql backslash commands and `COPY` from stdin.
     ClientCommand,

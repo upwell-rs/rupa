@@ -5,11 +5,15 @@ use super::schema::{ATTEMPTS, HISTORY};
 use super::{Owner, PgExecutor, db, quote};
 use crate::PgError;
 
+/// PostgreSQL's largest `lock_timeout`; longer waits are clamped to it.
+const MAX_LOCK_TIMEOUT_MS: u128 = i32::MAX as u128;
+
 impl PgExecutor {
     /// Takes the session advisory lock, waiting at most the lock timeout.
     /// Session locks survive the transaction that bounds the wait.
     fn lock(&mut self, key: i64) -> Result<(), Error<PgError>> {
         let timeout = self.migration.lock_timeout;
+        let millis = timeout.as_millis().clamp(1, MAX_LOCK_TIMEOUT_MS);
 
         if timeout.is_zero() {
             let acquired: bool = self
@@ -21,12 +25,16 @@ impl PgExecutor {
             return if acquired { Ok(()) } else { Err(Error::Busy) };
         }
 
-        self.client
-            .batch_execute(&format!(
-                "BEGIN; SET LOCAL lock_timeout = '{}ms'",
-                timeout.as_millis().max(1)
-            ))
-            .map_err(db)?;
+        if let Err(error) = self
+            .client
+            .batch_execute(&format!("BEGIN; SET LOCAL lock_timeout = '{millis}ms'"))
+        {
+            if self.client.batch_execute("ROLLBACK").is_err() {
+                self.migration.poisoned = true;
+            }
+
+            return Err(db(error));
+        }
 
         if let Err(error) = self.client.execute("SELECT pg_advisory_lock($1)", &[&key]) {
             let busy = error.code() == Some(&SqlState::LOCK_NOT_AVAILABLE);
@@ -290,7 +298,11 @@ impl Session for PgExecutor {
             ));
         }
 
-        let key = self.migration.owner.as_ref().map_or(0, |owner| owner.key);
+        let Some(key) = self.migration.owner.as_ref().map(|owner| owner.key) else {
+            return Err(Error::History(
+                "migration connection does not own the target".into(),
+            ));
+        };
         let released: bool = self
             .client
             .query_one("SELECT pg_advisory_unlock($1)", &[&key])
