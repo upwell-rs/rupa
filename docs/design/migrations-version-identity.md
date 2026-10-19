@@ -1,6 +1,7 @@
 # Migration versions and artifact identity
 
-Status: proposed for owner review, not an implemented or approved API.
+Status: accepted design through owner-reviewed [PR #20](https://github.com/upwell-rs/rupa/pull/20),
+merged into the migration integration branch on 2026-10-19. Not implemented.
 Addresses [#12](https://github.com/upwell-rs/rupa/issues/12), under discovery
 [#4](https://github.com/upwell-rs/rupa/issues/4) and epic
 [#3](https://github.com/upwell-rs/rupa/issues/3).
@@ -163,7 +164,7 @@ separate from actual installation rank. Never use the maximum installed
 version as the complete set of applied identities. For #9, generators must
 report collisions and never silently overwrite sources.
 
-Before implementation, owner review must approve or amend the grammar,
-timestamp default, leading-zero rejection, structured key, and rename rules.
-Then copy the accepted contract into #5/#6/#9 and align #13/#14/#17 with it.
-Keep #12 and the parent discovery checklist open until that review is recorded.
+PR #20 records approval of the grammar, timestamp default, leading-zero
+rejection, structured key, and rename rules. Carry this accepted contract into
+#5/#6/#9 and align #13/#14/#17 with it. Issue #12 is complete; parent discovery
+#4 remains open for the remaining decisions.
