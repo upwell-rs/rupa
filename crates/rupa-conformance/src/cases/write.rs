@@ -14,16 +14,16 @@ pub async fn case_update<E: AsyncExecutor>(e: &mut E) {
     let n = e
         .run(
             update::<Item>()
-                .set(col!(Item::meta), &meta)
-                .set_expr(col!(Item::label), col!(Item::name))
-                .filter(col!(Item::active).eq(true))
+                .set(Item::META, &meta)
+                .set_expr(Item::LABEL, Item::NAME)
+                .filter(Item::ACTIVE.eq(true))
                 .affected(),
         )
         .await
         .unwrap();
     assert_eq!(n, 3);
     let rows = e
-        .run(select::<Item>().order_by(col!(Item::id).asc()).all())
+        .run(select::<Item>().order_by(Item::ID.asc()).all())
         .await
         .unwrap();
     for item in &rows {
@@ -42,8 +42,8 @@ pub async fn case_update<E: AsyncExecutor>(e: &mut E) {
     let any = e
         .run(
             update::<Item>()
-                .set(col!(Item::qty), &1)
-                .filter(col!(Item::id).eq(99))
+                .set(Item::QTY, &1)
+                .filter(Item::ID.eq(99))
                 .build::<bool>(),
         )
         .await
@@ -54,20 +54,16 @@ pub async fn case_update<E: AsyncExecutor>(e: &mut E) {
 pub async fn case_delete<E: AsyncExecutor>(e: &mut E) {
     seed(e).await;
     assert_eq!(
-        e.run(delete::<Item>().filter(col!(Item::qty).lt(5)).affected())
+        e.run(delete::<Item>().filter(Item::QTY.lt(5)).affected())
             .await
             .unwrap(),
         2
     );
-    assert_eq!(ids(e, col!(Item::id).gt(0)).await, [2, 3]);
+    assert_eq!(ids(e, Item::ID.gt(0)).await, [2, 3]);
     assert!(
-        !e.run(
-            delete::<Item>()
-                .filter(col!(Item::id).eq(1))
-                .build::<bool>()
-        )
-        .await
-        .unwrap()
+        !e.run(delete::<Item>().filter(Item::ID.eq(1)).build::<bool>())
+            .await
+            .unwrap()
     );
     assert_eq!(e.run(delete::<Item>().affected()).await.unwrap(), 2);
 }
@@ -181,14 +177,14 @@ pub async fn case_update_entity_and_patches<E: AsyncExecutor>(e: &mut E) {
         .run(
             update::<Note>()
                 .apply(&SetPinned { pinned: Some(true) })
-                .filter(col!(Note::id).gt(0))
+                .filter(Note::ID.gt(0))
                 .affected(),
         )
         .await
         .unwrap();
     assert_eq!(n, 2);
     let pinned = e
-        .run(select::<Note>().filter(col!(Note::pinned).eq(true)).all())
+        .run(select::<Note>().filter(Note::PINNED.eq(true)).all())
         .await
         .unwrap();
     assert_eq!(pinned.len(), 2);

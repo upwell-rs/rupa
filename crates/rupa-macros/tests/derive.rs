@@ -2,7 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use rupa::core::exec::Executor;
-use rupa::core::{ColumnKind, Entity as _, SqlType, Value};
+use rupa::core::{ColumnKind, Entity as _, Generated, SqlType, Value};
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
 use serde::{Deserialize, Serialize};
@@ -93,7 +93,7 @@ fn entity_metadata() {
         rupa::core::ir::TableRef::with_schema("app", "users")
     );
     assert_eq!(User::ID_COLUMNS, ["id"]);
-    let cols = User::columns();
+    let cols = User::COLUMNS;
     let names: Vec<_> = cols.iter().map(|c| c.name).collect();
     assert_eq!(
         names,
@@ -119,13 +119,21 @@ fn entity_metadata() {
         ColumnKind::Json,
         "#[column(json)] overrides scalar inference"
     );
-    assert!(kind("id").generated && kind("version").generated && !kind("email").generated);
     assert_eq!(
-        col!(User::raw_label).kind(),
-        ColumnKind::Json,
-        "col! respects the override too"
+        (
+            kind("id").generated,
+            kind("version").generated,
+            kind("email").generated
+        ),
+        (Some(Generated::Identity), Some(Generated::Database), None)
     );
-    assert_eq!(col!(User::created_at).name(), "created");
+    assert!(kind("id").primary_key && !kind("email").primary_key);
+    assert_eq!(
+        User::RAW_LABEL.kind(),
+        ColumnKind::Json,
+        "the column handle respects the override too"
+    );
+    assert_eq!(User::CREATED_AT.name(), "created");
 }
 
 #[test]
@@ -251,7 +259,47 @@ fn ui() {
     trybuild::TestCases::new().compile_fail("tests/ui/*.rs");
 }
 
-// `User::ID` used above: a hand-written handle next to the derived ones.
-impl User {
-    const ID: Column<User, i64, Scalar> = Column::scalar("id");
+/// A user scalar type: not recognized by name, so its kind is selected at
+/// compile time through `ScalarColumn`.
+#[derive(Debug, Clone, PartialEq)]
+struct Slug(String);
+
+impl rupa::core::ScalarColumn for Slug {
+    type Base = Slug;
+    const SQL_TYPE: SqlType = SqlType::Text;
+
+    fn to_value(&self) -> Value {
+        Value::Text(self.0.clone())
+    }
+
+    fn from_value(v: Value) -> Result<Self, rupa::core::DecodeError> {
+        String::from_value(v).map(Slug)
+    }
+}
+
+/// An alias hides the scalar name; the compile-time selection still applies.
+type Label = String;
+
+#[derive(Debug, Entity)]
+#[entity(table = "pages")]
+struct Page {
+    #[id]
+    id: i64,
+    slug: Slug,
+    label: Label,
+    prefs: Option<Prefs>,
+}
+
+#[test]
+fn kinds_resolve_for_named_scalars_user_scalars_aliases_and_json() {
+    let _: Column<Page, i64, Scalar> = Page::ID;
+    let _: Column<Page, Slug, Scalar> = Page::SLUG;
+    let _: Column<Page, Label, Scalar> = Page::LABEL;
+    let _: Column<Page, Option<Prefs>, Json> = Page::PREFS;
+
+    assert_eq!(
+        Page::SLUG.encode(&Slug("a".into())),
+        Value::Text("a".into())
+    );
+    assert_eq!(Page::PREFS.encode(&None), Value::Null(SqlType::Json));
 }

@@ -7,8 +7,8 @@
 //!
 //! ```ignore
 //! let rows: Vec<(User, Option<Order>)> = select::<User>()
-//!     .left_join_on::<Order>(|(u, o)| o.col(col!(Order::user_id)).eq(u.col(col!(User::id))))
-//!     .filter(|(u, _)| u.col(col!(User::active)).eq(true))
+//!     .left_join_on::<Order>(|(u, o)| o.col(Order::USER_ID).eq(u.col(User::ID)))
+//!     .filter(|(u, _)| u.col(User::ACTIVE).eq(true))
 //!     .all()
 //!     .run(&mut db)?;
 //! ```

@@ -94,7 +94,7 @@ fn tenant(id: i64) -> SecurityContext {
 
 async fn titles<E: AsyncExecutor>(e: &mut E) -> Vec<String> {
     let docs = e
-        .run(select::<Doc>().order_by(col!(Doc::id).asc()).all())
+        .run(select::<Doc>().order_by(Doc::ID.asc()).all())
         .await
         .unwrap();
     docs.into_iter().map(|d| d.title).collect()
@@ -281,7 +281,7 @@ async fn native_row_level_security() {
             select::<Doc>()
                 .join::<Comment>()
                 .left()
-                .order_by(|(d, _)| d.col(col!(Doc::id)).asc())
+                .order_by(|(d, _)| d.col(Doc::ID).asc())
                 .all(),
         )
         .await
@@ -303,7 +303,7 @@ async fn native_row_level_security() {
             select::<Comment>()
                 .join::<Doc>()
                 .left()
-                .order_by(|(c, _)| c.col(col!(Comment::id)).asc())
+                .order_by(|(c, _)| c.col(Comment::ID).asc())
                 .all(),
         )
         .await

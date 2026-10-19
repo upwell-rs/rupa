@@ -51,7 +51,7 @@ pub async fn case_join_on_macro<E: AsyncExecutor>(e: &mut E) {
         .run(
             select::<Item>()
                 .inner_join_on::<Review>(rupa::on!(Review::item_id == Item::id))
-                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
+                .order_by(|(_, r)| r.col(Review::ID).asc())
                 .all(),
         )
         .await
@@ -78,7 +78,7 @@ pub async fn case_join_on_macro<E: AsyncExecutor>(e: &mut E) {
                         && Item::name like $pattern
                         && !ci_eq(Item::name, "BANANA")
                 ))
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
+                .order_by(|(i, _)| i.col(Item::ID).asc())
                 .all(),
         )
         .await
@@ -93,10 +93,8 @@ pub async fn case_join_inner<E: AsyncExecutor>(e: &mut E) {
     let rows = e
         .run(
             select::<Item>()
-                .inner_join_on::<Review>(|(i, r)| {
-                    r.col(col!(Review::item_id)).eq(i.col(col!(Item::id)))
-                })
-                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
+                .inner_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
+                .order_by(|(_, r)| r.col(Review::ID).asc())
                 .all(),
         )
         .await
@@ -117,11 +115,9 @@ pub async fn case_join_left<E: AsyncExecutor>(e: &mut E) {
     let rows = e
         .run(
             select::<Item>()
-                .left_join_on::<Review>(|(i, r)| {
-                    r.col(col!(Review::item_id)).eq(i.col(col!(Item::id)))
-                })
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
-                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
+                .left_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
+                .order_by(|(i, _)| i.col(Item::ID).asc())
+                .order_by(|(_, r)| r.col(Review::ID).asc())
                 .all(),
         )
         .await
@@ -140,11 +136,9 @@ pub async fn case_join_left<E: AsyncExecutor>(e: &mut E) {
     let rows = e
         .run(
             select::<Item>()
-                .left_join_on::<Review>(|(i, r)| {
-                    r.col(col!(Review::item_id)).eq(i.col(col!(Item::id)))
-                })
-                .filter(|(_, r)| r.col(col!(Review::id)).is_null())
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
+                .left_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
+                .filter(|(_, r)| r.col(Review::ID).is_null())
+                .order_by(|(i, _)| i.col(Item::ID).asc())
                 .all(),
         )
         .await
@@ -160,11 +154,9 @@ pub async fn case_join_filter_and_order_on_joined_columns<E: AsyncExecutor>(e: &
     let rows = e
         .run(
             select::<Item>()
-                .inner_join_on::<Review>(|(i, r)| {
-                    r.col(col!(Review::item_id)).eq(i.col(col!(Item::id)))
-                })
-                .filter(|(_, r)| r.col(col!(Review::stars)).ge(4))
-                .order_by(|(_, r)| r.col(col!(Review::stars)).desc())
+                .inner_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
+                .filter(|(_, r)| r.col(Review::STARS).ge(4))
+                .order_by(|(_, r)| r.col(Review::STARS).desc())
                 .all(),
         )
         .await
@@ -175,11 +167,9 @@ pub async fn case_join_filter_and_order_on_joined_columns<E: AsyncExecutor>(e: &
     let rows = e
         .run(
             select::<Item>()
-                .left_join_on::<Review>(|(i, r)| {
-                    r.col(col!(Review::item_id)).eq(i.col(col!(Item::id)))
-                })
-                .order_by(|(_, r)| r.col(col!(Review::stars)).desc())
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
+                .left_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
+                .order_by(|(_, r)| r.col(Review::STARS).desc())
+                .order_by(|(i, _)| i.col(Item::ID).asc())
                 .all(),
         )
         .await
@@ -198,11 +188,9 @@ pub async fn case_join_filter_and_order_on_joined_columns<E: AsyncExecutor>(e: &
     let rows = e
         .run(
             select::<Item>()
-                .left_join_on::<Review>(|(i, r)| {
-                    r.col(col!(Review::item_id)).eq(i.col(col!(Item::id)))
-                })
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
-                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
+                .left_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
+                .order_by(|(i, _)| i.col(Item::ID).asc())
+                .order_by(|(_, r)| r.col(Review::ID).asc())
                 .limit(2)
                 .offset(1)
                 .all(),
@@ -221,12 +209,12 @@ pub async fn case_join_self_left_join_decodes_none<E: AsyncExecutor>(e: &mut E) 
         .run(
             select::<Item>()
                 .left_join_on::<Item>(|(a, b)| {
-                    b.col(col!(Item::qty))
-                        .gt(a.col(col!(Item::qty)))
-                        .and(b.col(col!(Item::label)).is_not_null())
+                    b.col(Item::QTY)
+                        .gt(a.col(Item::QTY))
+                        .and(b.col(Item::LABEL).is_not_null())
                 })
-                .order_by(|(a, _)| a.col(col!(Item::id)).asc())
-                .order_by(|(_, b)| b.col(col!(Item::id)).asc())
+                .order_by(|(a, _)| a.col(Item::ID).asc())
+                .order_by(|(_, b)| b.col(Item::ID).asc())
                 .all(),
         )
         .await
@@ -255,16 +243,14 @@ pub async fn case_join_three_sources<E: AsyncExecutor>(e: &mut E) {
     let rows = e
         .run(
             select::<Item>()
-                .inner_join_on::<Review>(|(i, r)| {
-                    r.col(col!(Review::item_id)).eq(i.col(col!(Item::id)))
-                })
+                .inner_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
                 .left_join_on::<Review>(|(_, r, later)| {
                     later
-                        .col(col!(Review::item_id))
-                        .eq(r.col(col!(Review::item_id)))
-                        .and(later.col(col!(Review::id)).gt(r.col(col!(Review::id))))
+                        .col(Review::ITEM_ID)
+                        .eq(r.col(Review::ITEM_ID))
+                        .and(later.col(Review::ID).gt(r.col(Review::ID)))
                 })
-                .order_by(|(_, r, _)| r.col(col!(Review::id)).asc())
+                .order_by(|(_, r, _)| r.col(Review::ID).asc())
                 .all(),
         )
         .await
@@ -283,47 +269,34 @@ pub async fn case_join_three_sources<E: AsyncExecutor>(e: &mut E) {
 pub async fn case_join_single_row_shapes_and_exists<E: AsyncExecutor>(e: &mut E) {
     seed(e).await;
     let joined = || {
-        select::<Item>().inner_join_on::<Review>(|(i, r)| {
-            r.col(col!(Review::item_id)).eq(i.col(col!(Item::id)))
-        })
+        select::<Item>()
+            .inner_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
     };
 
     let one = e
-        .run(
-            joined()
-                .filter(|(_, r)| r.col(col!(Review::id)).eq(12))
-                .one(),
-        )
+        .run(joined().filter(|(_, r)| r.col(Review::ID).eq(12)).one())
         .await
         .unwrap();
     assert_eq!(one, (item(3), review(12)));
 
     let none = e
-        .run(
-            joined()
-                .filter(|(i, _)| i.col(col!(Item::id)).eq(2))
-                .optional(),
-        )
+        .run(joined().filter(|(i, _)| i.col(Item::ID).eq(2)).optional())
         .await
         .unwrap();
     assert_eq!(none, None);
 
     let r = e
-        .run(joined().filter(|(i, _)| i.col(col!(Item::id)).eq(1)).one())
+        .run(joined().filter(|(i, _)| i.col(Item::ID).eq(1)).one())
         .await;
     assert_eq!(result_error(r), ResultError::TooManyRows);
 
     let reviewed = e
-        .run(joined().filter(|(_, _)| col!(Item::id).eq(1)).exists())
+        .run(joined().filter(|(_, _)| Item::ID.eq(1)).exists())
         .await
         .unwrap();
     assert!(reviewed);
     let reviewed = e
-        .run(
-            joined()
-                .filter(|(i, _)| i.col(col!(Item::id)).eq(4))
-                .exists(),
-        )
+        .run(joined().filter(|(i, _)| i.col(Item::ID).eq(4)).exists())
         .await
         .unwrap();
     assert!(!reviewed);

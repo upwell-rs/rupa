@@ -21,12 +21,7 @@ pub(super) async fn seed<E: AsyncExecutor>(e: &mut E) {
 
 pub(super) async fn ids<E: AsyncExecutor>(e: &mut E, cond: Expr<bool>) -> Vec<i64> {
     let rows = e
-        .run(
-            select::<Item>()
-                .filter(cond)
-                .order_by(col!(Item::id).asc())
-                .all(),
-        )
+        .run(select::<Item>().filter(cond).order_by(Item::ID.asc()).all())
         .await
         .expect("select");
     rows.into_iter().map(|i| i.id).collect()
@@ -61,7 +56,7 @@ pub(super) async fn insert_notes<E: AsyncExecutor>(e: &mut E, notes: &[NewNote])
     let mut newest = e
         .run(
             select::<Note>()
-                .order_by(col!(Note::id).desc())
+                .order_by(Note::ID.desc())
                 .limit(n as u64)
                 .all(),
         )

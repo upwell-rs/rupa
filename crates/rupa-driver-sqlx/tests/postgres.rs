@@ -102,9 +102,7 @@ async fn pooled_connections(url: &str) {
     conn.script(POSTGRES_DDL).await.unwrap();
     for n in 1..=4i64 {
         let ids: Vec<i64> = (0..n).collect();
-        let q = rupa::core::select::<Note>()
-            .filter(rupa::col!(Note::id).in_(ids))
-            .all();
+        let q = rupa::core::select::<Note>().filter(Note::ID.in_(ids)).all();
         rupa::core::exec::AsyncExecutor::run(&mut conn, q)
             .await
             .unwrap();

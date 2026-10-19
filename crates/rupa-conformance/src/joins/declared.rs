@@ -18,8 +18,8 @@ pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &mut E) {
             select::<Item>()
                 .join::<Review>()
                 .left()
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
-                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
+                .order_by(|(i, _)| i.col(Item::ID).asc())
+                .order_by(|(_, r)| r.col(Review::ID).asc())
                 .all(),
         )
         .await
@@ -40,7 +40,7 @@ pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &mut E) {
             select::<Review>()
                 .join::<Item>()
                 .inner_via(Review::item())
-                .order_by(|(r, _)| r.col(col!(Review::id)).desc())
+                .order_by(|(r, _)| r.col(Review::ID).desc())
                 .all(),
         )
         .await
@@ -117,8 +117,8 @@ pub async fn case_join_into_merged_struct<E: AsyncExecutor>(e: &mut E) {
             select::<Item>()
                 .join::<Review>()
                 .left()
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
-                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
+                .order_by(|(i, _)| i.col(Item::ID).asc())
+                .order_by(|(_, r)| r.col(Review::ID).asc())
                 .into::<ItemReview>()
                 .all(),
         )
