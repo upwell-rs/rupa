@@ -36,6 +36,12 @@ languages and all execution modes. A snapshot may share an incremental version
 because its kind differs; coverage still needs explicit artifact identities
 under #13. The runner must not infer coverage from a numeric range alone.
 
+Sources sharing a key are duplicates unless one catalog declaration explicitly
+groups them as dialect variants of one artifact. A matching key or filename
+never establishes that grouping automatically. The declaration syntax and
+variant completeness rules belong to #5/#17; until those are agreed, reject
+multiple sources at a key rather than infer variants.
+
 ### Numbered syntax
 
 Accept ASCII decimal integers from `1` through `18446744073709551615` (`u64::MAX`).
@@ -99,9 +105,9 @@ An unapplied collision can be resolved by changing one artifact's version and
 updating references before it reaches any managed target. Once applied to any
 managed target, retain its key; write a new migration for a correction. An
 explicit reset policy for disposable local databases is outside this slice.
-Replacing
-an SQL source with Rust under the same key is also an artifact change subject
-to checksum validation, not an exemption based on equivalent intended effects.
+Replacing an SQL source with Rust under the same key is also an artifact change
+subject to checksum validation, not an exemption based on equivalent intended
+effects.
 
 ## Examples for acceptance tests
 
@@ -126,7 +132,8 @@ vectors, not evidence of a working parser or planner.
 | Timestamp | `2026101909300`, `202610190930000`, `20261019093000Z` | Wrong width or suffix rejected |
 | Explicit scheme | `20261019093000` | Numbered integer or UTC timestamp according to configuration |
 | Catalog | SQL and Rust incrementals at version `10` in one stream | Duplicate key rejected |
-| Catalog | Two dialect variants of one artifact | One key; variant validation belongs to #17 |
+| Catalog | Explicitly grouped dialect variants of one artifact | One key; declaration and validation belong to #5/#17 |
+| Catalog | Multiple ungrouped sources claiming dialect variation | Duplicate key rejected; matching versions do not imply grouping |
 | Catalog | Incremental and snapshot at version `10` | Distinct keys if snapshots are approved |
 | Applied history | Same key, changed executable checksum | Validation failure; no automatic replay |
 | Applied history | Same key and checksum, different source path | Same artifact; path alone creates no pending work |
