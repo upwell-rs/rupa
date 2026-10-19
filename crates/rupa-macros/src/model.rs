@@ -183,9 +183,11 @@ pub fn option_inner(ty: &Type) -> Option<&Type> {
 /// Field types `ScalarColumn` is implemented for, recognized by name so the
 /// derive can write `Scalar` directly: an exact type that rust-analyzer
 /// resolves, unlike a kind selected by evaluating a constant. Other types keep
-/// the compile-time selection. A user type shadowing one of these names
-/// fails with the scalar codec's "not a scalar column type" error, which
-/// `#[column(json)]` resolves.
+/// the compile-time selection. A user type shadowing one of these names fails
+/// with the scalar codec's "not a scalar column type" error, which
+/// `#[column(json)]` resolves. So does `Uuid` or a chrono type in a build
+/// without rupa's `uuid`/`chrono` features, which would otherwise have been
+/// stored as JSON: enable the feature, or opt into JSON explicitly.
 pub fn known_scalar(ty: &Type) -> bool {
     const PLAIN: [&str; 11] = [
         "bool",
