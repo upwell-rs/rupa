@@ -1,7 +1,7 @@
-use rupa::migrate::{Error, RunError, Session, VersionScheme};
+use rupa::migrate::{Error, RunError, VersionScheme};
 
-use super::fixture::{Interrupted, body};
-use super::{MigrationHarness, catalog};
+use super::{Apply, Harness, Session, catalog};
+use crate::migrations::fixture::{Interrupted, body};
 
 fn busy<E: std::error::Error, M: std::error::Error>(
     result: &Result<impl Sized, RunError<E, M>>,
@@ -15,23 +15,20 @@ fn busy<E: std::error::Error, M: std::error::Error>(
     )
 }
 
-pub(super) fn case_owner_excludes_competitors_between_commits<H: MigrationHarness>(h: &mut H) {
+pub(super) fn case_owner_excludes_competitors_between_commits<H: Harness>(h: &mut H) {
     let entries = [body("1", "CREATE TABLE once_only(id INTEGER);")];
     let catalog = catalog(&entries);
 
     let mut owner = h.connect();
     let mut competitor = h.connect();
-    owner
-        .acquire("primary", VersionScheme::Numbered)
-        .expect("first bootstrap and claim");
+    wait!(h, owner.acquire("primary", VersionScheme::Numbered)).expect("first bootstrap and claim");
 
-    assert!(busy(&competitor.apply(&catalog)));
+    assert!(busy(&wait!(h, competitor.apply(&catalog))));
 
-    owner.release().expect("release claim");
+    wait!(h, owner.release()).expect("release claim");
 
     assert_eq!(
-        competitor
-            .apply(&catalog)
+        wait!(h, competitor.apply(&catalog))
             .expect("apply after release")
             .applied
             .len(),
@@ -39,7 +36,7 @@ pub(super) fn case_owner_excludes_competitors_between_commits<H: MigrationHarnes
     );
 }
 
-pub(super) fn case_concurrent_first_runners_execute_once<H: MigrationHarness>(h: &mut H) {
+pub(super) fn case_concurrent_first_runners_execute_once<H: Harness + Sync>(h: &mut H) {
     let entries = [body(
         "1",
         "CREATE TABLE marker(id INTEGER); INSERT INTO marker VALUES (1);",
@@ -48,7 +45,8 @@ pub(super) fn case_concurrent_first_runners_execute_once<H: MigrationHarness>(h:
     let barrier = std::sync::Barrier::new(2);
     let mut applied = 0;
 
-    let sessions = [h.connect(), h.connect()];
+    let target = &*h;
+    let sessions = [target.connect(), target.connect()];
     let reports = std::thread::scope(|scope| {
         sessions
             .map(|mut session| {
@@ -57,7 +55,7 @@ pub(super) fn case_concurrent_first_runners_execute_once<H: MigrationHarness>(h:
                 scope.spawn(move || {
                     barrier.wait();
 
-                    session.apply(catalog)
+                    wait!(target, session.apply(catalog))
                 })
             })
             .map(|runner| runner.join().expect("runner thread"))
@@ -78,15 +76,15 @@ pub(super) fn case_concurrent_first_runners_execute_once<H: MigrationHarness>(h:
     assert_eq!(h.count("SELECT count(*) FROM marker"), 1);
 }
 
-pub(super) fn case_interrupted_body_leaves_an_unresolved_attempt<H: MigrationHarness>(h: &mut H) {
+pub(super) fn case_interrupted_body_leaves_an_unresolved_attempt<H: Harness>(h: &mut H) {
     let entries = [Interrupted];
     let catalog = catalog(&entries);
 
     let session = h.connect();
     let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = catalog.apply(session);
+        let _ = wait!(h, catalog.apply(session));
     }));
-    let competitor = h.connect().apply(&catalog);
+    let competitor = wait!(h, h.connect().apply(&catalog));
 
     assert!(interrupted.is_err());
     assert!(
@@ -106,7 +104,7 @@ pub(super) fn case_interrupted_body_leaves_an_unresolved_attempt<H: MigrationHar
     );
 }
 
-pub(super) fn case_apply_takes_and_closes_a_native_connection<H: MigrationHarness>(h: &mut H) {
+pub(super) fn case_apply_takes_and_closes_a_native_connection<H: Harness>(h: &mut H) {
     let entries = [body(
         "1",
         "CREATE TABLE once_only(id INTEGER); INSERT INTO once_only VALUES (1);",
@@ -114,16 +112,14 @@ pub(super) fn case_apply_takes_and_closes_a_native_connection<H: MigrationHarnes
     let catalog = catalog(&entries);
 
     assert_eq!(
-        catalog
-            .apply(h.connect())
+        wait!(h, catalog.apply(h.connect()))
             .expect("apply owns the connection")
             .applied
             .len(),
         1
     );
     assert!(
-        catalog
-            .apply(h.connect())
+        wait!(h, catalog.apply(h.connect()))
             .expect("a fresh invocation inspects history")
             .applied
             .is_empty()

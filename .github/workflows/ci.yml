@@ -41,12 +41,18 @@ jobs:
       - run: |
           set -e
           cargo check -p rupa --no-default-features
-          for f in migrations chrono uuid async tokio dynamic postgres postgres-sync sqlite sqlite-unbundled mysql memory sqlx-postgres sqlx-mysql sqlx-sqlite sqlx-sqlite-unbundled tls-rustls full; do
+          for f in migrations chrono uuid sync async tokio dynamic postgres postgres-sync sqlite sqlite-unbundled mysql memory sqlx-postgres sqlx-mysql sqlx-sqlite sqlx-sqlite-unbundled tls-rustls full; do
             echo "::group::rupa/$f"
             cargo check -p rupa --features "$f"
             echo "::endgroup::"
           done
           cargo check -p rupa --no-default-features --features full,tls-rustls
+      # Migration execution modes compile alone and together.
+      - run: |
+          set -e
+          for f in sync async sync,async; do
+            cargo check -p rupa-migrate --all-targets --features "$f"
+          done
       # Each crate must build (with its tests) on its own features, not only
       # through workspace feature unification.
       - run: |

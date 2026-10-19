@@ -1,5 +1,6 @@
 use rupa::drivers::sqlite::SqliteExecutor;
-use rupa::migrate::{MigrationInfo, Session};
+use rupa::migrate::MigrationInfo;
+use rupa::migrate::sync::Session;
 use rupa_example_db::migrations::{ENTRIES, catalog};
 
 #[test]

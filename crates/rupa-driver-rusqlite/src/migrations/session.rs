@@ -1,4 +1,5 @@
-use rupa_migrate::{CatalogEntry, Checksum, Error, HistoryEntry, Session, VersionScheme};
+use rupa_migrate::sync::Session;
+use rupa_migrate::{CatalogEntry, Checksum, Error, HistoryEntry, VersionScheme};
 
 use super::{SqliteExecutor, db};
 use crate::SqliteError;

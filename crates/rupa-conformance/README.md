@@ -9,7 +9,9 @@ on every backend. Not published.
 
 A driver's tests implement `Harness` (or `DatabaseHarness`) and call `run`,
 `run_transactions` or `run_database`. Drivers with a migration session
-implement `migrations::MigrationHarness` and call `migrations::run_migrations`.
+implement `migrations::sync::{Harness, Target}` and call `migrations::sync::run`,
+then run the same cases on the async contracts with
+`migrations::asynchronous::run(&mut Blocked(harness))`.
 
 ## Internal role
 
@@ -23,4 +25,4 @@ builder and declared relations, `tx_cases` transactions, `database` pools and
 
 | feature | adds |
 |---|---|
-| `migrations` | `migrations::run_migrations` and its fixtures |
+| `migrations` | the migration cases in both modes and their fixtures |

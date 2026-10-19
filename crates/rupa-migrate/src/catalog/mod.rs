@@ -96,10 +96,12 @@ pub struct CatalogEntry {
     /// The exact plan of a planned entry, as checksummed and executed;
     /// `None` denotes an opaque Rust body.
     pub plan: Option<Plan>,
+    #[cfg_attr(not(any(feature = "sync", feature = "async")), allow(dead_code))]
     pub(crate) index: usize,
 }
 
 /// A statically typed mixed SQL/Rust catalog in one explicit stream.
+#[cfg_attr(not(any(feature = "sync", feature = "async")), allow(dead_code))]
 pub struct Catalog<'a, M> {
     pub(crate) stream: &'a str,
     pub(crate) scheme: VersionScheme,
@@ -149,21 +151,10 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         })
     }
 
-    /// Applies pending migrations on a dedicated native connection, then closes it.
-    /// No runner/session wrapper is required; the driver owns exclusion and cleanup.
-    pub fn apply<S: crate::Session>(
-        &self,
-        mut connection: S,
-    ) -> Result<crate::ApplyReport, crate::RunError<S::Error, M::Error>>
-    where
-        M: crate::Migration<S>,
-    {
-        crate::runner::apply(&mut connection, self)
-    }
-
     /// Lexically checks every planned script with the session dialect's
     /// grammar, and renders every planned schema operation for it. Runs
     /// before acquisition, so a rejected plan never touches the target.
+    #[cfg_attr(not(any(feature = "sync", feature = "async")), allow(dead_code))]
     pub(crate) fn validate_plans(&self, dialect: DialectId) -> Result<(), ValidationError> {
         let operations = self
             .entries

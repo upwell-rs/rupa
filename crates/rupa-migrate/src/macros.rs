@@ -70,16 +70,61 @@ macro_rules! migration_catalog {
             }
         }
 
-        impl<__Session: $crate::Session> $crate::Migration<__Session> for $name
-        where $( $ty: $crate::Migration<__Session>, )+
-        {
-            type Error = $error<$(<$ty as $crate::Migration<__Session>>::Error),+>;
+        $crate::__sync_catalog!($name, $error, $($variant($ty)),+);
+        $crate::__async_catalog!($name, $error, $($variant($ty)),+);
+    };
+}
 
-            fn up(&self, context: &mut $crate::Context<'_, __Session>) -> Result<(), Self::Error> {
-                match self { $( Self::$variant(value) => $crate::Migration::up(value, context).map_err($error::$variant), )+ }
+/// The sync execution of a generated catalog, emitted only when this crate
+/// has `sync`, so consumers never evaluate a feature of their own.
+#[cfg(feature = "sync")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __sync_catalog {
+    ($name:ident, $error:ident, $($variant:ident($ty:ty)),+) => {
+        impl<__Session: $crate::sync::Session> $crate::sync::Migration<__Session> for $name
+        where $( $ty: $crate::sync::Migration<__Session>, )+
+        {
+            type Error = $error<$(<$ty as $crate::sync::Migration<__Session>>::Error),+>;
+
+            fn up(&self, context: &mut $crate::sync::Context<'_, __Session>) -> Result<(), Self::Error> {
+                match self { $( Self::$variant(value) => $crate::sync::Migration::up(value, context).map_err($error::$variant), )+ }
             }
         }
     };
+}
+
+#[cfg(not(feature = "sync"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __sync_catalog {
+    ($($tokens:tt)*) => {};
+}
+
+/// The async execution of a generated catalog, emitted only when this crate
+/// has `async`.
+#[cfg(feature = "async")]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __async_catalog {
+    ($name:ident, $error:ident, $($variant:ident($ty:ty)),+) => {
+        impl<__Session: $crate::asynchronous::Session> $crate::asynchronous::Migration<__Session> for $name
+        where Self: Send + Sync, $( $ty: $crate::asynchronous::Migration<__Session>, )+
+        {
+            type Error = $error<$(<$ty as $crate::asynchronous::Migration<__Session>>::Error),+>;
+
+            async fn up(&self, context: &mut $crate::asynchronous::Context<'_, __Session>) -> Result<(), Self::Error> {
+                match self { $( Self::$variant(value) => $crate::asynchronous::Migration::up(value, context).await.map_err($error::$variant), )+ }
+            }
+        }
+    };
+}
+
+#[cfg(not(feature = "async"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __async_catalog {
+    ($($tokens:tt)*) => {};
 }
 
 /// Includes the catalog `rupa_build::Migrations::new(stream)` generated in this

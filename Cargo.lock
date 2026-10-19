@@ -2535,6 +2535,7 @@ name = "rupa-conformance"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "pollster",
  "rupa",
  "serde",
  "serde_json",
