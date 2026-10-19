@@ -80,7 +80,13 @@ fn malformed_entries_fail_instead_of_being_skipped() {
 
 #[test]
 fn names_and_inputs_the_runtime_would_reject_fail_the_build() {
-    let cases: [RejectedCase; 4] = [
+    let cases: [RejectedCase; 6] = [
+        (&[("1_self_.sql", "SELECT 1;")], |e| {
+            matches!(e, Error::ReservedName(_))
+        }),
+        (&[("1_self__/mod.rs", "pub struct S;")], |e| {
+            matches!(e, Error::ReservedName(_))
+        }),
         (&[("1_self.sql", "SELECT 1;")], |e| {
             matches!(e, Error::ReservedName(_))
         }),

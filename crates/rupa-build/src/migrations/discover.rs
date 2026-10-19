@@ -7,11 +7,12 @@ use rupa_migrate::{Version, VersionScheme};
 use super::Error;
 use super::header::{self, Split};
 use super::isolation::{self, Layout};
+use super::render::pascal;
 
 const SQL_MARKER: &str = "--";
 const RUST_MARKER: &str = "//!";
 const RUST_ROOT: &str = "mod.rs";
-const RESERVED_NAME: &str = "self";
+const RESERVED_TYPE: &str = "Self";
 
 /// One discovered migration with the exact bytes its checksum covers.
 #[derive(Debug)]
@@ -153,7 +154,7 @@ fn parse(path: &Path, scheme: VersionScheme) -> Result<(Version, String, Entry),
         return Err(invalid());
     }
 
-    if name == RESERVED_NAME {
+    if pascal(name) == RESERVED_TYPE {
         return Err(Error::ReservedName(path.to_path_buf()));
     }
 
