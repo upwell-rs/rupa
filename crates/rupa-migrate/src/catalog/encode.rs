@@ -157,11 +157,57 @@ impl Encoder<'_> {
             }
             Value::Json(json) => {
                 self.str("json");
-                self.str(&json.to_string());
+                self.json(json);
             }
             other => {
                 self.str("other");
                 self.str(&format!("{other:?}"));
+            }
+        }
+    }
+
+    /// JSON in a canonical form of its own: object keys sorted, numbers by
+    /// kind, independent of `serde_json`'s `preserve_order` or
+    /// `arbitrary_precision` in the consuming build.
+    fn json(&mut self, json: &serde_json::Value) {
+        match json {
+            serde_json::Value::Null => self.str("null"),
+            serde_json::Value::Bool(b) => {
+                self.str("bool");
+                self.flag(*b);
+            }
+            serde_json::Value::Number(n) => match (n.as_i64(), n.as_u64(), n.as_f64()) {
+                (Some(i), _, _) => self.number("int", &i.to_be_bytes()),
+                (None, Some(u), _) => self.number("uint", &u.to_be_bytes()),
+                (None, None, Some(f)) => self.number("float", &f.to_bits().to_be_bytes()),
+                (None, None, None) => {
+                    self.str("number");
+                    self.str(&n.to_string());
+                }
+            },
+            serde_json::Value::String(text) => {
+                self.str("string");
+                self.str(text);
+            }
+            serde_json::Value::Array(items) => {
+                self.str("array");
+                self.len(items.len());
+
+                for item in items {
+                    self.json(item);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                let mut entries: Vec<_> = map.iter().collect();
+
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+                self.str("object");
+                self.len(entries.len());
+
+                for (key, value) in entries {
+                    self.str(key);
+                    self.json(value);
+                }
             }
         }
     }

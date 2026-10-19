@@ -219,6 +219,18 @@ fn defaults_are_checked_literals_or_parenthesized_expressions() {
         timestamp.ends_with("DEFAULT (CURRENT_TIMESTAMP)"),
         "{timestamp}"
     );
+    assert!(
+        render_schema(
+            &column(
+                ColumnType::Text,
+                ColumnDefault::Value(Value::Text("a\\b'c".into()))
+            ),
+            &Postgres
+        )
+        .expect("an escape string")
+        .ends_with(r"DEFAULT E'a\\b''c'"),
+        "PostgreSQL backslashes mean the same whatever standard_conforming_strings is"
+    );
     assert_eq!(
         render_schema(
             &column(

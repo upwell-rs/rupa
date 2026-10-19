@@ -9,7 +9,9 @@ pub enum SchemaError {
     /// `CREATE TABLE` without columns.
     #[error("table `{0}` has no columns")]
     NoColumns(&'static str),
-    /// A key, foreign key or index names a column the table does not have.
+    /// A `CREATE TABLE` primary or foreign key names a column the table does
+    /// not have. Indexes and alterations of existing tables carry no column
+    /// list to check against; the server rejects those.
     #[error("table `{table}` has no column `{column}`")]
     UnknownColumn {
         /// The table.
@@ -63,7 +65,8 @@ pub enum SchemaError {
         /// What the dialect requires.
         reason: &'static str,
     },
-    /// A key over a type this dialect cannot index without a length.
+    /// A primary key or `UNIQUE` column of a type this dialect cannot index
+    /// without a length.
     #[error("{dialect:?} cannot use column `{column}` of type {ty:?} in a key; use `VarChar`")]
     Unindexable {
         /// The column.

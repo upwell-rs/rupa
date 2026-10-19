@@ -156,3 +156,40 @@ fn plans_are_validated_for_the_session_dialect() {
             if *error == RenderError::UnsupportedDialect(DialectId::Memory)
     ));
 }
+
+#[test]
+fn an_empty_plan_is_rejected() {
+    assert!(matches!(
+        digest(Planned(Fixed(planless(), Plan::new))),
+        Err(ValidationError::EmptyPlan(version)) if version == "1"
+    ));
+}
+
+#[test]
+fn json_defaults_are_checksummed_canonically() {
+    let mut first = serde_json::Map::new();
+    let mut second = serde_json::Map::new();
+
+    first.insert("a".into(), serde_json::json!(1));
+    first.insert("b".into(), serde_json::json!([true, null, 2.5]));
+    second.insert("b".into(), serde_json::json!([true, null, 2.5]));
+    second.insert("a".into(), serde_json::json!(1));
+
+    let encode = |json: serde_json::Map<String, serde_json::Value>| {
+        let mut hash = Sha256::new();
+
+        encode::Encoder(&mut hash).schema(&SchemaOp::AddColumn {
+            table: NOTES,
+            column: ColumnDef::new("settings", ColumnType::Json)
+                .default(ColumnDefault::Value(Value::Json(json.into()))),
+        });
+
+        hash.finalize()
+    };
+
+    assert_eq!(
+        encode(first),
+        encode(second),
+        "key order is not part of a JSON default's identity"
+    );
+}

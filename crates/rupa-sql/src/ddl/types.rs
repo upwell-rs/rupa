@@ -134,8 +134,10 @@ pub(super) fn mysql_unbounded(ty: ColumnType) -> bool {
 /// The `DEFAULT` clause value of `column`.
 ///
 /// Expressions are parenthesized, the form every dialect accepts for any
-/// type. Text is quoted with doubled quotes; a backslash is refused on MySQL,
-/// where its meaning depends on the server's SQL mode.
+/// type. Text is quoted with doubled quotes. A backslash is refused on MySQL,
+/// where its meaning depends on the server's SQL mode, and written as an
+/// `E'..'` escape string on PostgreSQL, which means the same whatever
+/// `standard_conforming_strings` is.
 pub(super) fn default(
     column: &ColumnDef,
     default: &ColumnDefault,
@@ -176,8 +178,22 @@ fn quoted(text: &str, dialect: DialectId, out: &mut String) -> Option<()> {
         return None;
     }
 
+    let escape = dialect == DialectId::Postgres && text.contains('\\');
+
+    if escape {
+        out.push('E');
+    }
+
     out.push('\'');
-    out.push_str(&text.replace('\'', "''"));
+
+    for c in text.chars() {
+        match c {
+            '\'' => out.push_str("''"),
+            '\\' if escape => out.push_str("\\\\"),
+            c => out.push(c),
+        }
+    }
+
     out.push('\'');
 
     Some(())

@@ -61,6 +61,11 @@ pub enum ValidationError {
     /// Imperative Rust sources/helpers must be explicitly included.
     #[error("migration {0} has no declared artifact inputs")]
     NoInputs(String),
+    /// A planned migration whose plan has no operations, such as a truncated
+    /// builder chain; recording it would make the completed plan a changed
+    /// checksum wherever the empty one already ran.
+    #[error("planned migration {0} has no operations")]
+    EmptyPlan(String),
     /// A schema operation the session's dialect cannot express. Boxed to keep
     /// run errors small.
     #[error(transparent)]
@@ -224,6 +229,10 @@ fn checksum(
 
     if inputs.is_empty() && plan.is_none() {
         return Err(ValidationError::NoInputs(metadata.version.into()));
+    }
+
+    if plan.is_some_and(|plan| plan.operations().is_empty()) {
+        return Err(ValidationError::EmptyPlan(metadata.version.into()));
     }
 
     for field in [

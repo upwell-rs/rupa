@@ -2718,6 +2718,7 @@ version = "0.1.0"
 dependencies = [
  "rupa-core",
  "rupa-sql",
+ "serde_json",
  "sha2 0.11.0",
  "thiserror",
 ]

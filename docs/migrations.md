@@ -125,10 +125,15 @@ dialect. Nothing is approximated; these fail before the target is touched:
 - SQLite: adding a `NOT NULL` column without a default, or a `UNIQUE` column;
   an identity that is not the whole primary key; foreign keys into another
   attached database.
-- MySQL: keys over unbounded `Text`, `Bytes` or `Json` (use `VarChar(n)`); text
-  defaults containing a backslash; an identity that is not the whole primary key.
+- MySQL: primary keys or `UNIQUE` columns over unbounded `Text`, `Bytes` or
+  `Json` (use `VarChar(n)`); text defaults containing a backslash; an identity
+  that is not the whole primary key.
 - Any dialect: a type without a name there, a database-generated column without
-  a default, keys naming unknown columns.
+  a default, `CREATE TABLE` keys naming unknown columns, an empty plan.
+
+Indexes and foreign keys name columns without their types, so a MySQL index
+over unbounded text or an index naming an unknown column is rejected by the
+server when the migration runs.
 
 `apply` renders every planned operation for the session's dialect before it
 acquires the target. Scripted migrations run the same operations through

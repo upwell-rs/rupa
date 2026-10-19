@@ -198,7 +198,9 @@ pub enum ReferentialAction {
     SetNull,
 }
 
-/// `CREATE [UNIQUE] INDEX`.
+/// `CREATE [UNIQUE] INDEX`. It names columns without their types: on MySQL,
+/// index `VarChar` columns rather than unbounded `Text`, which the server
+/// cannot index without a prefix length.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Index {
     /// The index name.

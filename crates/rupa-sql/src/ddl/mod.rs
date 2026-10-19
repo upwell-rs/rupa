@@ -4,6 +4,11 @@
 //! rewrite: SQLite cannot add a `NOT NULL` column without a default, MySQL
 //! cannot key unbounded text, and identity columns follow each dialect's
 //! rules. Operations that need a table rebuild on SQLite are not offered.
+//!
+//! Checks that need column types or names are made where the operation
+//! carries them, in `CREATE TABLE` and `ADD COLUMN`. An index or a foreign
+//! key into an existing table names columns without types, so a MySQL index
+//! over unbounded text or an unknown column is rejected by the server.
 
 mod error;
 mod types;
