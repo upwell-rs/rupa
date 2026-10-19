@@ -1,18 +1,15 @@
 //! Migration control stays inside the native SQLite executor.
 
 mod authorization;
-mod error;
 mod schema;
 mod session;
 
 use std::time::Duration;
 
 use rupa_core::tx::TxConnection;
-use rupa_migrate::Error;
+use rupa_migrate::{Error, StateError};
 
 use crate::{SqliteError, SqliteExecutor};
-
-pub use error::MigrationStateError;
 
 /// Private per-connection ownership and attempt state.
 pub(super) struct State {
@@ -112,13 +109,13 @@ impl SqliteExecutor {
 
     fn user_executor(&mut self) -> Result<authorization::Authorized<'_>, SqliteError> {
         let state = if self.migration.owner.is_none() {
-            Some(MigrationStateError::NotOwner)
+            Some(StateError::NotOwner)
         } else if self.migration.poisoned {
-            Some(MigrationStateError::Poisoned)
+            Some(StateError::Poisoned)
         } else if self.migration.attempt.is_none() {
-            Some(MigrationStateError::NoAttempt)
+            Some(StateError::NoAttempt)
         } else if self.connection().is_autocommit() {
-            Some(MigrationStateError::NoTransaction)
+            Some(StateError::NoTransaction)
         } else {
             None
         };

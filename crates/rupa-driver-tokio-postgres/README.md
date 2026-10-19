@@ -19,4 +19,5 @@ Keeps server-side prepared statements per connection in an LRU (`StatementCache`
 | `chrono`, `uuid` (default) | date/time and UUID columns |
 | `pool` | `PgPool` on deadpool (tokio) |
 | `dynamic` | `PgDriver` (`postgres`), the registry entry (implies `pool`) |
+| `migrations` | the `PgError::Migration` state error shared with the sync driver's migration session |
 | `tls-rustls` | TLS on rustls (ring, webpki roots), as the URL's `sslmode` asks |

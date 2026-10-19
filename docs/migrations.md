@@ -1,7 +1,8 @@
 # Migrations
 
-Enable `migrations` and `sqlite` (bundled SQLite) or `sqlite-unbundled` (system
-SQLite). Neither async nor runtime driver selection is required.
+Enable `migrations` and a supported driver: `sqlite` (bundled SQLite),
+`sqlite-unbundled` (system SQLite) or `postgres-sync` (the sync `postgres`
+crate). Neither async nor runtime driver selection is required.
 
 ```sh
 cargo run -p rupa-example-app
@@ -146,6 +147,9 @@ offered; write them as SQL.
 let entries = application_migrations();
 let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries)?;
 let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
+
+let client = postgres::Client::connect(url, postgres::NoTls)?;
+let report = catalog.apply(PgExecutor::new(client))?;
 ```
 
 `Catalog::new` validates versions, duplicates, source inputs and checksums without
@@ -171,8 +175,22 @@ Use `sql_migration!` for a zero-sized type backed by an explicitly named SQL fil
 then put `Planned<ThatType>` in `migration_catalog!`. Native SQLite parses scripts,
 so quoted/comment semicolons are not split manually. Planned SQL is normalized
 and checksummed independently of any dialect; `apply` lexically checks it with
-the session dialect's grammar before acquiring the target. Only SQLite has a
-script grammar so far; other dialects reject scripts explicitly.
+the session dialect's grammar before acquiring the target. SQLite and
+PostgreSQL have script grammars; other dialects reject scripts explicitly
+(`ScriptError::Dialect`).
+
+The PostgreSQL grammar assumes `standard_conforming_strings` (the migration
+connection must have it on) and keeps standard and `E''` strings, quoted
+identifiers, nested block comments and dollar-quoted bodies whole. PostgreSQL
+has no client-side authorizer, so statements the runner owns are refused before
+dispatch (`ScriptError::Forbidden` with a `ScriptRule`): transaction control,
+session-level `SET`, `set_config`, `RESET`, `DISCARD`, `LISTEN` and `UNLISTEN`
+(`SET LOCAL`, `SET CONSTRAINTS` and `SET TRANSACTION` are allowed), psql
+backslash commands and `COPY` from stdin or to stdout,
+advisory lock functions, `_rupa_`-prefixed names and `BEGIN ATOMIC` bodies (use a
+dollar-quoted body instead). Typed raw queries are checked by the same grammar.
+Dollar-quoted bodies are opaque to it; the session's lock and transaction checks
+below catch what they do to the runner.
 
 Without `rupa-build`, a hand-written Rust module exports a type implementing
 `MigrationInfo` and either `Migration<S>` or `PlannedMigration`. A scripted
@@ -180,12 +198,14 @@ migration's static `Metadata.inputs` must embed the module and every local
 executable helper/input with stable logical paths; a planned one declares no
 inputs, wrapped as `Planned<T>` in the catalog. Source and helper declarations
 are then an author responsibility, not transitive Rust dependency analysis. The
-facade's migration tests keep such an explicit catalog.
+shared migration conformance fixtures (`rupa-conformance`) keep such an explicit
+catalog.
 
 `Context::run` accepts ordinary typed Rupa queries. `Context::script` runs SQL on
 the same transaction, and `Context::schema` a rendered schema operation. Neither exposes transaction control, connection extraction
 or pool access. SQLite authorization denies transaction/savepoint control,
-ATTACH/DETACH, PRAGMAs and framework metadata access. This is an ownership API,
+ATTACH/DETACH, PRAGMAs and framework metadata access; PostgreSQL uses the grammar
+above. This is an ownership API,
 not a sandbox against trusted Rust independently doing IO or opening connections.
 
 Checksums use `rupa-artifact-v1/sha256`: length-prefixed UTF-8 fields include the
@@ -203,24 +223,41 @@ crate-dependency closure records remain later authoring work.
 
 ## History and failure
 
-SQLite reserves `_rupa_migration_meta`, `_rupa_migration_history`, and
-`_rupa_migration_attempts`. A versioned schema signature, stream, scheme and
+Both engines reserve `_rupa_migration_meta`, `_rupa_migration_history`, and
+`_rupa_migration_attempts`; on PostgreSQL they live in the connection's current
+schema, the owned namespace. A versioned schema signature, stream, scheme and
 checksum format must match before managed execution. Incompatible same-named
 objects are never replaced.
 
-The driver atomically claims the target under `BEGIN IMMEDIATE`, then retains a
+On SQLite the driver atomically claims the target under `BEGIN IMMEDIATE`, then retains a
 durable owner token between separately committed migration transactions. Another
 cooperative runner cannot take over between commits or during first bootstrap.
 The writer-lock timeout is configurable using
 `SqliteExecutor::with_migration_lock_timeout`; an existing owner fails immediately.
+
+On PostgreSQL `apply` takes a session advisory lock before creating or
+reading history (standalone `Session::history()` inspection reads without it),
+holds it across the separately committed migration
+transactions and checks it before every write phase. The key is derived from
+the canonical target (`rupa_migrate::Target`: engine, `current_database()`,
+`current_schema()`), never from the driver, credentials or URL, so every runner
+of one schema contends for the same lock and different schemas are independent
+targets. `PgExecutor::with_migration_lock_timeout` bounds the wait (zero tries
+once; longer than PostgreSQL's `lock_timeout` maximum is clamped); a timeout reports `Error::Busy` with no user work done. A connection that
+loses the lock, or whose artifact transaction was committed or replaced, is
+poisoned instead of recording completion. Closing the connection releases the
+lock, so a dropped or crashed runner leaves only its running attempt behind,
+which blocks the next apply with `Error::Uncertain`. A connection already inside
+an application transaction is rejected.
 
 Before dispatching a body, its attempt is durable. Schema/data effects, installed
 history and attempt completion commit together. If a body fails, acknowledged
 rollback records a failed attempt and releases the claim. Earlier completed
 migrations remain installed. Errors preserve the failed version, typed body or
 driver cause, the versions this invocation already committed (`applied()`), and
-additional cleanup failures. Misusing a SQLite migration connection outside a
-runner-owned transaction fails with `SqliteError::Migration`.
+additional cleanup failures. Misusing a migration connection outside a
+runner-owned transaction fails with a typed `StateError`
+(`SqliteError::Migration`, `PgError::Migration`).
 
 On interruption or an uncertain commit, a claim/running attempt can remain.
 There is no safe automatic timeout takeover. Stop the old runner, inspect history
@@ -229,6 +266,7 @@ ownership; a supported recovery command is a later slice. Do not delete history
 or clear a claim merely because a client timeout elapsed. This first slice
 reports uncertainty and blocks further apply instead of guessing.
 
-Async and other-driver adapters, snapshots/adoption, authored down migrations,
-nontransactional work, allowed late application and operator recovery are not yet
-implemented. Their accepted design is in [the migration contract](design/migrations-contract.md).
+Async adapters (tokio-postgres, sqlx), MySQL, snapshots/adoption, authored down
+migrations, nontransactional work (such as `CREATE INDEX CONCURRENTLY`), allowed
+late application and operator recovery are not yet implemented. Their accepted
+design is in [the migration contract](design/migrations-contract.md).

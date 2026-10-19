@@ -1,7 +1,9 @@
-/// Why a migration connection refused user statements or scripts.
+use crate::ScriptError;
+
+/// Why a migration connection refused a user statement or script.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum MigrationStateError {
+pub enum StateError {
     /// The connection holds no migration ownership claim.
     #[error("migration connection does not own the target")]
     NotOwner,
@@ -14,4 +16,7 @@ pub enum MigrationStateError {
     /// The artifact transaction is not open.
     #[error("no migration artifact transaction is open")]
     NoTransaction,
+    /// A raw statement was refused by the session dialect's script grammar.
+    #[error(transparent)]
+    Script(ScriptError),
 }

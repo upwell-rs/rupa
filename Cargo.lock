@@ -2599,6 +2599,7 @@ dependencies = [
  "rupa-core",
  "rupa-driver-postgres",
  "rupa-driver-tokio-postgres",
+ "rupa-migrate",
  "rupa-sql",
  "testcontainers-modules",
 ]
@@ -2655,6 +2656,7 @@ dependencies = [
  "rupa-conformance",
  "rupa-core",
  "rupa-driver-tokio-postgres",
+ "rupa-migrate",
  "rupa-sql",
  "rustls",
  "serde_json",

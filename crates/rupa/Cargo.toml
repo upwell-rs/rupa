@@ -8,7 +8,11 @@ license.workspace = true
 description = "Rust Unified Persistence API: explicit, attribute-driven repositories over any SQL database"
 
 [features]
-migrations = ["dep:rupa-migrate", "rupa-driver-rusqlite?/migrations"]
+migrations = [
+    "dep:rupa-migrate",
+    "rupa-driver-rusqlite?/migrations",
+    "rupa-driver-postgres?/migrations",
+]
 default = ["chrono", "uuid"]
 
 # Column types. Each is forwarded to every enabled driver.

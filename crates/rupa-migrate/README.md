@@ -8,8 +8,8 @@ dispatch, a pool, or Upwell.
 
 ## Usage
 
-Enable `rupa/migrations` and a supported driver. The initial implementation is
-native synchronous SQLite (`sqlite` or `sqlite-unbundled`):
+Enable `rupa/migrations` and a supported driver: native synchronous SQLite
+(`sqlite` or `sqlite-unbundled`) or PostgreSQL (`postgres-sync`):
 
 ```rust,ignore
 let entries = application_migrations();
@@ -40,16 +40,20 @@ apply engine, typed errors and driver session contracts. Schema operations are
 rendered with `rupa-sql` for the session's dialect, and every plan is rendered
 before the target is acquired.
 Drivers implement `Session` on their native executor and keep lock/history
-machinery private. No boxed body errors or erased catalog dispatch is required.
+machinery private. Shared driver support also lives here: per-dialect script
+grammars (`validate_script`, refusing runner-owned statements on engines without
+a native authorizer), the canonical target identity (`Target`) that derives
+lock keys independently of driver and URL, and the typed `StateError` drivers
+report for misused migration connections. No boxed body errors or erased catalog dispatch is required.
 
 The first slice applies transactional incrementals. Changed/missing applied
 artifacts, duplicate versions, late arrivals and unsupported policies fail
 explicitly. Each successful body commits with history and attempt completion;
 a failed later body rolls back without undoing earlier commits. SQLite uses a
-durable cooperative claim across commits; interruption can require explicit
-reconciliation. There is no automatic takeover or replay.
+durable cooperative claim across commits, PostgreSQL a session advisory lock;
+interruption can require explicit reconciliation. There is no automatic takeover or replay.
 
-Async/dynamic adapters, other engines, snapshots, adoption, authored reversal,
+Async/dynamic adapters, MySQL, nontransactional work, snapshots, adoption, authored reversal,
 out-of-order permission and operator recovery remain subsequent implementation
 slices. Declaring their
 metadata is not a claim that this slice executes them.

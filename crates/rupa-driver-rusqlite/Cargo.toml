@@ -31,7 +31,7 @@ uuid = { workspace = true, optional = true }
 r2d2 = { workspace = true, optional = true }
 
 [dev-dependencies]
-rupa-driver-rusqlite = { path = ".", features = ["dynamic"] }
-rupa-conformance = { path = "../rupa-conformance" }
-rupa = { path = "../rupa", features = ["dynamic"] }
+rupa-driver-rusqlite = { path = ".", features = ["dynamic", "migrations"] }
+rupa-conformance = { path = "../rupa-conformance", features = ["migrations"] }
+rupa = { path = "../rupa", features = ["dynamic", "migrations"] }
 pollster.workspace = true

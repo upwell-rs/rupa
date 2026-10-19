@@ -97,7 +97,8 @@ impl<S: Session> Context<'_, S> {
     /// Runs a script using the driver's native parser and migration authorization.
     pub fn script(&mut self, sql: &str) -> Result<(), Error<S::Error>> {
         let normalized = crate::catalog::normalize(sql, "script")?;
-        crate::script::validate(&normalized, self.session.dialect().id())?;
+        crate::validate_script(&normalized, self.session.dialect().id())
+            .map_err(|e| Error::Validation(e.into()))?;
 
         self.session.script(&normalized)
     }
