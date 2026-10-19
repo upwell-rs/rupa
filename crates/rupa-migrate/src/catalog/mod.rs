@@ -7,8 +7,8 @@ use rupa_sql::RenderError;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    Metadata, MigrationInfo, MigrationKind, Operation, Plan, Policy, Version, VersionError,
-    VersionScheme,
+    Metadata, MigrationInfo, MigrationKind, Operation, Plan, Policy, ScriptError, Version,
+    VersionError, VersionScheme,
 };
 
 /// Canonical artifact encoding and digest algorithm identity.
@@ -70,12 +70,9 @@ pub enum ValidationError {
     /// run errors small.
     #[error(transparent)]
     Schema(Box<RenderError>),
-    /// Unsupported source grammar, detected before script dispatch.
-    #[error("unterminated SQL quote or comment at byte {0}")]
-    Sql(usize),
-    /// The session's dialect has no migration script grammar yet.
-    #[error("migration scripts are not supported on dialect {0:?}")]
-    ScriptDialect(DialectId),
+    /// A script refused by the session dialect's grammar before dispatch.
+    #[error(transparent)]
+    Script(#[from] ScriptError),
     /// The first vertical does not execute snapshots or nontransactional bodies.
     #[error("migration {0}: this runner supports transactional incremental artifacts only")]
     Unsupported(String),
@@ -177,7 +174,7 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         for operation in operations {
             match operation {
                 Operation::Sql(sql) => {
-                    crate::script::validate(&normalize(sql, "planned SQL")?, dialect)?
+                    crate::validate_script(&normalize(sql, "planned SQL")?, dialect)?
                 }
                 Operation::Schema(op) => {
                     rupa_sql::render_schema(op, &DynDialect::new(dialect))?;

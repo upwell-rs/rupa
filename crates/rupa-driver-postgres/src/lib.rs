@@ -30,6 +30,8 @@
 
 #[cfg(feature = "dynamic")]
 mod driver;
+#[cfg(feature = "migrations")]
+mod migrations;
 #[cfg(feature = "pool")]
 pub mod pool;
 
@@ -60,6 +62,8 @@ pub struct PgExecutor {
     dialect: Postgres,
     pending: PendingRollback,
     statements: StatementCache,
+    #[cfg(feature = "migrations")]
+    migration: migrations::State,
 }
 
 impl PgExecutor {
@@ -70,6 +74,8 @@ impl PgExecutor {
             dialect: Postgres,
             pending: PendingRollback::default(),
             statements: StatementCache::default(),
+            #[cfg(feature = "migrations")]
+            migration: migrations::State::default(),
         }
     }
 
@@ -168,6 +174,11 @@ impl Executor for PgExecutor {
     }
 
     fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
+        #[cfg(feature = "migrations")]
+        if self.migration.owner.is_some() || self.migration.poisoned {
+            return self.execute_migration_statement(statement, expect);
+        }
+
         self.run(statement, expect)
     }
 }

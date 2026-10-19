@@ -8,6 +8,8 @@
 pub mod database;
 pub mod fixture;
 mod joins;
+#[cfg(feature = "migrations")]
+pub mod migrations;
 
 use std::fmt::Debug;
 use std::future::Future;

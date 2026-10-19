@@ -8,6 +8,8 @@ license.workspace = true
 description = "Async RUPA executor on tokio-postgres"
 
 [features]
+# The migration state error shared by migration sessions on both Postgres drivers.
+migrations = ["dep:rupa-migrate"]
 default = ["chrono", "uuid"]
 # Date, time and UUID columns.
 chrono = ["dep:chrono", "rupa-core/chrono", "tokio-postgres/with-chrono-0_4", "postgres-types/with-chrono-0_4"]
@@ -20,6 +22,7 @@ dynamic = ["pool", "rupa-core/dynamic"]
 tls-rustls = ["dep:tokio-postgres-rustls", "dep:rustls", "dep:webpki-roots"]
 
 [dependencies]
+rupa-migrate = { workspace = true, optional = true }
 rupa-core = { workspace = true, features = ["async"] }
 hashlink.workspace = true
 rupa-sql.workspace = true
