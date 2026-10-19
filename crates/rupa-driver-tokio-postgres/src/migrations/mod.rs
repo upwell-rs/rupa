@@ -60,6 +60,15 @@ impl Default for State {
 }
 
 impl State {
+    /// Whether a run left state on the connection: owned, mid-attempt,
+    /// mid-transaction or poisoned. Pools must discard such connections.
+    pub fn is_active(&self) -> bool {
+        self.owner.is_some()
+            || self.attempt.is_some()
+            || self.transaction.is_some()
+            || self.poisoned
+    }
+
     /// Whether user statements may run: owned, unpoisoned, inside an attempt's transaction.
     pub fn user_state(&self) -> Result<(), StateError> {
         if self.owner.is_none() {

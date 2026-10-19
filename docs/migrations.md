@@ -209,7 +209,9 @@ handling are identical in both modes.
 A run that ends without returning (a dropped `apply` future, or a panic
 unwinding through it) abandons its session: the runner's drop guard calls the
 non-blocking `Session::abandon`, and a retained session then refuses every
-statement and run with `StateError::Poisoned`. A consumed connection is simply
+statement with `StateError::Poisoned` (and a new run with `Error::History`).
+Pools discard a connection a run left in this or any other unfinished state,
+instead of handing it out again. A consumed connection is simply
 closed, which on PostgreSQL rolls back the open transaction and releases the
 lock; the journaled attempt stays running and blocks the next apply until it is
 reconciled. Nothing an abandoned body did is committed.

@@ -1,11 +1,13 @@
 use std::time::Duration;
 
+use rupa::DbConfig;
 use rupa::core::exec::AsyncExecutor;
+use rupa::core::pool::AsyncPool;
 use rupa::migrate::asynchronous::{Apply, Session};
 use rupa::migrate::{Catalog, Error, MigrationInfo, RunError, StateError, VersionScheme};
 use rupa_conformance::migrations::asynchronous::{Harness, Target};
 use rupa_conformance::migrations::fixture::body;
-use rupa_driver_tokio_postgres::PgError;
+use rupa_driver_tokio_postgres::{PgError, PgPool};
 
 use super::Pg;
 
@@ -25,6 +27,7 @@ pub(super) fn run(pg: &mut Pg) {
     cases!(
         a_dropped_apply_closes_the_connection_and_leaves_an_unresolved_attempt,
         a_dropped_apply_poisons_a_retained_session,
+        an_abandoned_pooled_session_is_discarded,
     );
 }
 
@@ -79,5 +82,29 @@ fn a_dropped_apply_poisons_a_retained_session(pg: &mut Pg) {
             Err(Error::History(_))
         ),
         "it cannot start another run either"
+    );
+}
+
+fn an_abandoned_pooled_session_is_discarded(pg: &mut Pg) {
+    let entries = [body("1", SLOW)];
+    let catalog = numbered(&entries);
+    let config = DbConfig::new(&pg.url).max_connections(1);
+
+    let pool = pg.block_on(PgPool::connect(&config)).expect("pool");
+    let abandoned = pg.block_on(async {
+        let mut conn = pool.get().await.expect("pooled connection");
+
+        tokio::time::timeout(GIVE_UP, Session::apply(&mut *conn, &catalog)).await
+    });
+    let reused = pg.block_on(async {
+        let mut conn = pool.get().await.expect("replacement connection");
+
+        conn.run(rupa::raw().sql("SELECT 1").execute::<u64>()).await
+    });
+
+    assert!(abandoned.is_err(), "the caller gave up mid-body");
+    assert!(
+        reused.is_ok(),
+        "the pool replaced the abandoned connection: {reused:?}"
     );
 }

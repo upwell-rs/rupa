@@ -144,6 +144,12 @@ impl managed::Manager for PgManager {
             return Err(RecycleError::message("connection closed"));
         }
 
+        if holds_migration_state(conn) {
+            return Err(RecycleError::message(
+                "migration run left state on the connection",
+            ));
+        }
+
         self.expiry.check(metrics)?;
 
         conn.clean().await.map_err(RecycleError::Backend)
@@ -227,4 +233,19 @@ impl AsyncPool for PgPool {
     fn status(&self) -> PoolStatus {
         glue::status(&self.pool)
     }
+}
+
+/// Whether a migration run left state on `conn`, so the pool must discard it
+/// instead of handing it out again.
+fn holds_migration_state(conn: &PgExecutor) -> bool {
+    #[cfg(feature = "migrations")]
+    let active = conn.migration.is_active();
+    #[cfg(not(feature = "migrations"))]
+    let active = {
+        let _ = conn;
+
+        false
+    };
+
+    active
 }

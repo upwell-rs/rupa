@@ -87,8 +87,11 @@ impl Target for Pg {
     fn forbidden_scripts(&self) -> &'static [&'static str] {
         &[
             "CREATE TABLE marker(id INTEGER); SET search_path = pg_catalog;",
+            "CREATE TABLE marker(id INTEGER); RESET ALL;",
+            "CREATE TABLE marker(id INTEGER); DISCARD ALL;",
             "CREATE TABLE marker(id INTEGER); SELECT pg_advisory_unlock_all();",
             "CREATE TABLE marker(id INTEGER); COPY marker FROM STDIN;",
+            "CREATE TABLE marker(id INTEGER); PREPARE TRANSACTION 'escape';",
         ]
     }
 }

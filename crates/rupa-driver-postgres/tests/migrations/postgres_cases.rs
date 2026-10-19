@@ -29,6 +29,7 @@ pub(super) fn run(pg: &mut Pg) {
         lost_advisory_lock_poisons_instead_of_committing,
         unbounded_lock_timeouts_are_clamped,
         sync_and_async_drivers_share_one_lock_and_history,
+        an_abandoned_pooled_session_is_discarded,
     );
 }
 
@@ -251,4 +252,30 @@ fn sync_and_async_drivers_share_one_lock_and_history(pg: &mut Pg) {
         ["2"]
     );
     assert_eq!(pg.count("SELECT count(*) FROM _rupa_migration_history"), 2);
+}
+
+fn an_abandoned_pooled_session_is_discarded(pg: &mut Pg) {
+    use rupa::core::pool::Pool;
+    use rupa_conformance::migrations::fixture::Interrupted;
+
+    let entries = [Interrupted];
+    let catalog = numbered(&entries);
+    let config = rupa::DbConfig::new(&pg.url).max_connections(1);
+    let pool = rupa_driver_postgres::PgPool::connect(&config).expect("pool");
+
+    let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut conn = pool.get().expect("pooled connection");
+        let _ = conn.apply(&catalog);
+    }));
+    let mut replacement = pool.get().expect("replacement connection");
+
+    assert!(interrupted.is_err());
+    assert!(
+        Executor::run(
+            &mut *replacement,
+            rupa::raw().sql("SELECT 1").execute::<u64>()
+        )
+        .is_ok(),
+        "the pool replaced the abandoned connection"
+    );
 }
