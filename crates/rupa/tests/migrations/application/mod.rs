@@ -1,3 +1,5 @@
+//! Hand-written explicit catalog, covering the macros generated catalogs build on.
+
 mod normalize;
 
 use normalize::Normalize;

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "examples/migrations/*"]
 
 [workspace.package]
 # Lockstep versioning: every member shares this version (see docs/design/versioning.md).
@@ -12,6 +12,7 @@ repository = "https://github.com/upwell-rs/rupa"
 
 [workspace.dependencies]
 rupa-migrate = { path = "crates/rupa-migrate", version = "=0.1.0" }
+rupa-build = { path = "crates/rupa-build", version = "=0.1.0" }
 sha2 = "0.11"
 # Intra-workspace crates are pinned exactly: macros emit paths into rupa-core's
 # hidden API, so mismatched versions must be impossible to resolve.

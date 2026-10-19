@@ -154,7 +154,3 @@ required-features = ["sqlite", "dynamic"]
 [[example]]
 name = "sqlite_async"
 required-features = ["sqlx-sqlite"]
-
-[[example]]
-name = "sqlite_migrations"
-required-features = ["sqlite-unbundled", "migrations"]

@@ -79,3 +79,24 @@ macro_rules! migration_catalog {
         }
     };
 }
+
+/// Includes the catalog `rupa_build::Migrations::new(stream)` generated in this
+/// crate's build script: `STREAM`, `SCHEME`, the `Migrations` enum, its typed
+/// `MigrationsError`, `ENTRIES` and `catalog()`.
+///
+/// The catalog is engine-independent, so it can live in a `db` crate while an
+/// application crate applies it on its own dedicated connection.
+#[macro_export]
+macro_rules! include_migrations {
+    ($stream:literal) => {
+        #[doc(hidden)]
+        use $crate as __rupa_migrate;
+
+        ::std::include!(::std::concat!(
+            ::std::env!("OUT_DIR"),
+            "/rupa-migrations/",
+            $stream,
+            ".rs"
+        ));
+    };
+}

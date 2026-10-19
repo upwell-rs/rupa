@@ -1,0 +1,12 @@
+[package]
+name = "rupa-example-app"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Example application applying the db crate's migrations on startup"
+
+[dependencies]
+db = { package = "rupa-example-db", path = "../db" }
+rupa = { path = "../../../crates/rupa", default-features = false, features = ["migrations", "sqlite"] }

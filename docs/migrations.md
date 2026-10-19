@@ -4,14 +4,65 @@ Enable `migrations` and `sqlite` (bundled SQLite) or `sqlite-unbundled` (system
 SQLite). Neither async nor runtime driver selection is required.
 
 ```sh
-cargo run -p rupa --example sqlite_migrations --no-default-features --features migrations,sqlite
-cargo run -p rupa --example sqlite_migrations --no-default-features --features migrations,sqlite -- app.db
+cargo run -p rupa-example-app
+cargo run -p rupa-example-app -- app.db
 ```
 
-The example uses an embedded SQL file to create notes, then a compiled Rust
-migration reads typed `Note` rows, normalizes titles in Rust, and writes bound
-updates. Passing a file makes history persist; a second invocation skips
-installed work. The exact example catalog is also exercised by integration tests.
+The example in [`examples/migrations`](../examples/migrations) is split like an
+application: `db` owns entities and a `migrations/` directory, and `app`
+applies the generated catalog on startup. The directory holds a SQL file, a
+single-file Rust migration that normalizes titles through typed queries, and a
+directory migration with a private helper. Passing a file makes history
+persist; a second invocation skips installed work.
+
+## Discovering a directory
+
+`rupa-build` generates the catalog from file names at build time, so adding a
+migration means adding a file:
+
+```rust,ignore
+// db/build.rs
+fn main() -> Result<(), rupa_build::Error> {
+    rupa_build::Migrations::new("primary").compile()
+}
+
+// db/src/lib.rs
+pub mod migrations {
+    rupa::migrate::include_migrations!("primary");
+}
+
+// app: the catalog is engine-independent and can be applied from any crate
+db::migrations::catalog()?.apply(SqliteExecutor::open("app.db")?)?;
+```
+
+| Entry | Meaning |
+|---|---|
+| `0001_create_notes.sql` | Planned SQL migration, version `1` |
+| `0002_normalize_titles.rs` | Rust migration; exports a unit struct `NormalizeTitles` implementing `Migration<S>` |
+| `0003_add_slugs/mod.rs` (+ helpers) | Rust migration whose private helper files are part of its checksum |
+
+Leading zeros are dropped for numbered versions, so `1_a.sql` and `001_b.sql`
+collide at build time. Leading `--` (SQL) or `//!` (Rust) lines are the
+description; they are excluded from the hashed and executed body, so rewording
+them never changes a checksum. Without a header, the name (`create notes`) is
+used. Unrecognized entries fail the build; dotfiles are ignored. The build reruns
+when the directory changes, so added or removed files never leave a stale catalog.
+
+### Rust migrations are self-contained
+
+A migration is frozen history, but application entities keep changing. If
+migration 2 queried the crate's `Note` and migration 7 later added a column to
+it, migration 2 would select a column that does not yet exist on every fresh
+database, while its checksum still reported no change. `rupa-build` therefore
+rejects Rust migrations that reach outside their own files: `crate::` paths,
+`super::` above the migration root, `#[path]`, out-of-line modules in
+single-file migrations and `include*!` outside the migration directory.
+
+Declare the row shape a migration needs locally, as a private
+`#[derive(rupa::Entity)]` struct, and keep helpers inside a directory migration.
+External crates such as `rupa` stay available; depending on a shared crate is an
+explicit decision whose drift the checksum cannot see. `Context` exposes typed
+queries and scripts only, so repositories cannot run inside a migration.
 
 ## Applying a catalog
 
@@ -47,12 +98,11 @@ and checksummed independently of any dialect; `apply` lexically checks it with
 the session dialect's grammar before acquiring the target. Only SQLite has a
 script grammar so far; other dialects reject scripts explicitly.
 
-A Rust module exports a type implementing `MigrationInfo` and `Migration<S>`.
-Its static `Metadata.inputs` must embed the module and every local executable
-helper/input with stable logical paths. Source and helper declarations are an
-author responsibility, not transitive Rust dependency analysis. See
-[`normalize.rs`](../crates/rupa/examples/migrations/normalize.rs) and
-[the catalog](../crates/rupa/examples/migrations/mod.rs).
+Without `rupa-build`, a hand-written Rust module exports a type implementing
+`MigrationInfo` and `Migration<S>`. Its static `Metadata.inputs` must embed the
+module and every local executable helper/input with stable logical paths. Source
+and helper declarations are then an author responsibility, not transitive Rust
+dependency analysis. The facade's migration tests keep such an explicit catalog.
 
 `Context::run` accepts ordinary typed Rupa queries. `Context::script` runs SQL on
 the same transaction. Neither exposes transaction control, connection extraction

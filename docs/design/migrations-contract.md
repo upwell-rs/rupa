@@ -382,13 +382,17 @@ paths are normalized relative paths with `/`, never absolute host paths.
 Descriptions and diagnostic root paths are excluded; executable input logical
 paths are included, so changing an input path may change checksum despite the
 artifact key remaining stable. Execute the normalized SQL bytes that were
-hashed. No SQL formatting, comment removal, or language-level normalization.
+hashed. No SQL formatting, comment removal, or language-level normalization,
+except that discovery removes a leading description header (consecutive `--`
+lines in SQL, `//!` lines in Rust) from both the hashed and the executed body.
 
-Rust is compiled code, not a filesystem runtime script. Select an explicit
-manifest listing its module, exported type, and helper/input closure. A module
-exports `pub struct Migration` by convention, or names another exported type in
-the manifest. The manifest assigns the accepted artifact key and execution
-modes; filename numbering is an authoring convenience, not a second identity.
+Rust is compiled code, not a filesystem runtime script. The migration directory
+is the manifest (amended in #35): `<version>_<snake_name>.sql`,
+`<version>_<snake_name>.rs`, or a `<version>_<snake_name>/` directory rooted at
+`mod.rs`. The canonical file name version is the artifact key, and a Rust module
+exports a unit struct named after the snake name in PascalCase. A directory
+migration's files are its complete local closure. Unrecognized entries fail the
+build. Hand-written catalogs remain available through `migration_catalog!`.
 Constructors needing state must declare immutable input bytes; reject runtime
 secrets/config as behavior inputs. Record source digests with the binary so
 runtime metadata never rereads Rust source from disk to decide what compiled.
@@ -404,11 +408,19 @@ source hash proves transitive semantic identity across compilers, dependency
 resolution, runtime environment, or undeclared helper code. A closure audit and
 fixtures are required; future automatic dependency analysis is deferred.
 
-The same manifest drives code generation and rebuild tracking. A build helper
-emits `cargo:rerun-if-changed` for the manifest, source root directories, each
-Rust/SQL module and each declared input. Directory watching catches additions
-and removals; rerunning validates unlisted migration files, rather than silently
-changing a catalog. Rust module references ensure normal compilation tracking
+Discovered Rust migrations must not reach outside their own files: the build
+helper rejects `crate::` paths (including inside macro tokens), `super::` above
+the migration root, `#[path]`, out-of-line modules in single-file migrations and
+`include*!` paths that leave the migration directory. Application entities and
+repositories evolve after a migration is applied, and are neither hashed nor
+frozen with it; migrations declare the row shapes they need locally. External
+crates remain allowed as explicit dependencies, covered by the crate-helper rule
+above rather than by the source checksum.
+
+The directory drives code generation and rebuild tracking. The `rupa-build`
+helper emits `cargo::rerun-if-changed` for the migration directory, which Cargo
+scans recursively, so additions and removals rerun discovery rather than
+silently changing a catalog. Rust module references ensure normal compilation tracking
 as well. Do not rely solely on proc-macro `include_str!` of the previous file set
 to detect new files. Clean and incremental builds must produce identical catalog
 metadata. Keep generated artifacts in OUT_DIR; no runtime source traversal for
@@ -430,7 +442,8 @@ SQL inputs, with duplicate-key validation across both sources.
 | File rename with explicit key unchanged | Key unchanged; checksum may change if logical input path changed |
 | Different driver or facade feature selection | Same checksum for the same complete declared closure |
 | Declared executable feature/dependency input changes | Checksum changes; never hide a different body behind one artifact checksum |
-| Add/remove SQL file in watched directory | Build reruns; manifest mismatch fails until explicitly updated |
+| Add/remove migration file in the discovered directory | Build reruns; the catalog follows the directory, and unrecognized entries fail the build |
+| Rust migration references application code (`crate::`, escaping `super::`/`include*!`/`#[path]`) | Build fails before the catalog exists |
 | Different Rust source on disk after binary build | Binary retains its compiled source metadata; no runtime Rust reload |
 | Undeclared helper behavior changes | Outside checksum guarantee; documented author error, never a semantic-integrity claim |
 

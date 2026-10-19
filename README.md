@@ -61,7 +61,7 @@ no database server, Docker, or database file.
 
 | Example | What it shows | Run |
 |---|---|---|
-| [SQL/Rust migrations](crates/rupa/examples/sqlite_migrations.rs) | Immutable history, typed Rust data steps, per-migration transactions | `cargo run -p rupa --example sqlite_migrations --features migrations,sqlite` |
+| [SQL/Rust migrations](examples/migrations) | `db` crate with a discovered migration directory, applied by an `app` crate; immutable history, typed Rust data steps | `cargo run -p rupa-example-app` |
 | [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
 | [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
 | [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |

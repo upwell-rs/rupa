@@ -1,0 +1,14 @@
+[package]
+name = "rupa-build"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Build-script helpers that generate RUPA code from project layouts"
+
+[dependencies]
+rupa-migrate.workspace = true
+thiserror.workspace = true
+syn = { workspace = true, features = ["visit"] }
+proc-macro2.workspace = true
