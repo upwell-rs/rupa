@@ -13,4 +13,3 @@ help: the trait `ExprOps` is implemented for `rupa::Column<E, T, rupa::Scalar>`
   |
   | impl<E, T: ScalarColumn> ExprOps for Column<E, T, Scalar> {
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  = note: this error originates in the attribute macro `query` (in Nightly builds, run with -Z macro-backtrace for more info)

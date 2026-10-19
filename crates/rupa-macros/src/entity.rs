@@ -13,6 +13,9 @@ use syn::{DeriveInput, Ident, LitStr};
 
 use crate::model::{self, Kind, const_ident, option_inner};
 
+/// Hidden associated constants the derive emits next to the column handles.
+const RESERVED: [&str; 1] = ["__RUPA_INSERT_REQUIRED"];
+
 pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     model::reject_generics(&input, "Entity")?;
     let ms = model::support_path(&input)?;
@@ -42,6 +45,16 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     let mut handles = HashMap::new();
     for f in &fields {
         let handle = const_ident(&f.ident).to_string();
+
+        if RESERVED.contains(&handle.as_str()) {
+            return Err(syn::Error::new(
+                f.ident.span(),
+                format!(
+                    "field `{}` would get the column handle `{ident}::{handle}`, which `#[derive(Entity)]` reserves; rename it",
+                    f.ident
+                ),
+            ));
+        }
 
         if let Some(earlier) = handles.insert(handle.clone(), &f.ident) {
             return Err(syn::Error::new(

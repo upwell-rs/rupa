@@ -1,5 +1,7 @@
 # Milestone 6: DSL functions and `rupa-dsl-std`
 
+> **Updated by #39:** `col!(Entity::field)` is now the derived constant `Entity::FIELD`. The design below keeps the original spelling.
+
 Status: **implemented.**
 
 ## `#[dsl::function]`
@@ -37,7 +39,7 @@ pub fn json_contains(dialect: &dyn Dialect, doc: Expr<Json>, part: Expr<Json>) -
   - `crate = path` sets the crate path.
 - **Generated under the function's name:**
   - `fn name(a: impl IntoExpr<T>, ..) -> Expr<R>`: builds the un-lowered call
-    (`ExprNode::Dsl`). Usable from builder code, e.g. `ilike(User::EMAIL, "a%")`.
+    (`ExprNode::Dsl`). Usable from builder code, e.g. `ilike(col!(User::email), "a%")`.
   - `struct name {}`: a marker type. It implements `DslAvailable<D>` for every
     dialect, or, with `requires`, only for dialects with `Supports<Cap>`.
     Types and functions live in separate namespaces, so

@@ -1,5 +1,7 @@
 # Joins
 
+> **Updated by #39:** `col!(Entity::field)` is now the derived constant `Entity::FIELD`, and `E::columns()` the constant `E::COLUMNS`. The design below keeps the original spelling.
+
 Status: **built** (2026-10-18), on branch `joins`. All seven steps of the
 build order are done:
 
@@ -103,9 +105,9 @@ closes known gap 4 for joined queries:
 
 ```rust
 let rows: Vec<(User, Option<Order>)> = select::<User>()
-    .left_join_on::<Order>(|(u, o)| o.col(Order::USER_ID).eq(u.col(User::ID)))
-    .filter(|(u, _)| u.col(User::ACTIVE).eq(true))
-    .order_by(|(_, o)| o.col(Order::PLACED_AT).desc())
+    .left_join_on::<Order>(|(u, o)| o.col(col!(Order::user_id)).eq(u.col(col!(User::id))))
+    .filter(|(u, _)| u.col(col!(User::active)).eq(true))
+    .order_by(|(_, o)| o.col(col!(Order::placed_at)).desc())
     .all()
     .run(&mut db)?;
 ```
@@ -135,7 +137,7 @@ As built (step 2):
 - **Plain columns mean the first source.** A column used in a join closure
   without going through a handle refers to the first source. That is
   intended for filters added before the join, and it is still valid after
-  one. It is also a known footgun: `Order::TOTAL` written without
+  one. It is also a known footgun: `col!(Order::total)` written without
   `o.col(..)` is source 0, and the database then rejects `t0.total`. So the
   mistake fails loudly, but only at run time.
 - **Closures return `Expr<bool>`,** not `impl IntoExpr<bool>`. With a generic
@@ -247,7 +249,7 @@ struct Order {
   implements `Row` by shifting indexes. A derived `from_row` reads columns
   `0..n`, so it works unchanged when given an `OffsetRow`. Each tuple element
   decodes from `OffsetRow { base: sum of earlier widths }`, where the widths
-  come from `E::COLUMNS.len()`.
+  come from `E::columns().len()`.
 - **Why tuples need their own trait.** We can't simply implement `FromRow` for
   `Option<E>`: the blanket `impl<T: FromRow> QueryResult for T` would then
   overlap with `impl QueryResult for Option<T>`. Instead, tuple elements

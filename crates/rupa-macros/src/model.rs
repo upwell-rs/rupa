@@ -193,13 +193,15 @@ pub fn const_ident(field: &Ident) -> Ident {
 ///
 /// The constant's name resolves with macro hygiene but keeps the field's
 /// location, so a misspelled field is reported there without rustc offering
-/// the constant's uppercase name as a replacement for the field.
+/// the constant's uppercase name as a replacement for the field. The block
+/// carries the field's span, so errors about the handle (a JSON path on a
+/// scalar column) point at the field rather than at the macro.
 pub fn column_path(entity: &TokenStream, field: &Ident) -> TokenStream {
     let mut handle = const_ident(field);
 
     handle.set_span(field.span().resolved_at(Span::call_site()));
 
-    quote_spanned!(field.span()=> <#entity>::#handle)
+    quote_spanned!(field.span()=> { <#entity>::#handle })
 }
 
 /// Reads `#[<name>(entity = Path)]`, used by capability derives on companion structs.
