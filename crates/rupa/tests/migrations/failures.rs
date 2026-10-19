@@ -1,4 +1,5 @@
 use super::*;
+use rupa::drivers::sqlite::{MigrationStateError, SqliteError};
 use rupa::migrate::RunError;
 
 #[test]
@@ -18,10 +19,18 @@ fn failed_later_body_rolls_back_its_changes_and_preserves_prior_commits() {
 
     let mut runner = memory_runner();
 
-    assert!(matches!(
-        runner.apply(&catalog),
-        Err(RunError::Migration { .. })
-    ));
+    let error = runner.apply(&catalog).expect_err("second body fails");
+
+    assert!(matches!(error, RunError::Migration { .. }));
+    assert_eq!(
+        error
+            .applied()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>(),
+        ["1"],
+        "the error reports versions committed before the failure"
+    );
     assert_eq!(
         runner
             .history()
@@ -215,6 +224,40 @@ fn unsupported_policy_is_rejected_before_bootstrap() {
 }
 
 #[test]
+fn malformed_planned_sql_is_rejected_with_the_session_dialect_before_bootstrap() {
+    use rupa::migrate::{Operation, Planned, PlannedMigration, ValidationError};
+
+    struct Unterminated(&'static Metadata);
+
+    impl MigrationInfo for Unterminated {
+        fn info(&self) -> &'static Metadata {
+            self.0
+        }
+    }
+
+    impl PlannedMigration for Unterminated {
+        const UP: &'static [Operation] = &[Operation::Sql("INSERT INTO t VALUES ('oops")];
+    }
+
+    let entries = [Planned(Unterminated(
+        body("1", "INSERT INTO t VALUES ('oops").0,
+    ))];
+    let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries)
+        .expect("lexing is deferred to the session dialect");
+
+    let mut runner = memory_runner();
+
+    assert!(matches!(
+        runner.apply(&catalog),
+        Err(RunError::Infrastructure {
+            source: Error::Validation(ValidationError::Sql(22)),
+            ..
+        })
+    ));
+    assert!(runner.history().expect("no installed work").is_empty());
+}
+
+#[test]
 fn version_scheme_cannot_change_after_initialization() {
     let entries = [body("1", "CREATE TABLE kept (id INTEGER);")];
     let empty: [Body; 0] = [];
@@ -278,6 +321,16 @@ fn failed_commit_releases_sqlite_writer_lock_before_returning() {
             .history()
             .expect("no committed migration")
             .is_empty()
+    );
+    assert!(
+        matches!(
+            rupa::core::exec::Executor::run(
+                &mut connection,
+                rupa::raw().sql("SELECT 1").execute::<u64>()
+            ),
+            Err(SqliteError::Migration(MigrationStateError::Poisoned))
+        ),
+        "a poisoned migration connection refuses statements with a typed state error"
     );
 }
 

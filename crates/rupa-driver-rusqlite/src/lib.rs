@@ -66,6 +66,8 @@ use rusqlite::types::Value as SqlValue;
 #[cfg(feature = "dynamic")]
 pub use driver::SqliteDriver;
 pub use error::SqliteError;
+#[cfg(feature = "migrations")]
+pub use migrations::MigrationStateError;
 #[cfg(feature = "pool")]
 pub use pool::{OpenMode, SqliteConn, SqliteManager, SqlitePool, SqlitePoolTx, SqliteTarget};
 use value::{Param, SqliteRows};

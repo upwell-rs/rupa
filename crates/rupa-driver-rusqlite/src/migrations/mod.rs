@@ -1,6 +1,7 @@
 //! Migration control stays inside the native SQLite executor.
 
 mod authorization;
+mod error;
 mod schema;
 mod session;
 
@@ -10,6 +11,8 @@ use rupa_core::tx::TxConnection;
 use rupa_migrate::Error;
 
 use crate::{SqliteError, SqliteExecutor};
+
+pub use error::MigrationStateError;
 
 /// Private per-connection ownership and attempt state.
 pub(super) struct State {
@@ -108,12 +111,20 @@ impl SqliteExecutor {
     }
 
     fn user_executor(&mut self) -> Result<authorization::Authorized<'_>, SqliteError> {
-        if self.migration.owner.is_none()
-            || self.migration.attempt.is_none()
-            || self.migration.poisoned
-            || self.connection().is_autocommit()
-        {
-            return Err(SqliteError::Db(rusqlite::Error::InvalidQuery));
+        let state = if self.migration.owner.is_none() {
+            Some(MigrationStateError::NotOwner)
+        } else if self.migration.poisoned {
+            Some(MigrationStateError::Poisoned)
+        } else if self.migration.attempt.is_none() {
+            Some(MigrationStateError::NoAttempt)
+        } else if self.connection().is_autocommit() {
+            Some(MigrationStateError::NoTransaction)
+        } else {
+            None
+        };
+
+        if let Some(state) = state {
+            return Err(SqliteError::Migration(state));
         }
 
         authorization::Authorized::new(self)

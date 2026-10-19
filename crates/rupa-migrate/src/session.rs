@@ -1,3 +1,4 @@
+use rupa_core::dialect::Dialect;
 use rupa_core::exec::Executor;
 use rupa_core::query::{Query, QueryResult};
 
@@ -93,7 +94,7 @@ impl<S: Session> Context<'_, S> {
     /// Runs a script using the driver's native parser and migration authorization.
     pub fn script(&mut self, sql: &str) -> Result<(), Error<S::Error>> {
         let normalized = crate::catalog::normalize(sql, "script")?;
-        crate::script::validate(&normalized)?;
+        crate::script::validate(&normalized, self.session.dialect().id())?;
 
         self.session.script(&normalized)
     }

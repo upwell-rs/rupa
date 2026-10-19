@@ -1,5 +1,6 @@
 use std::fmt;
 
+use rupa_core::dialect::DialectId;
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -59,6 +60,9 @@ pub enum ValidationError {
     /// Unsupported source grammar, detected before script dispatch.
     #[error("unterminated SQL quote or comment at byte {0}")]
     Sql(usize),
+    /// The session's dialect has no migration script grammar yet.
+    #[error("migration scripts are not supported on dialect {0:?}")]
+    ScriptDialect(DialectId),
     /// The first vertical does not execute snapshots or nontransactional bodies.
     #[error("migration {0}: this runner supports transactional incremental artifacts only")]
     Unsupported(String),
@@ -140,6 +144,20 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         crate::runner::apply(&mut connection, self)
     }
 
+    /// Lexically checks every planned script with the session dialect's grammar.
+    /// Runs before acquisition so a rejected script never touches the target.
+    pub(crate) fn validate_scripts(&self, dialect: DialectId) -> Result<(), ValidationError> {
+        for operation in self.entries.iter().filter_map(|e| e.operations).flatten() {
+            match operation {
+                Operation::Sql(sql) => {
+                    crate::script::validate(&normalize(sql, "planned SQL")?, dialect)?
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Static ordered entries; inspection does not run user code.
     pub fn entries(&self) -> impl ExactSizeIterator<Item = &CatalogEntry> {
         self.entries.iter()
@@ -199,7 +217,6 @@ fn checksum(
                 match operation {
                     Operation::Sql(sql) => {
                         let sql = normalize(sql, "planned SQL")?;
-                        crate::script::validate(&sql)?;
                         hash_field(&mut hash, b"sql");
                         hash_field(&mut hash, sql.as_bytes());
                     }
