@@ -34,14 +34,20 @@ Entries are `<version>_<snake_name>.sql`, `<version>_<snake_name>.rs` (a unit
 struct named `<SnakeName>` implementing `Migration<S>` or `PlannedMigration`), or
 a `<version>_<snake_name>/` directory whose `mod.rs` is the root and whose other
 files are private helpers. Leading `--` or `//!` lines are the description and
-are excluded from the checksum. A `rupa: nontransactional` line among them
-declares `Policy::NonTransactional` (part of the checksum); unknown `rupa:`
-directives, or directives in a scripted directory migration's `.rs` helper
-files, fail the build. Only the migration root declares directives; a planned
-directory migration's helpers and non-Rust helpers are never header-parsed.
-Anything else fails the build; dotfiles are ignored.
+are excluded from the checksum, except `rupa:` directive lines:
+`rupa: nontransactional` declares `Policy::NonTransactional` (part of the
+checksum).
+Unknown, repeated or valued directives, and directives in a scripted directory
+migration's `.rs` helper files, fail the build. Only the migration root declares
+directives; a planned directory migration's helpers and non-Rust helpers are
+never header-parsed. Anything else fails the build; dotfiles are ignored.
 
 ## Internal role
+
+Header directives live in one table (`directive::Directive::KEYWORDS`). A new
+directive adds a variant, its keyword row and its effect on `Settings`; parsing
+already separates a keyword from an optional value, and diagnostics list the
+table, so a directive taking configuration needs no new header grammar.
 
 Discovery reuses `rupa-migrate`'s version grammar, so names are validated at
 build time with the same rules the runtime applies. Output goes to

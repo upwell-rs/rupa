@@ -7,5 +7,5 @@
 
 mod migrations;
 
-pub use migrations::{DEFAULT_DIR, Error, Migrations, Violation};
+pub use migrations::{DEFAULT_DIR, DirectiveError, Error, Migrations, Violation};
 pub use rupa_migrate::VersionScheme;

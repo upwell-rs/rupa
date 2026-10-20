@@ -1,8 +1,7 @@
 use std::path::Path;
 
-use rupa_migrate::Policy;
-
 use super::Error;
+use super::directive::{Directive, DirectiveError, Settings};
 
 /// Prefix of a header line that configures the migration instead of describing it.
 const DIRECTIVE: &str = "rupa:";
@@ -19,29 +18,36 @@ pub(super) struct Split<'a> {
 #[derive(Debug)]
 pub(super) struct Header {
     pub(super) description: Option<String>,
-    pub(super) policy: Policy,
+    pub(super) directives: Vec<Directive>,
+    pub(super) settings: Settings,
 }
 
 impl Split<'_> {
-    /// The description and declared policy; `path` names the source in errors.
+    /// Parses the directives into settings; `path` names the source in errors.
     pub(super) fn header(self, path: &Path) -> Result<Header, Error> {
-        let mut policy = Policy::TransactionalRequired;
+        let mut directives = Vec::with_capacity(self.directives.len());
+        let refuse = |text: &str, reason| Error::Directive {
+            path: path.to_path_buf(),
+            directive: text.to_owned(),
+            reason,
+        };
 
-        for directive in self.directives {
-            match directive {
-                "nontransactional" => policy = Policy::NonTransactional,
-                _ => {
-                    return Err(Error::Directive {
-                        path: path.to_path_buf(),
-                        directive: directive.to_owned(),
-                    });
-                }
+        for text in self.directives {
+            let directive = Directive::parse(text).map_err(|reason| refuse(text, reason))?;
+
+            if directives.contains(&directive) {
+                return Err(refuse(text, DirectiveError::Duplicate));
             }
+
+            directives.push(directive);
         }
+
+        let settings = Settings::from_directives(&directives);
 
         Ok(Header {
             description: self.description,
-            policy,
+            directives,
+            settings,
         })
     }
 }

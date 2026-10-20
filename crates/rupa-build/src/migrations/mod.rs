@@ -1,3 +1,4 @@
+mod directive;
 mod discover;
 mod error;
 mod header;
@@ -9,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use rupa_migrate::VersionScheme;
 
+pub use directive::DirectiveError;
 pub use error::{Error, Violation};
 
 /// Migration directory used when [`Migrations::dir`] is not called, relative to

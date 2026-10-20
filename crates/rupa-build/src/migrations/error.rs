@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use rupa_migrate::VersionError;
 
+use super::DirectiveError;
+
 /// A migration directory cannot be turned into a catalog.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -37,15 +39,15 @@ pub enum Error {
         "{0}: implement either `PlannedMigration` (a plan) or `Migration` (a script), not both"
     )]
     MixedKinds(String),
-    /// A `rupa:` header line names no known directive.
-    #[error(
-        "{path}: unknown header directive `rupa: {directive}`; expected `rupa: nontransactional`"
-    )]
+    /// A `rupa:` header line cannot be applied.
+    #[error("{path}: `rupa: {directive}`: {reason}")]
     Directive {
         /// The offending source.
         path: PathBuf,
         /// The text after `rupa:`.
         directive: String,
+        /// Why it was refused.
+        reason: DirectiveError,
     },
     /// A helper file of a directory migration declares a directive, which
     /// only the migration root (`mod.rs`) may do.

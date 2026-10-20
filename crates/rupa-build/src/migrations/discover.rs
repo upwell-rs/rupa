@@ -217,7 +217,7 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
         name,
         description,
         documented,
-        policy: header.policy,
+        policy: header.settings.policy,
         body,
     })
 }
@@ -248,7 +248,7 @@ fn rust_dir(dir: &Path, prefix: &str) -> Result<(Header, Body), Error> {
 
             if depth == 0 {
                 root = Some(header);
-            } else if header.policy != Policy::TransactionalRequired {
+            } else if !header.directives.is_empty() {
                 return Err(Error::HelperDirective(path));
             }
 

@@ -2,7 +2,6 @@ use std::path::Path;
 
 use rupa_migrate::Policy;
 
-use crate::migrations::Error;
 use crate::migrations::header::{Split, split};
 
 #[test]
@@ -63,16 +62,6 @@ fn directive_lines_declare_the_policy_and_stay_out_of_the_description() {
         header.description.as_deref(),
         Some("Index notes without blocking writes.")
     );
-    assert_eq!(header.policy, Policy::NonTransactional);
-    assert_eq!(default.policy, Policy::TransactionalRequired);
-}
-
-#[test]
-fn unknown_directives_are_rejected() {
-    let result = split("-- rupa: autocommit\nSELECT 1;", "--").header(Path::new("1_x.sql"));
-
-    assert!(
-        matches!(&result, Err(Error::Directive { directive, .. }) if directive == "autocommit"),
-        "{result:?}"
-    );
+    assert_eq!(header.settings.policy, Policy::NonTransactional);
+    assert_eq!(default.settings.policy, Policy::TransactionalRequired);
 }
