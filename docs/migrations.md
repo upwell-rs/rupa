@@ -91,8 +91,10 @@ used. A header line `-- rupa: nontransactional` (`//! rupa: nontransactional` in
 a Rust root) declares the [nontransactional policy](#nontransactional-migrations)
 instead of describing the migration; the policy is part of the checksum. Unknown
 `rupa:` directives, and directives in a scripted directory migration's `.rs`
-helper files, fail the build. Planned directory migrations and non-Rust helper
-files have no header, so only the root declares directives. Unrecognized entries fail the build; dotfiles are ignored. The build reruns
+helper files, fail the build. A planned directory migration's helper files and
+non-Rust helper files are never header-parsed, so only the migration root (its
+`.sql` file, `.rs` file or `mod.rs`) declares directives. Unrecognized entries
+fail the build; dotfiles are ignored. The build reruns
 when the directory changes, so added or removed files never leave a stale catalog.
 
 ### Scripted and planned Rust migrations

@@ -37,9 +37,9 @@ files are private helpers. Leading `--` or `//!` lines are the description and
 are excluded from the checksum. A `rupa: nontransactional` line among them
 declares `Policy::NonTransactional` (part of the checksum); unknown `rupa:`
 directives, or directives in a scripted directory migration's `.rs` helper
-files, fail the build. Only the root declares directives; other helpers have no
-header. Anything else fails the build; dotfiles are
-ignored.
+files, fail the build. Only the migration root declares directives; a planned
+directory migration's helpers and non-Rust helpers are never header-parsed.
+Anything else fails the build; dotfiles are ignored.
 
 ## Internal role
 
