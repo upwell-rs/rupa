@@ -1,12 +1,14 @@
 use rupa_core::exec::Blocking;
 
 use super::Session;
-use crate::{CatalogEntry, Error, HistoryEntry, VersionScheme, sync};
+use crate::{CatalogEntry, Error, HistoryEntry, Policy, VersionScheme, sync};
 
 /// A sync session driven through the async contracts. Each call runs on the
 /// calling thread and completes when first polled, with no added locking; it
 /// lets async applications apply catalogs on sync-only drivers.
 impl<S: sync::Session + Send> Session for Blocking<S> {
+    const POLICIES: &'static [Policy] = S::POLICIES;
+
     async fn acquire(
         &mut self,
         stream: &str,
@@ -23,8 +25,8 @@ impl<S: sync::Session + Send> Session for Blocking<S> {
         self.0.start_attempt(entry)
     }
 
-    async fn begin_migration(&mut self) -> Result<(), Error<S::Error>> {
-        self.0.begin_migration()
+    async fn begin_migration(&mut self, policy: Policy) -> Result<(), Error<S::Error>> {
+        self.0.begin_migration(policy)
     }
 
     async fn complete(

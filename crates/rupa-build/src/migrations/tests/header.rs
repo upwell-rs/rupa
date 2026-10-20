@@ -1,3 +1,8 @@
+use std::path::Path;
+
+use rupa_migrate::Policy;
+
+use crate::migrations::Error;
 use crate::migrations::header::{Split, split};
 
 #[test]
@@ -10,6 +15,7 @@ fn leading_comment_lines_become_the_description_and_leave_the_body_intact() {
         parsed,
         Split {
             description: Some("Create notes with a seed row".into()),
+            directives: Vec::new(),
             body: "SELECT 1; -- trailing\n",
         }
     );
@@ -40,4 +46,33 @@ fn editing_only_the_description_keeps_the_hashed_body() {
 
     assert_ne!(before.description, after.description);
     assert_eq!(before.body, after.body);
+}
+
+#[test]
+fn directive_lines_declare_the_policy_and_stay_out_of_the_description() {
+    let source = "-- Index notes without blocking writes.\n--  rupa:  nontransactional \nCREATE INDEX CONCURRENTLY i ON notes (title);\n";
+
+    let header = split(source, "--")
+        .header(Path::new("2_index.sql"))
+        .expect("known directive");
+    let default = split("//! Plain\nfn up() {}", "//!")
+        .header(Path::new("1_plain.rs"))
+        .expect("no directives");
+
+    assert_eq!(
+        header.description.as_deref(),
+        Some("Index notes without blocking writes.")
+    );
+    assert_eq!(header.policy, Policy::NonTransactional);
+    assert_eq!(default.policy, Policy::TransactionalRequired);
+}
+
+#[test]
+fn unknown_directives_are_rejected() {
+    let result = split("-- rupa: autocommit\nSELECT 1;", "--").header(Path::new("1_x.sql"));
+
+    assert!(
+        matches!(&result, Err(Error::Directive { directive, .. }) if directive == "autocommit"),
+        "{result:?}"
+    );
 }

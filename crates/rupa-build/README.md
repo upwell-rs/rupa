@@ -34,7 +34,9 @@ Entries are `<version>_<snake_name>.sql`, `<version>_<snake_name>.rs` (a unit
 struct named `<SnakeName>` implementing `Migration<S>` or `PlannedMigration`), or
 a `<version>_<snake_name>/` directory whose `mod.rs` is the root and whose other
 files are private helpers. Leading `--` or `//!` lines are the description and
-are excluded from the checksum. Anything else fails the build; dotfiles are
+are excluded from the checksum. A `rupa: nontransactional` line among them
+declares `Policy::NonTransactional` (part of the checksum); unknown `rupa:`
+directives, or directives in helper files, fail the build. Anything else fails the build; dotfiles are
 ignored.
 
 ## Internal role

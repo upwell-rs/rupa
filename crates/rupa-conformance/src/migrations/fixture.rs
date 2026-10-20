@@ -11,11 +11,14 @@ use rupa::{raw, select};
 /// Declares a fixture's metadata with its own source as the artifact closure.
 macro_rules! fixture_info {
     ($version:literal, $description:literal) => {
+        fixture_info!($version, $description, TransactionalRequired);
+    };
+    ($version:literal, $description:literal, $policy:ident) => {
         fn info(&self) -> &'static Metadata {
             const INFO: Metadata = Metadata {
                 version: $version,
                 description: $description,
-                policy: Policy::TransactionalRequired,
+                policy: Policy::$policy,
                 kind: MigrationKind::Incremental,
                 inputs: &[ArtifactInput::new("fixture.rs", include_str!("fixture.rs"))],
             };
@@ -140,6 +143,13 @@ impl MigrationInfo for Interrupted {
     fixture_info!("1", "interruption");
 }
 
+/// Panics after a nontransactional statement, whose effect then survives.
+pub struct InterruptedAutocommit;
+
+impl MigrationInfo for InterruptedAutocommit {
+    fixture_info!("1", "nontransactional interruption", NonTransactional);
+}
+
 /// The author shape the schema migrations below create.
 #[derive(Debug, rupa::Entity)]
 #[entity(table = "authors")]
@@ -250,6 +260,16 @@ macro_rules! bodies {
                 context.script("CREATE TABLE lost(id INTEGER)") $($await)*?;
 
                 panic!("injected migration interruption");
+            }
+        }
+
+        impl<S: Session> Migration<S> for InterruptedAutocommit {
+            type Error = Error<S::Error>;
+
+            $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                context.script("CREATE TABLE survived(id INTEGER)") $($await)*?;
+
+                panic!("injected nontransactional interruption");
             }
         }
 

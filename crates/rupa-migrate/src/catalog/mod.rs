@@ -73,8 +73,9 @@ pub enum ValidationError {
     /// A script refused by the session dialect's grammar before dispatch.
     #[error(transparent)]
     Script(#[from] ScriptError),
-    /// The first vertical does not execute snapshots or nontransactional bodies.
-    #[error("migration {0}: this runner supports transactional incremental artifacts only")]
+    /// The selected session cannot execute the artifact's kind or policy;
+    /// snapshots are not executed yet.
+    #[error("migration {0}: the session cannot execute this artifact's kind or policy")]
     Unsupported(String),
 }
 

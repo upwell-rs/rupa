@@ -32,15 +32,24 @@ pub struct Owner {
     pub namespace: String,
 }
 
-/// Per-connection ownership, attempt and transaction state.
+/// How the body of the journaled attempt executes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Body {
+    /// Inside the artifact transaction with this transaction id.
+    Transaction(i64),
+    /// In autocommit, one statement per request, for nontransactional work.
+    Autocommit,
+}
+
+/// Per-connection ownership, attempt and body state.
 #[derive(Debug)]
 pub struct State {
     /// The held lock and owned namespace while a run owns the target.
     pub owner: Option<Owner>,
     /// The journaled attempt in progress.
     pub attempt: Option<i64>,
-    /// The transaction id of the open artifact transaction.
-    pub transaction: Option<i64>,
+    /// The running attempt's body, once begun.
+    pub body: Option<Body>,
     /// An uncertain outcome: the connection must be discarded.
     pub poisoned: bool,
     /// How long to wait for another runner's lock.
@@ -52,7 +61,7 @@ impl Default for State {
         Self {
             owner: None,
             attempt: None,
-            transaction: None,
+            body: None,
             poisoned: false,
             lock_timeout: Duration::from_secs(5),
         }
@@ -61,15 +70,12 @@ impl Default for State {
 
 impl State {
     /// Whether a run left state on the connection: owned, mid-attempt,
-    /// mid-transaction or poisoned. Pools must discard such connections.
+    /// mid-body or poisoned. Pools must discard such connections.
     pub fn is_active(&self) -> bool {
-        self.owner.is_some()
-            || self.attempt.is_some()
-            || self.transaction.is_some()
-            || self.poisoned
+        self.owner.is_some() || self.attempt.is_some() || self.body.is_some() || self.poisoned
     }
 
-    /// Whether user statements may run: owned, unpoisoned, inside an attempt's transaction.
+    /// Whether user statements may run: owned, unpoisoned, inside a begun attempt body.
     pub fn user_state(&self) -> Result<(), StateError> {
         if self.owner.is_none() {
             Err(StateError::NotOwner)
@@ -77,7 +83,7 @@ impl State {
             Err(StateError::Poisoned)
         } else if self.attempt.is_none() {
             Err(StateError::NoAttempt)
-        } else if self.transaction.is_none() {
+        } else if self.body.is_none() {
             Err(StateError::NoTransaction)
         } else {
             Ok(())
@@ -213,7 +219,8 @@ macro_rules! __pg_migrations {
         use $crate::migrations::rupa_migrate::{
             CHECKSUM_FORMAT, CatalogEntry, Error, HistoryEntry, StateError, VersionScheme,
         };
-        use $crate::migrations::{Connection, Owner, SqlState, db, decode_history, lock_parts, quote, sql};
+        use $crate::migrations::rupa_migrate::Policy;
+        use $crate::migrations::{Body, Connection, Owner, SqlState, db, decode_history, lock_parts, quote, sql};
     };
     (sync) => {
         $crate::__pg_migrations!(@uses);

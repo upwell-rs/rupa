@@ -1,4 +1,4 @@
-use rupa_migrate::VersionScheme;
+use rupa_migrate::{Policy, VersionScheme};
 
 use super::Error;
 use super::discover::{Artifact, Body};
@@ -104,6 +104,7 @@ fn artifact_module(out: &mut String, artifact: &Artifact) -> Result<(), Error> {
             emit!(out, "    #[derive(Debug, Clone, Copy)]");
             emit!(out, "    pub struct {name};\n");
             emit!(out, "    const SQL: &str = {:?};\n", input.contents);
+
             let mut block = String::new();
 
             info(&mut block, &runtime, &name, artifact, &inputs);
@@ -166,7 +167,8 @@ fn info(out: &mut String, runtime: &str, name: &str, artifact: &Artifact, inputs
     emit!(out, "            description: {:?},", artifact.description);
     emit!(
         out,
-        "            policy: {runtime}::Policy::TransactionalRequired,"
+        "            policy: {runtime}::Policy::{},",
+        policy(artifact.policy)
     );
     emit!(
         out,
@@ -177,6 +179,13 @@ fn info(out: &mut String, runtime: &str, name: &str, artifact: &Artifact, inputs
     emit!(out, "        &INFO");
     emit!(out, "    }}");
     emit!(out, "}}\n");
+}
+
+fn policy(policy: Policy) -> &'static str {
+    match policy {
+        Policy::TransactionalRequired => "TransactionalRequired",
+        Policy::NonTransactional => "NonTransactional",
+    }
 }
 
 fn module(artifact: &Artifact) -> String {
