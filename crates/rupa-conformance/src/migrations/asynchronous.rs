@@ -2,6 +2,7 @@
 
 use std::future::Future;
 
+use rupa::core::asynchronous::Connection;
 use rupa::core::exec::Blocking;
 use rupa::migrate::asynchronous::{Apply, Session};
 
@@ -83,6 +84,9 @@ mod nontransactional {
 }
 mod schema {
     include!("cases/schema.rs");
+}
+mod support {
+    include!("cases/support.rs");
 }
 
 /// Runs every case through the async contracts.

@@ -94,7 +94,7 @@ macro_rules! __pg_migration_session {
 
                 if policy == Policy::NonTransactional {
                     self.verify_owner() $($await)*?;
-                    self.migration.body = Some(Body::Autocommit);
+                    self.migration.body = Some(Body::Autocommit { dispatched: false });
 
                     return Ok(());
                 }
@@ -125,16 +125,18 @@ macro_rules! __pg_migration_session {
                 result
             }
 
-            /// A nontransactional body's effects may persist, so its attempt
-            /// stays durably unresolved rather than being recorded as failed,
-            /// which would permit a replay.
+            /// Once a nontransactional body dispatched a statement its effects
+            /// may persist, so its attempt stays durably unresolved rather than
+            /// being recorded as failed, which would permit a replay. A body
+            /// refused before dispatching anything records an ordinary failure.
             $($async)* fn abort(&mut self, attempt: i64) -> Result<(), Error<PgError>> {
                 match self.migration.body.take() {
-                    Some(Body::Autocommit) => {
+                    Some(Body::Autocommit { dispatched: true }) => {
                         self.migration.attempt = None;
 
                         return Err(Error::Uncertain(attempt));
                     }
+                    Some(Body::Autocommit { dispatched: false }) => {}
                     Some(Body::Transaction(_)) => {
                         if let Err(error) = self.client.batch_execute("ROLLBACK") $($await)* {
                             self.migration.poisoned = true;
@@ -212,7 +214,7 @@ macro_rules! __pg_migration_session {
                     .map_err(|state| Error::Database(PgError::Migration(state)))?;
 
                 let result = match self.migration.body {
-                    Some(Body::Autocommit) => self.autocommit_script(sql) $($await)*,
+                    Some(Body::Autocommit { .. }) => self.autocommit_script(sql) $($await)*,
                     _ => self.client.batch_execute(sql) $($await)* .map_err(db),
                 };
 

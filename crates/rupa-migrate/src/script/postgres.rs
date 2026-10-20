@@ -1,6 +1,8 @@
 use std::ops::Range;
 
-use super::{ScriptError, ScriptRule, line_comment, quoted};
+use super::{
+    Ranges, ScriptError, ScriptRule, forbidden, line_comment, quoted, word_end, word_start,
+};
 
 /// PostgreSQL has no client-side authorizer, so statement classes the runner
 /// owns are refused lexically, assuming `standard_conforming_strings`.
@@ -11,10 +13,8 @@ use super::{ScriptError, ScriptRule, line_comment, quoted};
 /// comments, without its terminating semicolon.
 pub(super) fn statements(sql: &str) -> Result<Vec<Range<usize>>, ScriptError> {
     let bytes = sql.as_bytes();
-    let mut ranges = Vec::new();
+    let mut ranges = Ranges::default();
     let mut statement = Statement::default();
-    let mut begin = 0;
-    let mut significant = false;
     let mut index = 0;
 
     while index < bytes.len() {
@@ -24,7 +24,7 @@ pub(super) fn statements(sql: &str) -> Result<Vec<Range<usize>>, ScriptError> {
             [b'-', b'-', ..] | [b'/', b'*', ..] | [b';', ..]
         ) || bytes[index].is_ascii_whitespace();
 
-        significant |= !inert;
+        ranges.token(inert);
         index = match bytes[index] {
             b'\'' => quoted(bytes, index, b'\'', true)?,
             b'"' => {
@@ -39,13 +39,8 @@ pub(super) fn statements(sql: &str) -> Result<Vec<Range<usize>>, ScriptError> {
             b'$' => dollar_quoted(bytes, index)?,
             b'\\' => return Err(forbidden(ScriptRule::ClientCommand, start)),
             b';' => {
-                if significant {
-                    ranges.push(begin..start);
-                }
-
+                ranges.end(start);
                 statement = Statement::default();
-                begin = index + 1;
-                significant = false;
 
                 index + 1
             }
@@ -64,11 +59,7 @@ pub(super) fn statements(sql: &str) -> Result<Vec<Range<usize>>, ScriptError> {
         };
     }
 
-    if significant {
-        ranges.push(begin..bytes.len());
-    }
-
-    Ok(ranges)
+    Ok(ranges.finish(bytes.len()))
 }
 
 /// The leading keyword of a statement whose meaning depends on later words.
@@ -162,21 +153,6 @@ fn leading(keyword: &str, at: usize) -> Result<Leading, ScriptError> {
     };
 
     Err(forbidden(rule, at))
-}
-
-fn forbidden(rule: ScriptRule, at: usize) -> ScriptError {
-    ScriptError::Forbidden { rule, at }
-}
-
-fn word_start(byte: u8) -> bool {
-    byte.is_ascii_alphabetic() || byte == b'_' || byte >= 0x80
-}
-
-fn word_end(bytes: &[u8], start: usize) -> usize {
-    bytes[start..]
-        .iter()
-        .position(|byte| !(word_start(*byte) || byte.is_ascii_digit() || *byte == b'$'))
-        .map_or(bytes.len(), |offset| start + offset)
 }
 
 /// An `E'...'` string, where a backslash escapes the next byte.

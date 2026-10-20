@@ -79,7 +79,7 @@ impl r2d2::ManageConnection for MySqlManager {
     }
 
     fn has_broken(&self, conn: &mut MySqlExecutor) -> bool {
-        conn.is_dirty() && conn.clean().is_err()
+        holds_migration_state(conn) || (conn.is_dirty() && conn.clean().is_err())
     }
 }
 
@@ -108,4 +108,19 @@ impl MySqlPool {
         let manager = MySqlManager::with_options(opts, config.driver.mysql()?);
         Self::new(manager, &config.pool).map_err(|e| ConnectError::Connect(DynError::new(e)))
     }
+}
+
+/// Whether a migration run left state on `conn`, so the pool must discard it
+/// instead of handing it out again.
+fn holds_migration_state(conn: &MySqlExecutor) -> bool {
+    #[cfg(feature = "migrations")]
+    let active = conn.migration.is_active();
+    #[cfg(not(feature = "migrations"))]
+    let active = {
+        let _ = conn;
+
+        false
+    };
+
+    active
 }

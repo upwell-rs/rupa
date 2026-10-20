@@ -1,13 +1,15 @@
+use rupa::core::dialect::DialectId;
 use rupa::migrate::schema::Index;
 use rupa::migrate::{Error, Planned, RunError};
 
+use super::support::{dialect, planned, script};
 use super::{Harness, Session, catalog};
-use crate::migrations::fixture::{Plans, Post, Scripted, add_pinned, body, create_tables, planned};
+use crate::migrations::fixture::{Plans, Post, Scripted, add_pinned, create_tables};
 
 pub(super) fn case_planned_schema_creates_entity_tables<H: Harness>(h: &mut H) {
     let entries = [
-        Planned(Plans(planned("1"), create_tables)),
-        Planned(Plans(planned("2"), add_pinned)),
+        Planned(Plans(planned::<H>("1"), create_tables)),
+        Planned(Plans(planned::<H>("2"), add_pinned)),
     ];
 
     wait!(h, h.connect().apply(&catalog(&entries))).expect("schema plans apply");
@@ -19,8 +21,8 @@ pub(super) fn case_planned_schema_creates_entity_tables<H: Harness>(h: &mut H) {
 }
 
 pub(super) fn case_changed_plan_is_reported_as_changed_history<H: Harness>(h: &mut H) {
-    let original = [Planned(Plans(planned("1"), create_tables))];
-    let changed = [Planned(Plans(planned("1"), || {
+    let original = [Planned(Plans(planned::<H>("1"), create_tables))];
+    let changed = [Planned(Plans(planned::<H>("1"), || {
         create_tables().create_index(Index::on("posts_body", Post::BODY))
     }))];
 
@@ -37,7 +39,7 @@ pub(super) fn case_changed_plan_is_reported_as_changed_history<H: Harness>(h: &m
 }
 
 pub(super) fn case_scripted_migrations_run_schema_operations<H: Harness>(h: &mut H) {
-    let entries = [Scripted(body("1", "scripted schema").0)];
+    let entries = [Scripted(script::<H>("1", "scripted schema").0)];
 
     wait!(h, h.connect().apply(&catalog(&entries))).expect("scripted schema apply");
 
@@ -47,8 +49,14 @@ pub(super) fn case_scripted_migrations_run_schema_operations<H: Harness>(h: &mut
     );
 }
 
+/// MySQL spells `DROP INDEX` and text indexes differently; its driver tests
+/// cover the same DDL.
 pub(super) fn case_ordinary_renames_and_indexes_work<H: Harness>(h: &mut H) {
-    let entries = [body(
+    if dialect(h) == DialectId::MySql {
+        return;
+    }
+
+    let entries = [script::<H>(
         "1",
         "CREATE TABLE notes(old_name TEXT); ALTER TABLE notes RENAME COLUMN old_name TO title; ALTER TABLE notes RENAME TO renamed; INSERT INTO renamed VALUES ('ok'); CREATE UNIQUE INDEX renamed_title ON renamed(title); DROP INDEX renamed_title;",
     )];
