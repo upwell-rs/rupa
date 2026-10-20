@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
 
-mod directive;
 mod discovery;
+mod frontmatter;
 mod header;
 mod isolation;
 

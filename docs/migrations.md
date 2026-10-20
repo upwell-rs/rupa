@@ -87,13 +87,25 @@ Leading zeros are dropped for numbered versions, so `1_a.sql` and `001_b.sql`
 collide at build time. Leading `--` (SQL) or `//!` (Rust) lines are the
 description; they are excluded from the hashed and executed body, so rewording
 them never changes a checksum. Without a header, the name (`create notes`) is
-used. A header line `-- rupa: nontransactional` (`//! rupa: nontransactional` in
-a Rust root) declares the [nontransactional policy](#nontransactional-migrations)
-instead of describing the migration; the policy is part of the checksum. Unknown
-`rupa:` directives, and directives in a scripted directory migration's `.rs`
-helper files, fail the build. A planned directory migration's helper files and
-non-Rust helper files are never header-parsed, so only the migration root (its
-`.sql` file, `.rs` file or `mod.rs`) declares directives. Unrecognized entries
+used.
+
+From its first line starting with `rupa:`, the header is YAML frontmatter
+instead of description, with the comment markers removed:
+
+```sql
+-- Index titles without blocking writes.
+-- rupa:
+--   policy: nontransactional
+```
+
+The flow form `-- rupa: { policy: nontransactional }` is the same document.
+`policy` is `transactional` (the default) or `nontransactional` (see
+[nontransactional migrations](#nontransactional-migrations)), and is part of
+the checksum. Unknown keys or values and malformed YAML fail the build with the
+parser's location. Only the migration root (its `.sql` file, `.rs` file or
+`mod.rs`) declares frontmatter: a scripted directory migration's `.rs` helper
+with a `rupa:` header fails the build, and a planned directory migration's
+helpers and non-Rust helpers are never header-parsed. Unrecognized entries
 fail the build; dotfiles are ignored. The build reruns
 when the directory changes, so added or removed files never leave a stale catalog.
 
@@ -335,7 +347,8 @@ runs its whole body without an artifact transaction:
 
 ```sql
 -- Index titles without blocking writes.
--- rupa: nontransactional
+-- rupa:
+--   policy: nontransactional
 CREATE INDEX CONCURRENTLY notes_title ON notes (title);
 ```
 

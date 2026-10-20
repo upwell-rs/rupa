@@ -303,20 +303,20 @@ fn scripted_migrations_stay_isolated_and_kinds_do_not_mix() {
 }
 
 #[test]
-fn header_directives_set_each_migrations_policy() {
+fn frontmatter_sets_each_migrations_policy() {
     let fixture = Fixture::new(&[
         ("1_create.sql", "CREATE TABLE notes (title text);\n"),
         (
             "2_index.sql",
-            "-- Index titles without blocking writes.\n-- rupa: nontransactional\nCREATE INDEX CONCURRENTLY notes_title ON notes (title);\n",
+            "-- Index titles without blocking writes.\n-- rupa:\n--   policy: nontransactional\nCREATE INDEX CONCURRENTLY notes_title ON notes (title);\n",
         ),
         (
             "3_backfill.rs",
-            "//! rupa: nontransactional\npub struct Backfill;\n",
+            "//! rupa: { policy: nontransactional }\npub struct Backfill;\n",
         ),
         (
             "4_split/mod.rs",
-            "//! rupa: nontransactional\nmod helper;\npub struct Split;\n",
+            "//! rupa:\n//!   policy: nontransactional\nmod helper;\npub struct Split;\n",
         ),
         ("4_split/helper.rs", "pub(super) fn step() {}\n"),
     ]);
@@ -349,22 +349,22 @@ fn header_directives_set_each_migrations_policy() {
 }
 
 #[test]
-fn directives_must_be_known_and_declared_by_the_root() {
-    let unknown = Fixture::new(&[("1_x.sql", "-- rupa: autocommit\nSELECT 1;\n")]);
+fn frontmatter_must_be_known_and_declared_by_the_root() {
+    let unknown = Fixture::new(&[("1_x.sql", "-- rupa:\n--   autocommit: true\nSELECT 1;\n")]);
     let helper = Fixture::new(&[
         ("1_split/mod.rs", "mod helper;\npub struct Split;\n"),
         (
             "1_split/helper.rs",
-            "//! rupa: nontransactional\npub(super) fn step() {}\n",
+            "//! rupa: { policy: nontransactional }\npub(super) fn step() {}\n",
         ),
     ]);
 
     assert!(matches!(
         unknown.discover(VersionScheme::Numbered),
-        Err(Error::Directive { directive, .. }) if directive == "autocommit"
+        Err(Error::Frontmatter { message, .. }) if message.contains("autocommit")
     ));
     assert!(matches!(
         helper.discover(VersionScheme::Numbered),
-        Err(Error::HelperDirective(path)) if path.ends_with("helper.rs")
+        Err(Error::HelperFrontmatter(path)) if path.ends_with("helper.rs")
     ));
 }

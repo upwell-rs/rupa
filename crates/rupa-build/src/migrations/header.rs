@@ -1,16 +1,16 @@
 use std::path::Path;
 
 use super::Error;
-use super::directive::{Directive, DirectiveError, Settings};
+use super::frontmatter::Frontmatter;
 
-/// Prefix of a header line that configures the migration instead of describing it.
-const DIRECTIVE: &str = "rupa:";
+/// The key opening a header's YAML frontmatter.
+const FRONTMATTER: &str = "rupa:";
 
 /// A source split into its leading comment header and the executable body.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Split<'a> {
     pub(super) description: Option<String>,
-    pub(super) directives: Vec<&'a str>,
+    pub(super) frontmatter: Option<String>,
     pub(super) body: &'a str,
 }
 
@@ -18,58 +18,52 @@ pub(super) struct Split<'a> {
 #[derive(Debug)]
 pub(super) struct Header {
     pub(super) description: Option<String>,
-    pub(super) directives: Vec<Directive>,
-    pub(super) settings: Settings,
+    pub(super) frontmatter: Option<Frontmatter>,
 }
 
 impl Split<'_> {
-    /// Parses the directives into settings; `path` names the source in errors.
+    /// Parses the frontmatter; `path` names the source in errors.
     pub(super) fn header(self, path: &Path) -> Result<Header, Error> {
-        let mut directives = Vec::with_capacity(self.directives.len());
-        let refuse = |text: &str, reason| Error::Directive {
-            path: path.to_path_buf(),
-            directive: text.to_owned(),
-            reason,
-        };
-
-        for text in self.directives {
-            let directive = Directive::parse(text).map_err(|reason| refuse(text, reason))?;
-
-            if directives.contains(&directive) {
-                return Err(refuse(text, DirectiveError::Duplicate));
-            }
-
-            directives.push(directive);
-        }
-
-        let settings = Settings::from_directives(&directives);
+        let frontmatter = self
+            .frontmatter
+            .map(|yaml| Frontmatter::parse(&yaml))
+            .transpose()
+            .map_err(|error| Error::Frontmatter {
+                path: path.to_path_buf(),
+                message: error.to_string(),
+            })?;
 
         Ok(Header {
             description: self.description,
-            directives,
-            settings,
+            frontmatter,
         })
     }
 }
 
 /// Splits consecutive leading lines starting with `marker` (`--` or `//!`) off `source`.
 ///
-/// Lines starting with `rupa:` are directives; the others form the description.
-/// The body keeps every remaining byte, so the runner executes and hashes exactly
-/// what follows the header; editing only the description keeps the checksum.
+/// Lines before the first one starting with `rupa:` form the description;
+/// that line and every later header line form the YAML frontmatter, with the
+/// marker and one following space removed so indentation is kept. The body
+/// keeps every remaining byte, so the runner executes and hashes exactly what
+/// follows the header; editing only the description keeps the checksum.
 pub(super) fn split<'a>(source: &'a str, marker: &str) -> Split<'a> {
     let mut lines = Vec::new();
-    let mut directives = Vec::new();
+    let mut frontmatter: Option<String> = None;
     let mut body = source.strip_prefix('\u{feff}').unwrap_or(source);
 
     while let Some(text) = body.strip_prefix(marker) {
         let (line, rest) = text.split_once('\n').unwrap_or((text, ""));
-        let line = line.trim();
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let yaml = line.strip_prefix(' ').unwrap_or(line);
 
-        if let Some(directive) = line.strip_prefix(DIRECTIVE) {
-            directives.push(directive.trim());
-        } else if !line.is_empty() {
-            lines.push(line);
+        if let Some(document) = &mut frontmatter {
+            document.push('\n');
+            document.push_str(yaml);
+        } else if line.trim_start().starts_with(FRONTMATTER) {
+            frontmatter = Some(yaml.trim_start().to_owned());
+        } else if !line.trim().is_empty() {
+            lines.push(line.trim());
         }
 
         body = rest;
@@ -79,7 +73,7 @@ pub(super) fn split<'a>(source: &'a str, marker: &str) -> Split<'a> {
 
     Split {
         description,
-        directives,
+        frontmatter,
         body,
     }
 }

@@ -1,6 +1,6 @@
-mod directive;
 mod discover;
 mod error;
+mod frontmatter;
 mod header;
 mod isolation;
 mod kind;
@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 
 use rupa_migrate::VersionScheme;
 
-pub use directive::DirectiveError;
 pub use error::{Error, Violation};
 
 /// Migration directory used when [`Migrations::dir`] is not called, relative to
@@ -43,9 +42,10 @@ const GENERATED_DIR: &str = "rupa-migrations";
 /// File names carry identity: `<version>_<snake_name>.sql`, `<version>_<snake_name>.rs`,
 /// or a `<version>_<snake_name>/` directory whose `mod.rs` is the migration root and
 /// whose other files are its private helpers. Leading `--` (SQL) or `//!` (Rust)
-/// lines are the description and are excluded from the checksum, except a
-/// `rupa: nontransactional` line, which declares the migration's policy.
-/// Unrecognized entries and directives fail the build; dotfiles are ignored.
+/// lines are the description and are excluded from the checksum; from the first
+/// line starting with `rupa:`, they are YAML frontmatter instead, such as
+/// `rupa: { policy: nontransactional }`. Unrecognized entries and invalid
+/// frontmatter fail the build; dotfiles are ignored.
 #[derive(Debug, Clone)]
 pub struct Migrations {
     stream: String,

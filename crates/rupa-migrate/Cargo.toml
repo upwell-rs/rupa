@@ -16,6 +16,7 @@ async = ["rupa-core/async"]
 [dependencies]
 rupa-core.workspace = true
 rupa-sql.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 sha2.workspace = true

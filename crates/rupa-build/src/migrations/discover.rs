@@ -217,7 +217,7 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
         name,
         description,
         documented,
-        policy: header.settings.policy,
+        policy: header.frontmatter.unwrap_or_default().policy,
         body,
     })
 }
@@ -248,8 +248,8 @@ fn rust_dir(dir: &Path, prefix: &str) -> Result<(Header, Body), Error> {
 
             if depth == 0 {
                 root = Some(header);
-            } else if !header.directives.is_empty() {
-                return Err(Error::HelperDirective(path));
+            } else if header.frontmatter.is_some() {
+                return Err(Error::HelperFrontmatter(path));
             }
 
             inputs.push(input);

@@ -19,9 +19,15 @@ impl ArtifactInput {
 }
 
 /// The execution guarantee required by the complete migration body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Deserializes from `transactional` or `nontransactional`, as migration
+/// frontmatter spells it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Policy {
     /// Database effects and completed history must commit together.
+    #[default]
+    #[serde(rename = "transactional")]
     TransactionalRequired,
     /// Effects can survive failure; an attempt journal and recovery are required.
     NonTransactional,

@@ -1,7 +1,3 @@
-use std::path::Path;
-
-use rupa_migrate::Policy;
-
 use crate::migrations::header::{Split, split};
 
 #[test]
@@ -14,7 +10,7 @@ fn leading_comment_lines_become_the_description_and_leave_the_body_intact() {
         parsed,
         Split {
             description: Some("Create notes with a seed row".into()),
-            directives: Vec::new(),
+            frontmatter: None,
             body: "SELECT 1; -- trailing\n",
         }
     );
@@ -48,20 +44,17 @@ fn editing_only_the_description_keeps_the_hashed_body() {
 }
 
 #[test]
-fn directive_lines_declare_the_policy_and_stay_out_of_the_description() {
-    let source = "-- Index notes without blocking writes.\n--  rupa:  nontransactional \nCREATE INDEX CONCURRENTLY i ON notes (title);\n";
+fn frontmatter_starts_at_rupa_and_keeps_its_indentation() {
+    let source = "-- Index notes without blocking writes.\n-- rupa:\n--   policy: nontransactional\nCREATE INDEX CONCURRENTLY i ON notes (title);\n";
 
-    let header = split(source, "--")
-        .header(Path::new("2_index.sql"))
-        .expect("known directive");
-    let default = split("//! Plain\nfn up() {}", "//!")
-        .header(Path::new("1_plain.rs"))
-        .expect("no directives");
+    let parsed = split(source, "--");
 
     assert_eq!(
-        header.description.as_deref(),
-        Some("Index notes without blocking writes.")
+        parsed,
+        Split {
+            description: Some("Index notes without blocking writes.".into()),
+            frontmatter: Some("rupa:\n  policy: nontransactional".into()),
+            body: "CREATE INDEX CONCURRENTLY i ON notes (title);\n",
+        }
     );
-    assert_eq!(header.settings.policy, Policy::NonTransactional);
-    assert_eq!(default.settings.policy, Policy::TransactionalRequired);
 }

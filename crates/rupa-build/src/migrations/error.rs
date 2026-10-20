@@ -2,8 +2,6 @@ use std::path::PathBuf;
 
 use rupa_migrate::VersionError;
 
-use super::DirectiveError;
-
 /// A migration directory cannot be turned into a catalog.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -39,20 +37,18 @@ pub enum Error {
         "{0}: implement either `PlannedMigration` (a plan) or `Migration` (a script), not both"
     )]
     MixedKinds(String),
-    /// A `rupa:` header line cannot be applied.
-    #[error("{path}: `rupa: {directive}`: {reason}")]
-    Directive {
+    /// The `rupa:` frontmatter is not valid YAML for the known settings.
+    #[error("{path}: invalid `rupa:` frontmatter: {message}")]
+    Frontmatter {
         /// The offending source.
         path: PathBuf,
-        /// The text after `rupa:`.
-        directive: String,
-        /// Why it was refused.
-        reason: DirectiveError,
+        /// The YAML parser's message.
+        message: String,
     },
-    /// A helper file of a directory migration declares a directive, which
+    /// A helper file of a directory migration declares frontmatter, which
     /// only the migration root (`mod.rs`) may do.
-    #[error("{0}: only a migration root may declare `rupa:` directives")]
-    HelperDirective(PathBuf),
+    #[error("{0}: only a migration root may declare `rupa:` frontmatter")]
+    HelperFrontmatter(PathBuf),
     /// The name would generate the reserved type name `Self`.
     #[error("{0}: this name cannot be used because its migration type would be `Self`")]
     ReservedName(PathBuf),
