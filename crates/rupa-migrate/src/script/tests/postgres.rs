@@ -166,7 +166,7 @@ fn splitting_validates_the_whole_script_first() {
 
 #[test]
 fn refuses_to_split_dialects_without_known_boundaries() {
-    for dialect in [DialectId::Sqlite, DialectId::MySql, DialectId::Memory] {
+    for dialect in [DialectId::Sqlite, DialectId::Memory] {
         assert_eq!(
             split_script("SELECT 1; SELECT 2", dialect),
             Err(ScriptError::Dialect(dialect)),

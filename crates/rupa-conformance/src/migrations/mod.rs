@@ -59,6 +59,7 @@ macro_rules! all_cases {
                 case_failed_body_keeps_effects_and_blocks_replay,
                 case_interrupted_body_is_uncertain,
                 case_statements_outside_transactions_need_the_policy,
+                case_body_refused_before_dispatch_fails_without_uncertainty,
             ],
         )
     };

@@ -3,6 +3,9 @@ use sha2::{Digest, Sha256};
 /// Domain tag and version of the canonical target identity bytes.
 const IDENTITY_FORMAT: &str = "rupa-migration-target-v1";
 
+/// Prefix of MySQL named migration locks.
+const LOCK_PREFIX: &str = "rupa:";
+
 /// A database engine whose migration targets share one exclusion protocol,
 /// whichever driver connects to them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,6 +72,20 @@ impl Target<'_> {
         key.copy_from_slice(&digest[..8]);
 
         i64::from_be_bytes(key)
+    }
+
+    /// The MySQL named lock: `rupa:` and the digest's first 28 bytes as 56
+    /// lowercase hex digits, 61 characters within MySQL's 64-character limit.
+    pub fn lock_name(&self) -> String {
+        let mut name = String::with_capacity(LOCK_PREFIX.len() + 56);
+
+        name.push_str(LOCK_PREFIX);
+
+        for byte in &self.digest()[..28] {
+            name.push_str(&format!("{byte:02x}"));
+        }
+
+        name
     }
 }
 

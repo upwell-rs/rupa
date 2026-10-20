@@ -31,6 +31,8 @@
 #[cfg(feature = "dynamic")]
 mod driver;
 mod error;
+#[cfg(feature = "migrations")]
+mod migrations;
 #[cfg(feature = "pool")]
 pub mod pool;
 mod value;
@@ -67,6 +69,8 @@ pub struct MySqlExecutor {
     conn: mysql::Conn,
     dialect: MySql,
     pending: PendingRollback,
+    #[cfg(feature = "migrations")]
+    migration: migrations::State,
 }
 
 impl MySqlExecutor {
@@ -76,6 +80,8 @@ impl MySqlExecutor {
             conn,
             dialect: MySql,
             pending: PendingRollback::default(),
+            #[cfg(feature = "migrations")]
+            migration: migrations::State::default(),
         }
     }
 
@@ -162,6 +168,11 @@ impl Executor for MySqlExecutor {
     }
 
     fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, MySqlError> {
+        #[cfg(feature = "migrations")]
+        if self.migration.is_running() {
+            return self.execute_migration_statement(statement, expect);
+        }
+
         self.run(statement, expect)
     }
 }

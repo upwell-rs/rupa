@@ -1,5 +1,6 @@
+use super::support::{script, transactional};
 use super::{Harness, Session, catalog};
-use crate::migrations::fixture::{RawCommit, body};
+use crate::migrations::fixture::RawCommit;
 
 const SHARED: [&str; 6] = [
     "CREATE TABLE marker(id INTEGER); COMMIT;",
@@ -14,7 +15,7 @@ pub(super) fn case_scripts_cannot_escape_the_runner<H: Harness>(h: &mut H) {
     let scripts = SHARED.iter().chain(h.forbidden_scripts());
 
     for sql in scripts {
-        let entries = [body("1", sql)];
+        let entries = [script::<H>("1", sql)];
 
         let mut session = h.connect();
 
@@ -32,7 +33,13 @@ pub(super) fn case_scripts_cannot_escape_the_runner<H: Harness>(h: &mut H) {
     }
 }
 
+/// Transactional only: under autocommit the body's first statement commits
+/// before the refused raw `COMMIT`, as intended.
 pub(super) fn case_raw_queries_cannot_escape_the_runner<H: Harness>(h: &mut H) {
+    if !transactional::<H>() {
+        return;
+    }
+
     let entries = [RawCommit];
 
     let mut session = h.connect();
@@ -47,7 +54,7 @@ pub(super) fn case_raw_queries_cannot_escape_the_runner<H: Harness>(h: &mut H) {
 }
 
 pub(super) fn case_renaming_into_reserved_names_cannot_commit<H: Harness>(h: &mut H) {
-    let entries = [body(
+    let entries = [script::<H>(
         "1",
         "CREATE TABLE notes(id INTEGER); ALTER TABLE notes RENAME TO _rupa_hidden;",
     )];

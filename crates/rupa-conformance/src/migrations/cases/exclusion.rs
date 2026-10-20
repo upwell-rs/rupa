@@ -1,7 +1,8 @@
 use rupa::migrate::{Error, RunError, VersionScheme};
 
+use super::support::{script, transactional};
 use super::{Apply, Harness, Session, catalog};
-use crate::migrations::fixture::{Interrupted, body};
+use crate::migrations::fixture::Interrupted;
 
 fn busy<E: std::error::Error, M: std::error::Error>(
     result: &Result<impl Sized, RunError<E, M>>,
@@ -16,7 +17,7 @@ fn busy<E: std::error::Error, M: std::error::Error>(
 }
 
 pub(super) fn case_owner_excludes_competitors_between_commits<H: Harness>(h: &mut H) {
-    let entries = [body("1", "CREATE TABLE once_only(id INTEGER);")];
+    let entries = [script::<H>("1", "CREATE TABLE once_only(id INTEGER);")];
     let catalog = catalog(&entries);
 
     let mut owner = h.connect();
@@ -37,7 +38,7 @@ pub(super) fn case_owner_excludes_competitors_between_commits<H: Harness>(h: &mu
 }
 
 pub(super) fn case_concurrent_first_runners_execute_once<H: Harness + Sync>(h: &mut H) {
-    let entries = [body(
+    let entries = [script::<H>(
         "1",
         "CREATE TABLE marker(id INTEGER); INSERT INTO marker VALUES (1);",
     )];
@@ -77,6 +78,10 @@ pub(super) fn case_concurrent_first_runners_execute_once<H: Harness + Sync>(h: &
 }
 
 pub(super) fn case_interrupted_body_leaves_an_unresolved_attempt<H: Harness>(h: &mut H) {
+    if !transactional::<H>() {
+        return;
+    }
+
     let entries = [Interrupted];
     let catalog = catalog(&entries);
 
@@ -105,7 +110,7 @@ pub(super) fn case_interrupted_body_leaves_an_unresolved_attempt<H: Harness>(h: 
 }
 
 pub(super) fn case_apply_takes_and_closes_a_native_connection<H: Harness>(h: &mut H) {
-    let entries = [body(
+    let entries = [script::<H>(
         "1",
         "CREATE TABLE once_only(id INTEGER); INSERT INTO once_only VALUES (1);",
     )];

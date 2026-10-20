@@ -1,4 +1,4 @@
-use super::{ScriptError, line_comment, quoted};
+use super::{ScriptError, block_comment, line_comment, quoted};
 
 /// SQLite statements are authorized natively, so only the lexical grammar is checked.
 pub(super) fn validate(sql: &str) -> Result<(), ScriptError> {
@@ -18,13 +18,4 @@ pub(super) fn validate(sql: &str) -> Result<(), ScriptError> {
     }
 
     Ok(())
-}
-
-fn block_comment(bytes: &[u8], start: usize) -> Result<usize, ScriptError> {
-    let close = bytes[start + 2..]
-        .windows(2)
-        .position(|pair| pair == b"*/")
-        .ok_or(ScriptError::Unterminated(start))?;
-
-    Ok(start + 2 + close + 2)
 }

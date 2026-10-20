@@ -2645,6 +2645,7 @@ dependencies = [
  "rupa-conformance",
  "rupa-core",
  "rupa-driver-mysql",
+ "rupa-migrate",
  "rupa-sql",
  "serde_json",
  "testcontainers-modules",
