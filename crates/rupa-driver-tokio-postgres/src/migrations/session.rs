@@ -86,19 +86,24 @@ macro_rules! __pg_migration_session {
                 Ok(id)
             }
 
+            /// An autocommit body is marked begun only after ownership is
+            /// verified, so a failure here records a replayable failed attempt
+            /// instead of an uncertain one: no statement has run yet.
             $($async)* fn begin_migration(&mut self, policy: Policy) -> Result<(), Error<PgError>> {
                 self.statements.clear();
 
-                match policy {
-                    Policy::TransactionalRequired => {
-                        self.client.batch_execute("BEGIN") $($await)* .map_err(db)?;
+                if policy == Policy::NonTransactional {
+                    self.verify_owner() $($await)*?;
+                    self.migration.body = Some(Body::Autocommit);
 
-                        let transaction = self.current_transaction() $($await)*?;
-
-                        self.migration.body = Some(Body::Transaction(transaction));
-                    }
-                    Policy::NonTransactional => self.migration.body = Some(Body::Autocommit),
+                    return Ok(());
                 }
+
+                self.client.batch_execute("BEGIN") $($await)* .map_err(db)?;
+
+                let transaction = self.current_transaction() $($await)*?;
+
+                self.migration.body = Some(Body::Transaction(transaction));
 
                 self.verify_owner() $($await)*
             }

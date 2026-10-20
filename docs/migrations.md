@@ -90,8 +90,9 @@ them never changes a checksum. Without a header, the name (`create notes`) is
 used. A header line `-- rupa: nontransactional` (`//! rupa: nontransactional` in
 a Rust root) declares the [nontransactional policy](#nontransactional-migrations)
 instead of describing the migration; the policy is part of the checksum. Unknown
-`rupa:` directives, and directives in a directory migration's helper files, fail
-the build. Unrecognized entries fail the build; dotfiles are ignored. The build reruns
+`rupa:` directives, and directives in a scripted directory migration's `.rs`
+helper files, fail the build. Planned directory migrations and non-Rust helper
+files have no header, so only the root declares directives. Unrecognized entries fail the build; dotfiles are ignored. The build reruns
 when the directory changes, so added or removed files never leave a stale catalog.
 
 ### Scripted and planned Rust migrations
@@ -218,7 +219,7 @@ Pools discard a connection a run left in this or any other unfinished state,
 instead of handing it out again. A consumed connection is simply
 closed, which on PostgreSQL rolls back the open transaction and releases the
 lock; the journaled attempt stays running and blocks the next apply until it is
-reconciled. Nothing an abandoned body did is committed.
+reconciled. Nothing an abandoned transactional body did is committed.
 
 The apply path is strict: incremental migrations only, with the policies the
 session supports (`Session::POLICIES`). An unsupported policy or kind is
@@ -314,9 +315,10 @@ lock, so a dropped or crashed runner leaves only its running attempt behind,
 which blocks the next apply with `Error::Uncertain`. A connection already inside
 an application transaction is rejected.
 
-Before dispatching a body, its attempt is durable. Schema/data effects, installed
-history and attempt completion commit together. If a body fails, acknowledged
-rollback records a failed attempt and releases the claim. Earlier completed
+Before dispatching a body, its attempt is durable. A transactional body's
+schema/data effects, installed history and attempt completion commit together.
+If a transactional body fails,
+acknowledged rollback records a failed attempt and releases the claim. Earlier completed
 migrations remain installed. Errors preserve the failed version, typed body or
 driver cause, the versions this invocation already committed (`applied()`), and
 additional cleanup failures. Misusing a migration connection outside a

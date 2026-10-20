@@ -36,7 +36,9 @@ a `<version>_<snake_name>/` directory whose `mod.rs` is the root and whose other
 files are private helpers. Leading `--` or `//!` lines are the description and
 are excluded from the checksum. A `rupa: nontransactional` line among them
 declares `Policy::NonTransactional` (part of the checksum); unknown `rupa:`
-directives, or directives in helper files, fail the build. Anything else fails the build; dotfiles are
+directives, or directives in a scripted directory migration's `.rs` helper
+files, fail the build. Only the root declares directives; other helpers have no
+header. Anything else fails the build; dotfiles are
 ignored.
 
 ## Internal role
