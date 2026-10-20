@@ -67,7 +67,7 @@ impl MemoryDb {
 
     /// Creates (or empties) the table for `E`.
     pub fn register<E: Entity>(&mut self) -> &mut Self {
-        self.create_table(E::TABLE, E::columns().to_vec(), E::ID_COLUMNS)
+        self.create_table(E::TABLE, E::COLUMNS.to_vec(), E::ID_COLUMNS)
     }
 
     /// Creates (or empties) a table from column metadata.
@@ -303,7 +303,7 @@ impl MemoryDb {
             }
 
             for (col, meta) in next.columns.iter().enumerate() {
-                if meta.generated && !idx.contains(&col) {
+                if meta.generated.is_some() && !idx.contains(&col) {
                     let seq = next.sequences.entry(col).or_insert(0);
                     *seq += 1;
                     row[col] = match meta.sql_type {

@@ -1,5 +1,7 @@
 # Joins
 
+> **Updated by #39:** `col!(Entity::field)` is now the derived constant `Entity::FIELD`, and `E::columns()` the constant `E::COLUMNS`. The design below keeps the original spelling.
+
 Status: **built** (2026-10-18), on branch `joins`. All seven steps of the
 build order are done:
 

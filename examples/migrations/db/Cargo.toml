@@ -1,0 +1,17 @@
+[package]
+name = "rupa-example-db"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Example persistence crate: entities and a discovered migration directory"
+
+[dependencies]
+rupa = { path = "../../../crates/rupa", default-features = false, features = ["migrations", "sync"] }
+
+[build-dependencies]
+rupa-build.workspace = true
+
+[dev-dependencies]
+rupa = { path = "../../../crates/rupa", default-features = false, features = ["migrations", "sqlite"] }

@@ -154,13 +154,13 @@ fn main() {
         .value(&new_user("ada@example.com", Some("ada"), true, "dark", 1))
         .returning_one();
     let active_dark = select::<User>()
-        .filter(col!(User::active).eq(true))
-        .filter(col!(User::prefs).path("theme").text().eq("dark"))
-        .order_by(col!(User::created_at).desc())
+        .filter(User::ACTIVE.eq(true))
+        .filter(User::PREFS.path("theme").text().eq("dark"))
+        .order_by(User::CREATED_AT.desc())
         .limit(10)
         .all();
     let by_email = select::<User>()
-        .filter(ci_eq(col!(User::email), "ADA@EXAMPLE.COM"))
+        .filter(ci_eq(User::EMAIL, "ADA@EXAMPLE.COM"))
         .optional();
     let patch = update::<User>()
         .one(&UserPatch {
@@ -306,7 +306,7 @@ fn run_in_memory(
     // The guard form: a dropped `Tx` rolls back.
     {
         let mut tx = db.begin().unwrap();
-        tx.run(delete::<User>().filter(col!(User::id).gt(0)).affected())
+        tx.run(delete::<User>().filter(User::ID.gt(0)).affected())
             .unwrap();
     }
     println!(
@@ -315,11 +315,7 @@ fn run_in_memory(
     );
 
     let removed = db
-        .run(
-            delete::<User>()
-                .filter(col!(User::active).eq(false))
-                .affected(),
-        )
+        .run(delete::<User>().filter(User::ACTIVE.eq(false)).affected())
         .unwrap();
     println!("   deleted {removed} inactive user(s)");
 
@@ -344,9 +340,8 @@ fn run_boxed(db: MemoryDb) -> MemoryDb {
         .unwrap()
         .len();
     println!("   {count} user(s) remain");
-    let missing =
-        pollster::block_on(dynamic.run(select::<User>().filter(col!(User::id).eq(99)).one()))
-            .unwrap_err();
+    let missing = pollster::block_on(dynamic.run(select::<User>().filter(User::ID.eq(99)).one()))
+        .unwrap_err();
     println!(
         "   missing row -> {:?} (inspectable through any driver)",
         missing.result_error()

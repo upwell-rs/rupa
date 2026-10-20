@@ -19,6 +19,7 @@ slow-timeout = { period = "60s" }
 filter = """
 binary_id(rupa-driver-mysql::conformance)
 | binary_id(/^rupa-driver-(tokio-)?postgres::(conformance|repository|rls)$/)
+| binary_id(/^rupa-driver-(tokio-)?postgres::migrations$/)
 | binary_id(/^rupa-driver-sqlx::(mysql|postgres)$/)
 """
 test-group = "docker"

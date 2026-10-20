@@ -1,5 +1,7 @@
 # Milestone 3: derives and capabilities
 
+> **Superseded in part (#39):** `__rupa_fields()`, the probe types, `col!` and `__RUPA_ID_FIELD` were replaced by typed column handle constants (`User::EMAIL`) and a constant `Entity::COLUMNS`.
+
 Status: **implemented.** We agreed on 2026-10-03 that the main way to work is
 one model (the entity itself), with typed insert and patch structs available
 as an opt-in.

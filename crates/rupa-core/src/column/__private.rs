@@ -1,173 +1,124 @@
-//! Field probes used by `#[derive(Entity)]`, the capability derives and
-//! [`col!`]. A derived entity exposes one probe per field; calling
-//! `(&&&probe).__rupa_codec()` yields the field's codec.
+//! Compile-time codec selection for `#[derive(Entity)]`, plus checks used by
+//! the capability derives.
 //!
-//! For an inferring [`Probe`], method resolution picks (highest first):
-//! 1. `T: ScalarColumn` -> `ScalarCodec<T>`
-//! 2. `T = Option<U>`, `U: JsonColumn` -> `NullableJsonCodec<U>`
-//! 3. otherwise -> `JsonCodec<T>`, with `T: JsonColumn` required on the
-//!    *method* so failures report our diagnostic.
+//! For each field type `T` the derive evaluates, in a constant:
+//! 1. `<ScalarSelect<T>>::ENCODING`: `Some` when `T: ScalarColumn`;
+//! 2. `<NullableJsonSelect<T>>::ENCODING`: `Some` when `T = Option<U>` with
+//!    `U: JsonColumn` (`None` is SQL `NULL`, not JSON `null`);
+//! 3. `<JsonSelect<T>>::ENCODING`: `Some` when `T: JsonColumn`;
 //!
-//! Fields with an explicit `#[column(scalar|json)]` get a [`ScalarProbe`],
-//! [`JsonProbe`] or [`NullableJsonProbe`] instead. Their inherent
-//! `__rupa_codec` is the only candidate, so the override always wins.
-//!
-//! Resolution happens where the call is written, so it is only meaningful
-//! for concrete types; the derive rejects generic entities.
+//! and [`select_encoding`] takes the first `Some`. Each selector has an inherent
+//! constant that only exists when its bound holds; otherwise path resolution
+//! falls back to the `None` of a blanket trait impl. That only decides for
+//! concrete types, which is why the derive rejects generic entities.
 
 use super::*;
 
-/// A probe for one field of entity `E`.
-pub trait FieldProbe: Copy {
-    type Entity;
-    type Field;
-    fn name(&self) -> &'static str;
+/// Picks the scalar encoding of `T`, if it has one.
+pub struct ScalarSelect<T>(PhantomData<fn() -> T>);
+
+/// Picks the nullable JSON encoding of `T`, if it has one.
+pub struct NullableJsonSelect<T>(PhantomData<fn() -> T>);
+
+/// Picks the JSON encoding of `T`, if it has one.
+pub struct JsonSelect<T>(PhantomData<fn() -> T>);
+
+/// The fallback of every selector: no encoding.
+pub trait NoEncoding<T> {
+    /// The selector's bound does not hold.
+    const ENCODING: Option<Encoding<T>> = None;
 }
 
-macro_rules! probe {
-    ($(#[$m:meta])* $name:ident<$e:ident, $t:ident> => $field:ty) => {
-        $(#[$m])*
-        pub struct $name<$e, $t> {
-            name: &'static str,
-            _p: PhantomData<fn() -> ($e, $t)>,
+impl<T> NoEncoding<T> for ScalarSelect<T> {}
+
+impl<T> NoEncoding<T> for NullableJsonSelect<T> {}
+
+impl<T> NoEncoding<T> for JsonSelect<T> {}
+
+impl<T: ScalarColumn> ScalarSelect<T> {
+    /// `T` is a scalar column.
+    pub const ENCODING: Option<Encoding<T>> = Some(Encoding::of::<ScalarCodec<T>>());
+}
+
+impl<U: JsonColumn> NullableJsonSelect<Option<U>> {
+    /// `Option<U>` of a JSON type.
+    pub const ENCODING: Option<Encoding<Option<U>>> = Some(Encoding::of::<NullableJsonCodec<U>>());
+}
+
+impl<T: JsonColumn> JsonSelect<T> {
+    /// `T` is a JSON document.
+    pub const ENCODING: Option<Encoding<T>> = Some(Encoding::of::<JsonCodec<T>>());
+}
+
+/// The first available encoding, in selector order, or `None` when the type
+/// can be stored neither way.
+pub const fn select_encoding<T>(
+    scalar: Option<Encoding<T>>,
+    nullable_json: Option<Encoding<T>>,
+    json: Option<Encoding<T>>,
+) -> Option<Encoding<T>> {
+    match (scalar, nullable_json, json) {
+        (Some(encoding), _, _) | (None, Some(encoding), _) | (None, None, Some(encoding)) => {
+            Some(encoding)
         }
-        impl<$e, $t> Clone for $name<$e, $t> {
-            fn clone(&self) -> Self {
-                *self
-            }
+        (None, None, None) => None,
+    }
+}
+
+/// Whether the selected encoding stores JSON; `false` when none was selected,
+/// so only the handle's value reports the unstorable type.
+pub const fn is_json_encoding<T>(encoding: Option<Encoding<T>>) -> bool {
+    match encoding {
+        Some(encoding) => encoding.is_json(),
+        None => false,
+    }
+}
+
+/// Whether `field` is the entity's (single) primary key field.
+pub const fn is_id_field(columns: &[ColumnMeta], field: &str) -> bool {
+    let mut i = 0;
+    while i < columns.len() {
+        if columns[i].primary_key && str_eq(columns[i].field, field) {
+            return true;
         }
-        impl<$e, $t> Copy for $name<$e, $t> {}
-        impl<$e, $t> $name<$e, $t> {
-            pub const fn new(name: &'static str) -> Self {
-                Self { name, _p: PhantomData }
-            }
-        }
-        impl<$e, $t> FieldProbe for $name<$e, $t> {
-            type Entity = $e;
-            type Field = $field;
-            fn name(&self) -> &'static str {
-                self.name
-            }
-        }
-    };
-}
 
-probe!(
-    /// Infers the kind from the field type.
-    Probe<E, T> => T
-);
-probe!(
-    /// `#[column(scalar)]`
-    ScalarProbe<E, T> => T
-);
-probe!(
-    /// `#[column(json)]` on a non-`Option` field.
-    JsonProbe<E, T> => T
-);
-probe!(
-    /// `#[column(json)]` on an `Option<U>` field; `None` is SQL `NULL`.
-    NullableJsonProbe<E, U> => Option<U>
-);
+        i += 1;
+    }
 
-pub trait ScalarLevel<T> {
-    fn __rupa_codec(&self) -> ScalarCodec<T>;
-}
-impl<E, T: ScalarColumn> ScalarLevel<T> for &&Probe<E, T> {
-    fn __rupa_codec(&self) -> ScalarCodec<T> {
-        ScalarCodec::new()
-    }
-}
-
-pub trait NullableJsonLevel<T> {
-    fn __rupa_codec(&self) -> NullableJsonCodec<T>;
-}
-impl<E, T: JsonColumn> NullableJsonLevel<T> for &Probe<E, Option<T>> {
-    fn __rupa_codec(&self) -> NullableJsonCodec<T> {
-        NullableJsonCodec::new()
-    }
-}
-
-pub trait JsonLevel<T> {
-    fn __rupa_codec(&self) -> JsonCodec<T>
-    where
-        T: JsonColumn;
-}
-impl<E, T> JsonLevel<T> for Probe<E, T> {
-    fn __rupa_codec(&self) -> JsonCodec<T>
-    where
-        T: JsonColumn,
-    {
-        JsonCodec::new()
-    }
-}
-
-impl<E, T: ScalarColumn> ScalarProbe<E, T> {
-    pub fn __rupa_codec(&self) -> ScalarCodec<T> {
-        ScalarCodec::new()
-    }
-}
-impl<E, T: JsonColumn> JsonProbe<E, T> {
-    pub fn __rupa_codec(&self) -> JsonCodec<T> {
-        JsonCodec::new()
-    }
-}
-impl<E, U: JsonColumn> NullableJsonProbe<E, U> {
-    pub fn __rupa_codec(&self) -> NullableJsonCodec<U> {
-        NullableJsonCodec::new()
-    }
-}
-
-pub fn column_from_probe<P: FieldProbe, C: Codec<P::Field>>(
-    probe: &P,
-    _codec: C,
-) -> Column<P::Entity, P::Field, C::Kind> {
-    Column::with_codec::<C>(probe.name())
+    false
 }
 
 /// Compile-time check that a companion struct's field of type `T` matches
-/// the entity field this probe describes. Implemented per probe type (not
-/// via `FieldProbe::Field`) so a mismatch reports this diagnostic.
+/// the entity field `Self` handles. Implemented for [`Column`] so a mismatch
+/// reports this diagnostic.
 #[diagnostic::on_unimplemented(
     message = "this field's type `{T}` does not match the entity's field",
     label = "expected the entity field's type",
-    note = "the entity field is described by `{Self}`"
+    note = "the entity field is `{Self}`"
 )]
 pub trait FieldIs<T> {
     /// The entity field type (always `T` when implemented).
     type Field;
+
+    /// `value`, as the entity field type.
     fn cast(value: &T) -> &Self::Field;
 }
-impl<E, T> FieldIs<T> for Probe<E, T> {
+
+impl<E, T, K> FieldIs<T> for Column<E, T, K> {
     type Field = T;
+
     fn cast(value: &T) -> &T {
-        value
-    }
-}
-impl<E, T> FieldIs<T> for ScalarProbe<E, T> {
-    type Field = T;
-    fn cast(value: &T) -> &T {
-        value
-    }
-}
-impl<E, T> FieldIs<T> for JsonProbe<E, T> {
-    type Field = T;
-    fn cast(value: &T) -> &T {
-        value
-    }
-}
-impl<E, U> FieldIs<Option<U>> for NullableJsonProbe<E, U> {
-    type Field = Option<U>;
-    fn cast(value: &Option<U>) -> &Option<U> {
         value
     }
 }
 
-pub fn assert_field_type<T, P: FieldIs<T>>(_probe: &P) {}
+/// Fails to compile unless `column` handles a field of type `T`.
+pub fn assert_field_type<T, C: FieldIs<T>>(_column: &C) {}
 
 /// `value` as the entity field type, checked by [`FieldIs`]. When the check
 /// fails, only that diagnostic is reported (not a second type mismatch).
-pub fn as_field<'a, T, P: FieldIs<T>>(_probe: &P, value: &'a T) -> &'a P::Field {
-    P::cast(value)
+pub fn as_field<'a, T, C: FieldIs<T>>(_column: &C, value: &'a T) -> &'a C::Field {
+    C::cast(value)
 }
 
 const fn str_eq(a: &str, b: &str) -> bool {
@@ -219,9 +170,4 @@ pub const fn missing_insert_field(
     }
 
     None
-}
-
-/// Const string equality, for generated checks.
-pub const fn same_str(a: &str, b: &str) -> bool {
-    str_eq(a, b)
 }

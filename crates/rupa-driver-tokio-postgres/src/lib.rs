@@ -1,10 +1,10 @@
 //! Async RUPA executor on [`tokio_postgres`].
 //!
 //! - [`PgExecutor`] wraps one `tokio_postgres::Client`.
-//! - With the `pool` feature, [`PgPool`] pools them (on `deadpool`).
+//! - With the `pool` feature, `PgPool` pools them (on `deadpool`).
 //! - With the `dynamic` feature, `PgDriver` registers the driver for
 //!   `postgres:` URLs (see `rupa_core::registry`).
-//! - With `tls-rustls`, [`PgPool::connect`] negotiates TLS on rustls as the
+//! - With `tls-rustls`, `PgPool::connect` negotiates TLS on rustls as the
 //!   URL's `sslmode` asks.
 //!
 //! # Performance
@@ -24,13 +24,18 @@
 //! a [`PgTx`], itself an executor, and `begin` on a `PgTx` opens a savepoint.
 //! Rust has no async `Drop`, so a `PgTx` dropped without `commit`/`rollback`
 //! cannot roll back on the spot. Instead it marks the executor dirty, and the
-//! rollback is sent before the connection's next statement; [`PgPool`] also
+//! rollback is sent before the connection's next statement; `PgPool` also
 //! cleans dirty connections when they are returned.
 
 #![warn(missing_docs)]
 
 #[cfg(feature = "dynamic")]
 mod driver;
+#[cfg(feature = "migrations")]
+mod migration_session;
+#[cfg(feature = "migration-protocol")]
+#[doc(hidden)]
+pub mod migrations;
 #[cfg(feature = "pool")]
 pub mod pool;
 #[doc(hidden)]
@@ -63,6 +68,8 @@ pub struct PgExecutor {
     dialect: Postgres,
     pending: PendingRollback,
     statements: StatementCache,
+    #[cfg(feature = "migrations")]
+    migration: migrations::State,
 }
 
 impl PgExecutor {
@@ -74,6 +81,8 @@ impl PgExecutor {
             dialect: Postgres,
             pending: PendingRollback::default(),
             statements: StatementCache::default(),
+            #[cfg(feature = "migrations")]
+            migration: migrations::State::default(),
         }
     }
 
@@ -174,6 +183,11 @@ impl AsyncExecutor for PgExecutor {
     }
 
     async fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
+        #[cfg(feature = "migrations")]
+        if self.migration.owner.is_some() || self.migration.poisoned {
+            return self.execute_migration_statement(statement, expect).await;
+        }
+
         self.run(statement, expect).await
     }
 }

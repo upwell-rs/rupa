@@ -1,5 +1,7 @@
 # Milestone 6: DSL functions and `rupa-dsl-std`
 
+> **Updated by #39:** `col!(Entity::field)` is now the derived constant `Entity::FIELD`. The design below keeps the original spelling.
+
 Status: **implemented.**
 
 ## `#[dsl::function]`

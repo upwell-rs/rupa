@@ -61,6 +61,7 @@ no database server, Docker, or database file.
 
 | Example | What it shows | Run |
 |---|---|---|
+| [SQL/Rust migrations](examples/migrations) | `db` crate with a discovered migration directory, applied by an `app` crate; immutable history, typed Rust data steps | `cargo run -p rupa-example-app` |
 | [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
 | [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
 | [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |
@@ -85,11 +86,13 @@ is a cargo feature of `rupa`:
 
 | feature | adds |
 |---|---|
+| `sync` | sync execution where a mode split exists (so far migrations: `rupa::migrate::sync`); enabled by sync drivers |
 | `async` | async executors, transactions, pools and `async fn` repository methods (no runtime by itself) |
 | `dynamic` | run-time driver selection and type erasure: `rupa::connect`, `rupa::registry()`, `Database`, boxed executors |
 | `tokio` | sync methods of async repositories block with tokio's `block_in_place` |
 | `tls-rustls` | TLS on rustls (ring) for every enabled networked driver |
-| `full` | every driver, plus `dynamic` |
+| `migrations` | explicit SQL/Rust migrations; native SQLite, and PostgreSQL on sync and tokio-postgres drivers ([guide](docs/migrations.md)) |
+| `full` | every driver, plus `dynamic` and `migrations` |
 
 Most applications know their database: use its pool directly
 (`rupa::drivers::sqlite::SqlitePool`, `rupa::drivers::postgres::PgPool`), which

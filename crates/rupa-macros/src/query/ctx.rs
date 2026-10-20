@@ -7,7 +7,7 @@ use quote::{quote, quote_spanned};
 use syn::{Ident, Type};
 
 use crate::dsl::{CmpOp, Expr};
-use crate::model::column_expr;
+use crate::model::column_path;
 
 /// `tokens` with every span set to `span`, so errors in generated code point
 /// at the user's token rather than at the whole attribute.
@@ -97,9 +97,7 @@ impl Ctx<'_> {
     /// A plain field: a column of the query's entity.
     pub(crate) fn column(&self, field: &Ident) -> syn::Result<TokenStream> {
         match &self.fields {
-            Fields::Entity(entity) => {
-                Ok(column_expr(self.ms, &quote!(#entity), field, field.span()))
-            }
+            Fields::Entity(entity) => Ok(column_path(&quote!(#entity), field)),
             Fields::Sources(_) | Fields::Known(..) => Err(syn::Error::new(
                 field.span(),
                 format!("name the field's entity: `Entity::{field}`"),
@@ -116,7 +114,7 @@ impl Ctx<'_> {
         match &self.fields {
             Fields::Sources(sources) => {
                 let ms = respan(self.ms, field.span());
-                let column = column_expr(self.ms, &quote!(#entity), field, field.span());
+                let column = column_path(&quote!(#entity), field);
                 Ok(quote_spanned!(field.span()=> #ms::source_col(&#sources, #column)))
             }
             Fields::Known(sources, known) => {
@@ -149,7 +147,7 @@ impl Ctx<'_> {
                         }
 
                         let ms = respan(self.ms, field.span());
-                        let column = column_expr(self.ms, &quote!(#entity), field, field.span());
+                        let column = column_path(&quote!(#entity), field);
                         return Ok(
                             quote_spanned!(field.span()=> #ms::source_col(&#sources, #column)),
                         );
@@ -166,7 +164,7 @@ impl Ctx<'_> {
                 };
                 let source = &known[at];
                 let index = syn::Index::from(at);
-                let column = column_expr(self.ms, &source.entity, field, field.span());
+                let column = column_path(&source.entity, field);
                 Ok(quote_spanned!(field.span()=> #sources.#index.col(#column)))
             }
             Fields::Entity(_) => Err(syn::Error::new(

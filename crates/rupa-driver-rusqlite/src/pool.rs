@@ -173,7 +173,7 @@ impl r2d2::ManageConnection for SqliteManager {
     }
 
     fn has_broken(&self, conn: &mut SqliteExecutor) -> bool {
-        conn.is_dirty() && conn.clean().is_err()
+        holds_migration_state(conn) || (conn.is_dirty() && conn.clean().is_err())
     }
 }
 
@@ -216,4 +216,19 @@ impl SqlitePool {
         let manager = SqliteManager::with_options(target, config.driver.sqlite()?);
         Self::new(manager, &config.pool).map_err(|e| ConnectError::Connect(DynError::new(e)))
     }
+}
+
+/// Whether a migration run left state on `conn`, so the pool must discard it
+/// instead of handing it out again.
+fn holds_migration_state(conn: &SqliteExecutor) -> bool {
+    #[cfg(feature = "migrations")]
+    let active = conn.migration.is_active();
+    #[cfg(not(feature = "migrations"))]
+    let active = {
+        let _ = conn;
+
+        false
+    };
+
+    active
 }

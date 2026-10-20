@@ -86,9 +86,7 @@ async fn dirty_connections_are_cleaned_on_return(url: &str) {
     let mut conn = small.get().await.unwrap();
     for n in 1..=4i64 {
         let ids: Vec<i64> = (0..n).collect();
-        let q = rupa::core::select::<Note>()
-            .filter(rupa::col!(Note::id).in_(ids))
-            .all();
+        let q = rupa::core::select::<Note>().filter(Note::ID.in_(ids)).all();
         rupa::core::exec::AsyncExecutor::run(&mut conn, q)
             .await
             .unwrap();

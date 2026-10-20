@@ -3,6 +3,8 @@
 
 #![warn(missing_docs)]
 
+#[cfg(feature = "async")]
+pub mod asynchronous;
 pub mod builder;
 pub mod capability;
 #[cfg(feature = "chrono")]
@@ -26,8 +28,10 @@ pub mod query;
 pub mod registry;
 pub mod repo;
 pub mod row;
+pub mod schema;
 pub mod security;
 pub mod sem;
+pub mod sync;
 pub mod tx;
 pub mod value;
 
@@ -41,7 +45,10 @@ pub mod __macro_support {
     pub use crate::builder::{delete, get, insert, raw, select, update};
     pub use crate::capability::{Deletable, Gettable, Insertable, Keyed, NoKey, Updatable, key_of};
     pub use crate::column::ReadAs;
-    pub use crate::column::{Column, ColumnMeta, Json, Scalar};
+    pub use crate::column::{
+        Column, ColumnKind, ColumnMeta, Encoding, Generated, Json, JsonCodec, Kinded,
+        NullableJsonCodec, Reference, Scalar, ScalarCodec, Stored,
+    };
     pub use crate::dialect::{Capability, CapabilityMarker, Dialect, DslAvailable, Supports, caps};
     pub use crate::entity::{Entity, FromRow, IdValues};
     pub use crate::error::ResultError;
@@ -61,13 +68,12 @@ pub mod __macro_support {
     pub use ::std::clone::Clone;
     pub use ::std::option::Option;
     pub use ::std::result::Result;
-    pub use ::std::sync::OnceLock;
     pub use ::std::vec::Vec;
 }
 
 pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
-pub use column::{Column, ColumnKind, ColumnMeta, Json, ReadAs, Scalar};
+pub use column::{Column, ColumnKind, ColumnMeta, Generated, Json, ReadAs, Reference, Scalar};
 pub use config::{DbConfig, PoolConfig};
 pub use dialect::{
     Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, MySql, Postgres, Sqlite,
@@ -108,7 +114,6 @@ pub use value::{ScalarColumn, SqlType, Value};
 
 /// The names most code needs: `use rupa_core::prelude::*`.
 pub mod prelude {
-    pub use crate::col;
     pub use crate::{
         Column, Deletable, Entity, Expr, ExprOps, FromRow, Gettable, Insertable, IntoExpr, Json,
         Query, Scalar, Updatable, bind, delete, get, insert, raw, select, update,

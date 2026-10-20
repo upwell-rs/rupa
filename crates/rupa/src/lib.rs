@@ -12,7 +12,8 @@
 //! | `dynamic` | run-time driver selection and type erasure ([`registry()`], [`connect`], `Database`) |
 //! | `postgres`, `postgres-sync`, `sqlite`, `sqlite-unbundled`, `mysql`, `memory`, `sqlx-*` | drivers |
 //! | `tls-rustls` | TLS for every enabled networked driver |
-//! | `full` | every driver, plus `dynamic` |
+//! | `migrations` | explicit SQL/Rust migration catalogs and native SQLite apply |
+//! | `full` | every driver, plus `dynamic` and `migrations` |
 //!
 //! # Statically typed (the default)
 //!
@@ -45,6 +46,8 @@ mod registry;
 pub use rupa_core as core;
 pub use rupa_dsl_std as dsl_std;
 pub use rupa_macros as macros;
+#[cfg(feature = "migrations")]
+pub use rupa_migrate as migrate;
 pub use rupa_sql as sql;
 
 #[cfg(feature = "dynamic")]
@@ -71,7 +74,7 @@ pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional};
 pub use rupa_core::tx::{IsolationLevel, Transaction, Transactional, TxOptions};
 pub use rupa_core::{
     Acquire, Column, Deletable, Entity, Executor, Expr, ExprOps, FromRow, Gettable, Insertable,
-    Json, NoKey, Query, Repo, RepoMut, RepoView, Scalar, Shared, TxSession, Updatable, bind, col,
+    Json, NoKey, Query, Repo, RepoMut, RepoView, Scalar, Shared, TxSession, Updatable, bind,
     delete, get, insert, raw, select, update,
 };
 #[cfg(feature = "async")]
@@ -129,4 +132,10 @@ pub mod prelude {
     pub use rupa_macros::{
         Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository,
     };
+    #[cfg(feature = "migrations")]
+    #[allow(
+        unused_imports,
+        reason = "empty unless exactly one migration mode is enabled"
+    )]
+    pub use rupa_migrate::prelude::*;
 }

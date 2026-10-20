@@ -11,7 +11,7 @@ fn note(title: &str) -> NewNote {
 
 async fn titles<E: AsyncExecutor>(e: &mut E) -> Vec<String> {
     let notes = e
-        .run(select::<Note>().order_by(col!(Note::id).asc()).all())
+        .run(select::<Note>().order_by(Note::ID.asc()).all())
         .await
         .expect("select");
     notes.into_iter().map(|n| n.title).collect()

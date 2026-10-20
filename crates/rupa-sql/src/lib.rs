@@ -19,6 +19,7 @@ use rupa_core::ir::{SourceId, Statement, TxStatement};
 use rupa_core::{Dialect, DialectId, DslError, Query, Value};
 
 pub mod cache;
+pub mod ddl;
 mod driver_error;
 mod mysql;
 mod postgres;
@@ -26,6 +27,7 @@ mod sqlite;
 mod writer;
 
 pub use cache::{CacheStats, CachedSql, RenderCache, render_cache, render_cached};
+pub use ddl::{SchemaError, render_schema};
 
 /// SQL text and its parameters, in placeholder order.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,6 +76,16 @@ pub enum RenderError {
     /// More joined sources than a `SourceId` can number.
     #[error("too many joined sources")]
     TooManySources,
+    /// A schema operation the dialect cannot express. Boxed so driver errors,
+    /// which embed render errors, stay small.
+    #[error(transparent)]
+    Schema(Box<SchemaError>),
+}
+
+impl From<SchemaError> for RenderError {
+    fn from(error: SchemaError) -> Self {
+        Self::Schema(Box::new(error))
+    }
 }
 
 fn syntax_for(dialect: &dyn Dialect) -> Result<&'static dyn writer::Syntax, RenderError> {
