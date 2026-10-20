@@ -1,17 +1,30 @@
+use std::ops::Range;
+
 use super::{ScriptError, ScriptRule, line_comment, quoted};
 
 /// PostgreSQL has no client-side authorizer, so statement classes the runner
 /// owns are refused lexically, assuming `standard_conforming_strings`.
 /// Dollar-quoted bodies are opaque: what they execute is the author's trust
 /// boundary, guarded by the session's transaction and lock checks.
-pub(super) fn validate(sql: &str) -> Result<(), ScriptError> {
+///
+/// Returns the byte range of every statement holding more than whitespace and
+/// comments, without its terminating semicolon.
+pub(super) fn statements(sql: &str) -> Result<Vec<Range<usize>>, ScriptError> {
     let bytes = sql.as_bytes();
+    let mut ranges = Vec::new();
     let mut statement = Statement::default();
+    let mut begin = 0;
+    let mut significant = false;
     let mut index = 0;
 
     while index < bytes.len() {
         let start = index;
+        let inert = matches!(
+            &bytes[index..],
+            [b'-', b'-', ..] | [b'/', b'*', ..] | [b';', ..]
+        ) || bytes[index].is_ascii_whitespace();
 
+        significant |= !inert;
         index = match bytes[index] {
             b'\'' => quoted(bytes, index, b'\'', true)?,
             b'"' => {
@@ -26,7 +39,13 @@ pub(super) fn validate(sql: &str) -> Result<(), ScriptError> {
             b'$' => dollar_quoted(bytes, index)?,
             b'\\' => return Err(forbidden(ScriptRule::ClientCommand, start)),
             b';' => {
+                if significant {
+                    ranges.push(begin..start);
+                }
+
                 statement = Statement::default();
+                begin = index + 1;
+                significant = false;
 
                 index + 1
             }
@@ -45,7 +64,11 @@ pub(super) fn validate(sql: &str) -> Result<(), ScriptError> {
         };
     }
 
-    Ok(())
+    if significant {
+        ranges.push(begin..bytes.len());
+    }
+
+    Ok(ranges)
 }
 
 /// The leading keyword of a statement whose meaning depends on later words.

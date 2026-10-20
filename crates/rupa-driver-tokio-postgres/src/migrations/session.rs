@@ -5,6 +5,9 @@
 macro_rules! __pg_migration_session {
     ([$($async:tt)*] [$($await:tt)*] $session:path) => {
         impl $session for PgExecutor {
+            const POLICIES: &'static [Policy] =
+                &[Policy::TransactionalRequired, Policy::NonTransactional];
+
             $($async)* fn acquire(
                 &mut self,
                 stream: &str,
@@ -57,7 +60,7 @@ macro_rules! __pg_migration_session {
             $($async)* fn start_attempt(&mut self, entry: &CatalogEntry) -> Result<i64, Error<PgError>> {
                 self.verify_owner() $($await)*?;
 
-                if self.migration.attempt.is_some() || self.migration.transaction.is_some() {
+                if self.migration.attempt.is_some() || self.migration.body.is_some() {
                     return Err(Error::History(
                         "a previous attempt remains unresolved".into(),
                     ));
@@ -83,10 +86,24 @@ macro_rules! __pg_migration_session {
                 Ok(id)
             }
 
-            $($async)* fn begin_migration(&mut self) -> Result<(), Error<PgError>> {
+            /// An autocommit body is marked begun only after ownership is
+            /// verified, so a failure here records a replayable failed attempt
+            /// instead of an uncertain one: no statement has run yet.
+            $($async)* fn begin_migration(&mut self, policy: Policy) -> Result<(), Error<PgError>> {
                 self.statements.clear();
+
+                if policy == Policy::NonTransactional {
+                    self.verify_owner() $($await)*?;
+                    self.migration.body = Some(Body::Autocommit);
+
+                    return Ok(());
+                }
+
                 self.client.batch_execute("BEGIN") $($await)* .map_err(db)?;
-                self.migration.transaction = Some(self.current_transaction() $($await)*?);
+
+                let transaction = self.current_transaction() $($await)*?;
+
+                self.migration.body = Some(Body::Transaction(transaction));
 
                 self.verify_owner() $($await)*
             }
@@ -102,19 +119,30 @@ macro_rules! __pg_migration_session {
                     self.migration.poisoned = true;
                 } else {
                     self.migration.attempt = None;
-                    self.migration.transaction = None;
+                    self.migration.body = None;
                 }
 
                 result
             }
 
+            /// A nontransactional body's effects may persist, so its attempt
+            /// stays durably unresolved rather than being recorded as failed,
+            /// which would permit a replay.
             $($async)* fn abort(&mut self, attempt: i64) -> Result<(), Error<PgError>> {
-                if self.migration.transaction.take().is_some()
-                    && let Err(error) = self.client.batch_execute("ROLLBACK") $($await)*
-                {
-                    self.migration.poisoned = true;
+                match self.migration.body.take() {
+                    Some(Body::Autocommit) => {
+                        self.migration.attempt = None;
 
-                    return Err(db(error));
+                        return Err(Error::Uncertain(attempt));
+                    }
+                    Some(Body::Transaction(_)) => {
+                        if let Err(error) = self.client.batch_execute("ROLLBACK") $($await)* {
+                            self.migration.poisoned = true;
+
+                            return Err(db(error));
+                        }
+                    }
+                    None => {}
                 }
 
                 self.verify_owner() $($await)*?;
@@ -140,7 +168,7 @@ macro_rules! __pg_migration_session {
             $($async)* fn release(&mut self) -> Result<(), Error<PgError>> {
                 self.verify_owner() $($await)*?;
 
-                if self.migration.attempt.is_some() || self.migration.transaction.is_some() {
+                if self.migration.attempt.is_some() || self.migration.body.is_some() {
                     self.migration.poisoned = true;
 
                     return Err(Error::History(
@@ -183,7 +211,10 @@ macro_rules! __pg_migration_session {
                     .user_state()
                     .map_err(|state| Error::Database(PgError::Migration(state)))?;
 
-                let result = self.client.batch_execute(sql) $($await)* .map_err(db);
+                let result = match self.migration.body {
+                    Some(Body::Autocommit) => self.autocommit_script(sql) $($await)*,
+                    _ => self.client.batch_execute(sql) $($await)* .map_err(db),
+                };
 
                 self.statements.clear();
 

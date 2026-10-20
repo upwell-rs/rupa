@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rupa_migrate::{Version, VersionScheme};
+use rupa_migrate::{Policy, Version, VersionScheme};
 
 use super::Error;
-use super::header::{self, Split};
+use super::header::{self, Header};
 use super::isolation::{self, Layout};
 use super::kind;
 use super::render::pascal;
@@ -22,6 +22,7 @@ pub(super) struct Artifact {
     pub(super) name: String,
     pub(super) description: String,
     pub(super) documented: bool,
+    pub(super) policy: Policy,
     pub(super) body: Body,
 }
 
@@ -181,24 +182,24 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| Error::Utf8(path.to_path_buf()))?;
-    let (description, body) = match entry {
+    let (header, body) = match entry {
         Entry::Sql => {
             let source = read(path)?;
-            let Split { description, body } = header::split(&source, SQL_MARKER);
-            let input = Input::new(file_name.to_owned(), body, path)?;
+            let split = header::split(&source, SQL_MARKER);
+            let input = Input::new(file_name.to_owned(), split.body, path)?;
 
-            (description, Body::Sql(input))
+            (split.header(path)?, Body::Sql(input))
         }
         Entry::RustFile if planned(path, file_name, &name)? => planned_body(path, path)?,
         Entry::RustDir if planned(&path.join(RUST_ROOT), file_name, &name)? => {
             planned_body(&path.join(RUST_ROOT), path)?
         }
         Entry::RustFile => {
-            let (description, input) = rust_input(path, file_name.to_owned(), Layout::File)?;
+            let (header, input) = rust_input(path, file_name.to_owned(), Layout::File)?;
             let module = path.to_path_buf();
 
             (
-                description,
+                header,
                 Body::Rust {
                     module,
                     inputs: vec![input],
@@ -208,21 +209,22 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
         }
         Entry::RustDir => rust_dir(path, file_name)?,
     };
-    let documented = description.is_some();
-    let description = description.unwrap_or_else(|| name.replace('_', " "));
+    let documented = header.description.is_some();
+    let description = header.description.unwrap_or_else(|| name.replace('_', " "));
 
     Ok(Artifact {
         version,
         name,
         description,
         documented,
+        policy: header.frontmatter.unwrap_or_default().policy,
         body,
     })
 }
 
-fn rust_dir(dir: &Path, prefix: &str) -> Result<(Option<String>, Body), Error> {
+fn rust_dir(dir: &Path, prefix: &str) -> Result<(Header, Body), Error> {
     let module = dir.join(RUST_ROOT);
-    let mut description = None;
+    let mut root = None;
     let mut inputs = Vec::new();
 
     if !module.is_file() {
@@ -245,7 +247,9 @@ fn rust_dir(dir: &Path, prefix: &str) -> Result<(Option<String>, Body), Error> {
             )?;
 
             if depth == 0 {
-                description = header;
+                root = Some(header);
+            } else if header.frontmatter.is_some() {
+                return Err(Error::HelperFrontmatter(path));
             }
 
             inputs.push(input);
@@ -256,8 +260,10 @@ fn rust_dir(dir: &Path, prefix: &str) -> Result<(Option<String>, Body), Error> {
         }
     }
 
+    let header = root.ok_or_else(|| Error::Name(dir.to_path_buf()))?;
+
     Ok((
-        description,
+        header,
         Body::Rust {
             module,
             inputs,
@@ -276,10 +282,10 @@ fn planned(root: &Path, logical: &str, name: &str) -> Result<bool, Error> {
     kind::planned(logical, &read(root)?, &pascal(name))
 }
 
-/// A planned Rust migration: its root's description, and no hashed inputs.
-fn planned_body(root: &Path, module: &Path) -> Result<(Option<String>, Body), Error> {
+/// A planned Rust migration: its root's header, and no hashed inputs.
+fn planned_body(root: &Path, module: &Path) -> Result<(Header, Body), Error> {
     let source = read(root)?;
-    let description = header::split(&source, RUST_MARKER).description;
+    let header = header::split(&source, RUST_MARKER).header(root)?;
     let module = if module.is_dir() {
         root.to_path_buf()
     } else {
@@ -287,7 +293,7 @@ fn planned_body(root: &Path, module: &Path) -> Result<(Option<String>, Body), Er
     };
 
     Ok((
-        description,
+        header,
         Body::Rust {
             module,
             inputs: Vec::new(),
@@ -296,19 +302,15 @@ fn planned_body(root: &Path, module: &Path) -> Result<(Option<String>, Body), Er
     ))
 }
 
-fn rust_input(
-    path: &Path,
-    logical: String,
-    layout: Layout<'_>,
-) -> Result<(Option<String>, Input), Error> {
+fn rust_input(path: &Path, logical: String, layout: Layout<'_>) -> Result<(Header, Input), Error> {
     let source = read(path)?;
 
     isolation::check(&logical, &source, layout)?;
 
-    let Split { description, body } = header::split(&source, RUST_MARKER);
-    let input = Input::new(logical, body, path)?;
+    let split = header::split(&source, RUST_MARKER);
+    let input = Input::new(logical, split.body, path)?;
 
-    Ok((description, input))
+    Ok((split.header(path)?, input))
 }
 
 /// Every regular file below `dir`, with its path components relative to `dir`.

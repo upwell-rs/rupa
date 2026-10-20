@@ -87,7 +87,26 @@ Leading zeros are dropped for numbered versions, so `1_a.sql` and `001_b.sql`
 collide at build time. Leading `--` (SQL) or `//!` (Rust) lines are the
 description; they are excluded from the hashed and executed body, so rewording
 them never changes a checksum. Without a header, the name (`create notes`) is
-used. Unrecognized entries fail the build; dotfiles are ignored. The build reruns
+used.
+
+From its first line starting with `rupa:`, the header is YAML frontmatter
+instead of description, with the comment markers removed:
+
+```sql
+-- Index titles without blocking writes.
+-- rupa:
+--   policy: nontransactional
+```
+
+The flow form `-- rupa: { policy: nontransactional }` is the same document.
+`policy` is `transactional` (the default) or `nontransactional` (see
+[nontransactional migrations](#nontransactional-migrations)), and is part of
+the checksum. Unknown keys or values and malformed YAML fail the build with the
+parser's location. Only the migration root (its `.sql` file, `.rs` file or
+`mod.rs`) declares frontmatter: a scripted directory migration's `.rs` helper
+with a `rupa:` header fails the build, and a planned directory migration's
+helpers and non-Rust helpers are never header-parsed. Unrecognized entries
+fail the build; dotfiles are ignored. The build reruns
 when the directory changes, so added or removed files never leave a stale catalog.
 
 ### Scripted and planned Rust migrations
@@ -214,10 +233,12 @@ Pools discard a connection a run left in this or any other unfinished state,
 instead of handing it out again. A consumed connection is simply
 closed, which on PostgreSQL rolls back the open transaction and releases the
 lock; the journaled attempt stays running and blocks the next apply until it is
-reconciled. Nothing an abandoned body did is committed.
+reconciled. Nothing an abandoned transactional body did is committed.
 
-The initial apply path is strict: transactional incremental migrations only.
-Unsupported policy/kind is rejected before initialization. A nonempty unmanaged
+The apply path is strict: incremental migrations only, with the policies the
+session supports (`Session::POLICIES`). An unsupported policy or kind is
+rejected before initialization and is never downgraded: SQLite runs
+`TransactionalRequired` only, PostgreSQL also `NonTransactional`. A nonempty unmanaged
 target is refused; absence of a history table is not proof of freshness.
 Changed or missing applied artifacts and late arrivals block pending work.
 There is no silent reordering, checksum replacement or automatic body retry.
@@ -225,7 +246,9 @@ There is no silent reordering, checksum replacement or automatic body retry.
 ## Authoring
 
 Use `sql_migration!` for a zero-sized type backed by an explicitly named SQL file,
-then put `Planned<ThatType>` in `migration_catalog!`. Native SQLite parses scripts,
+then put `Planned<ThatType>` in `migration_catalog!`. An optional
+`policy: NonTransactional,` field (before `up`) declares nontransactional work;
+it defaults to `TransactionalRequired`. Native SQLite parses scripts,
 so quoted/comment semicolons are not split manually. Planned SQL is normalized
 and checksummed independently of any dialect; `apply` lexically checks it with
 the session dialect's grammar before acquiring the target. SQLite and
@@ -306,14 +329,49 @@ lock, so a dropped or crashed runner leaves only its running attempt behind,
 which blocks the next apply with `Error::Uncertain`. A connection already inside
 an application transaction is rejected.
 
-Before dispatching a body, its attempt is durable. Schema/data effects, installed
-history and attempt completion commit together. If a body fails, acknowledged
-rollback records a failed attempt and releases the claim. Earlier completed
+Before dispatching a body, its attempt is durable. A transactional body's
+schema/data effects, installed history and attempt completion commit together.
+If a transactional body fails,
+acknowledged rollback records a failed attempt and releases the claim. Earlier completed
 migrations remain installed. Errors preserve the failed version, typed body or
 driver cause, the versions this invocation already committed (`applied()`), and
 additional cleanup failures. Misusing a migration connection outside a
 runner-owned transaction fails with a typed `StateError`
 (`SqliteError::Migration`, `PgError::Migration`).
+
+### Nontransactional migrations
+
+Some statements refuse to run inside a transaction, such as PostgreSQL's
+`CREATE INDEX CONCURRENTLY`. A migration declaring `Policy::NonTransactional`
+runs its whole body without an artifact transaction:
+
+```sql
+-- Index titles without blocking writes.
+-- rupa:
+--   policy: nontransactional
+CREATE INDEX CONCURRENTLY notes_title ON notes (title);
+```
+
+Its attempt is journaled before the body starts. Each statement of a script is
+then sent on its own, because several statements in one PostgreSQL request share
+an implicit transaction. The script is split by the same grammar that validated
+it as a whole before the first statement ran (`rupa_migrate::split_script`). After
+the body returns, history and attempt completion commit together in a
+framework transaction, still under the advisory lock. Transactional and
+nontransactional migrations can be mixed in one catalog and run in version order.
+Keep each nontransactional migration small: one artifact cannot mix policies.
+
+Effects are not atomic. If the body fails, statements that already ran stay
+committed. The attempt is therefore **not** recorded as failed, which would
+permit a replay. It stays unresolved, and the run's `RunError::Migration` lists
+`Error::Uncertain(attempt)` among its cleanup errors. The lock is released
+normally, and every later apply fails with `Error::Uncertain` until the
+attempt is reconciled. An interrupted body or a lost completion write leaves
+the same state. Write nontransactional statements so an operator can inspect
+what ran (e.g. `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, then checking for an
+invalid index).
+
+### Interruption
 
 On interruption or an uncertain commit, a claim/running attempt can remain.
 There is no safe automatic timeout takeover. Stop the old runner, inspect history
@@ -322,7 +380,8 @@ ownership; a supported recovery command is a later slice. Do not delete history
 or clear a claim merely because a client timeout elapsed. This first slice
 reports uncertainty and blocks further apply instead of guessing.
 
-sqlx sessions, MySQL, snapshots/adoption, authored down
-migrations, nontransactional work (such as `CREATE INDEX CONCURRENTLY`), allowed
-late application and operator recovery are not yet implemented. Their accepted
+sqlx sessions, MySQL, nontransactional work on SQLite, snapshots/adoption,
+authored down migrations, allowed late application and operator recovery
+(asserting that uncertain work completed or was restored) are not yet
+implemented. Their accepted
 design is in [the migration contract](design/migrations-contract.md).

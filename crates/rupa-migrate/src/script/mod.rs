@@ -2,6 +2,7 @@ mod postgres;
 mod sqlite;
 
 use std::fmt;
+use std::ops::Range;
 
 use rupa_core::dialect::DialectId;
 
@@ -64,7 +65,21 @@ impl fmt::Display for ScriptRule {
 pub fn validate_script(sql: &str, dialect: DialectId) -> Result<(), ScriptError> {
     match dialect {
         DialectId::Sqlite => sqlite::validate(sql),
-        DialectId::Postgres => postgres::validate(sql),
+        DialectId::Postgres => postgres::statements(sql).map(drop),
+        _ => Err(ScriptError::Dialect(dialect)),
+    }
+}
+
+/// Validates a whole script, then returns the source byte range of each of
+/// its statements, without terminating semicolons, comment-only or empty ones.
+///
+/// Drivers use it to dispatch statements one at a time where a single
+/// multi-statement request would run in one implicit transaction. Only
+/// dialects whose grammar knows every statement boundary can be split: SQLite
+/// trigger bodies, for one, contain unquoted semicolons.
+pub fn split_script(sql: &str, dialect: DialectId) -> Result<Vec<Range<usize>>, ScriptError> {
+    match dialect {
+        DialectId::Postgres => postgres::statements(sql),
         _ => Err(ScriptError::Dialect(dialect)),
     }
 }

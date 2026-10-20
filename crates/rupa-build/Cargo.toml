@@ -10,5 +10,7 @@ description = "Build-script helpers that generate RUPA code from project layouts
 [dependencies]
 rupa-migrate.workspace = true
 thiserror.workspace = true
+serde.workspace = true
+serde-saphyr.workspace = true
 syn = { workspace = true, features = ["visit"] }
 proc-macro2.workspace = true

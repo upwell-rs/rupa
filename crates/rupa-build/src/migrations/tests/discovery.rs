@@ -1,3 +1,5 @@
+use rupa_migrate::Policy;
+
 use super::discover::Body;
 use super::*;
 
@@ -297,5 +299,72 @@ fn scripted_migrations_stay_isolated_and_kinds_do_not_mix() {
     assert!(matches!(
         mixed.discover(VersionScheme::Numbered),
         Err(Error::MixedKinds(path)) if path == "1_mixed.rs"
+    ));
+}
+
+#[test]
+fn frontmatter_sets_each_migrations_policy() {
+    let fixture = Fixture::new(&[
+        ("1_create.sql", "CREATE TABLE notes (title text);\n"),
+        (
+            "2_index.sql",
+            "-- Index titles without blocking writes.\n-- rupa:\n--   policy: nontransactional\nCREATE INDEX CONCURRENTLY notes_title ON notes (title);\n",
+        ),
+        (
+            "3_backfill.rs",
+            "//! rupa: { policy: nontransactional }\npub struct Backfill;\n",
+        ),
+        (
+            "4_split/mod.rs",
+            "//! rupa:\n//!   policy: nontransactional\nmod helper;\npub struct Split;\n",
+        ),
+        ("4_split/helper.rs", "pub(super) fn step() {}\n"),
+    ]);
+
+    let artifacts = fixture
+        .discover(VersionScheme::Numbered)
+        .expect("valid directory");
+    let source = Migrations::new("primary")
+        .generate(fixture.path())
+        .expect("generated catalog");
+
+    assert_eq!(
+        artifacts.iter().map(|a| a.policy).collect::<Vec<_>>(),
+        [
+            Policy::TransactionalRequired,
+            Policy::NonTransactional,
+            Policy::NonTransactional,
+            Policy::NonTransactional,
+        ]
+    );
+    assert_eq!(
+        artifacts[1].description,
+        "Index titles without blocking writes."
+    );
+    assert_eq!(
+        source.matches("Policy::NonTransactional,").count(),
+        3,
+        "{source}"
+    );
+}
+
+#[test]
+fn frontmatter_must_be_known_and_declared_by_the_root() {
+    let unknown = Fixture::new(&[("1_x.sql", "-- rupa:\n--   autocommit: true\nSELECT 1;\n")]);
+    let helper = Fixture::new(&[
+        ("1_split/mod.rs", "mod helper;\npub struct Split;\n"),
+        (
+            "1_split/helper.rs",
+            "//! rupa: { policy: nontransactional }\npub(super) fn step() {}\n",
+        ),
+    ]);
+
+    assert!(matches!(
+        unknown.discover(VersionScheme::Numbered),
+        Err(Error::Frontmatter { message, .. }) if message.contains("autocommit")
+    ));
+    assert!(matches!(
+        helper.discover(VersionScheme::Numbered),
+        Err(Error::HelperFrontmatter(path)) if path.ends_with("helper.rs")
     ));
 }

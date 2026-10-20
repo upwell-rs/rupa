@@ -28,6 +28,8 @@ mod control;
 mod exclusion;
 #[path = "cases/history.rs"]
 mod history;
+#[path = "cases/nontransactional.rs"]
+mod nontransactional;
 #[path = "cases/schema.rs"]
 mod schema;
 

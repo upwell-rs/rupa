@@ -239,29 +239,41 @@ macro_rules! __pg_migration_control {
                 self.client.batch_execute("COMMIT") $($await)* .map_err(db)
             }
 
-            /// Commits only if the body left the artifact transaction it was
-            /// given: the transaction id proves no statement committed or replaced it.
+            /// Commits history and attempt completion with the artifact's
+            /// effects. A transactional body must have left the artifact
+            /// transaction it was given: the transaction id proves no statement
+            /// committed or replaced it. A nontransactional body's effects are
+            /// already committed, so completion opens its own transaction.
             $($async)* fn checked_completion(
                 &mut self,
                 attempt: i64,
                 entry: &CatalogEntry,
             ) -> Result<(), Error<PgError>> {
+                let body = self.migration.body;
+
+                if self.migration.attempt != Some(attempt) {
+                    return Err(Error::History(
+                        "attempt completion did not match the running attempt".into(),
+                    ));
+                }
+
+                match body {
+                    Some(Body::Transaction(id)) if id == self.current_transaction() $($await)*? => {}
+                    Some(Body::Autocommit) => {
+                        self.client.batch_execute("BEGIN") $($await)* .map_err(db)?
+                    }
+                    _ => {
+                        return Err(Error::History(
+                            "artifact transaction ended outside runner control".into(),
+                        ));
+                    }
+                }
+
                 self.verify_owner() $($await)*?;
 
                 let namespace = self.migration.owned_namespace()?;
 
                 self.validate_schema(&namespace) $($await)*?;
-
-                let transaction = self.migration.transaction;
-
-                if self.migration.attempt != Some(attempt)
-                    || transaction.is_none()
-                    || transaction != Some(self.current_transaction() $($await)*?)
-                {
-                    return Err(Error::History(
-                        "artifact transaction ended outside runner control".into(),
-                    ));
-                }
 
                 let history = self.migration.reserved(sql::HISTORY)?;
                 let attempts = self.migration.reserved(sql::ATTEMPTS)?;
@@ -286,6 +298,24 @@ macro_rules! __pg_migration_control {
                 }
 
                 self.client.batch_execute("COMMIT") $($await)* .map_err(db)
+            }
+
+            /// Sends each statement of a script as its own request: several
+            /// statements in one simple query share an implicit transaction,
+            /// which statements such as `CREATE INDEX CONCURRENTLY` refuse. The
+            /// first failure stops the script; earlier statements stay committed.
+            $($async)* fn autocommit_script(&mut self, sql: &str) -> Result<(), Error<PgError>> {
+                let statements = $crate::migrations::rupa_migrate::split_script(
+                    sql,
+                    $crate::migrations::rupa_core::DialectId::Postgres,
+                )
+                .map_err(|e| Error::Validation(e.into()))?;
+
+                for statement in statements {
+                    self.client.batch_execute(&sql[statement]) $($await)* .map_err(db)?;
+                }
+
+                Ok(())
             }
 
             /// Typed queries in a migration are refused by the same grammar as

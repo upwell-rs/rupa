@@ -1,5 +1,5 @@
 use rupa_migrate::sync::Session;
-use rupa_migrate::{CatalogEntry, Checksum, Error, HistoryEntry, VersionScheme};
+use rupa_migrate::{CatalogEntry, Checksum, Error, HistoryEntry, Policy, VersionScheme};
 
 use super::{SqliteExecutor, db};
 use crate::SqliteError;
@@ -89,10 +89,17 @@ impl Session for SqliteExecutor {
         Ok(id)
     }
 
-    fn begin_migration(&mut self) -> Result<(), Error<SqliteError>> {
+    fn begin_migration(&mut self, policy: Policy) -> Result<(), Error<SqliteError>> {
+        if !Self::POLICIES.contains(&policy) {
+            return Err(Error::History(format!(
+                "SQLite migration sessions cannot run {policy:?} bodies"
+            )));
+        }
+
         self.connection()
             .execute_batch("BEGIN IMMEDIATE")
             .map_err(db)?;
+
         self.verify_owner()
     }
 

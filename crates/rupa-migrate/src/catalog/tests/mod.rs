@@ -178,3 +178,35 @@ fn checksum_separates_operation_records_from_input_records() {
         "a source named sql must not alias another operation"
     );
 }
+
+crate::sql_migration! {
+    /// Declares no policy, so it requires a transaction.
+    struct DefaultPolicy {
+        version: "1",
+        description: "default policy",
+        up: "body.sql",
+    }
+}
+
+crate::sql_migration! {
+    /// Declares nontransactional execution.
+    struct DeclaredPolicy {
+        version: "1",
+        description: "declared policy",
+        policy: NonTransactional,
+        up: "body.sql",
+    }
+}
+
+#[test]
+fn sql_migrations_declare_their_policy_into_the_checksum() {
+    let default = DefaultPolicy.info();
+    let declared = DeclaredPolicy.info();
+
+    assert_eq!(default.policy, Policy::TransactionalRequired);
+    assert_eq!(declared.policy, Policy::NonTransactional);
+    assert_ne!(
+        digest(Planned(DefaultPolicy)).expect("default checksum"),
+        digest(Planned(DeclaredPolicy)).expect("declared checksum")
+    );
+}

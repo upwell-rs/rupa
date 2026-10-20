@@ -1,11 +1,14 @@
 /// Embeds a SQL file in a zero-sized planned migration. Paths are relative to
 /// the invoking source file, as with `include_str!`; explicit catalogs track
 /// changes to each referenced file through normal Rust dependency tracking.
+/// `policy` names a [`Policy`](crate::Policy) variant and defaults to
+/// `TransactionalRequired`.
 #[macro_export]
 macro_rules! sql_migration {
     ($(#[$meta:meta])* $vis:vis struct $name:ident {
         version: $version:literal,
         description: $description:literal,
+        $(policy: $policy:ident,)?
         up: $path:literal $(,)?
     }) => {
         $(#[$meta])*
@@ -17,7 +20,7 @@ macro_rules! sql_migration {
                 const INFO: $crate::Metadata = $crate::Metadata {
                     version: $version,
                     description: $description,
-                    policy: $crate::Policy::TransactionalRequired,
+                    policy: $crate::__policy!($($policy)?),
                     kind: $crate::MigrationKind::Incremental,
                     inputs: &[$crate::ArtifactInput::new($path, ::std::include_str!($path))],
                 };
@@ -31,6 +34,18 @@ macro_rules! sql_migration {
                 $crate::Plan::new().sql(::std::include_str!($path))
             }
         }
+    };
+}
+
+/// The declared policy of a SQL migration, `TransactionalRequired` when omitted.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __policy {
+    () => {
+        $crate::Policy::TransactionalRequired
+    };
+    ($policy:ident) => {
+        $crate::Policy::$policy
     };
 }
 

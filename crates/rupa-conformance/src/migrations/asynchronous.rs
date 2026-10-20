@@ -44,6 +44,10 @@ impl<H: super::sync::Harness> Target for Blocked<H> {
     fn forbidden_scripts(&self) -> &'static [&'static str] {
         self.0.forbidden_scripts()
     }
+
+    fn outside_transaction_script(&self) -> &'static str {
+        self.0.outside_transaction_script()
+    }
 }
 
 impl<H: super::sync::Harness> Harness for Blocked<H> {
@@ -73,6 +77,9 @@ mod exclusion {
 }
 mod history {
     include!("cases/history.rs");
+}
+mod nontransactional {
+    include!("cases/nontransactional.rs");
 }
 mod schema {
     include!("cases/schema.rs");

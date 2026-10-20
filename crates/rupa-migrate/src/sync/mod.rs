@@ -5,7 +5,7 @@ use rupa_core::sync::Connection;
 
 use crate::runner::mode;
 use crate::{
-    ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, MigrationInfo, Plan, RunError,
+    ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, MigrationInfo, Plan, Policy, RunError,
     VersionScheme,
 };
 
@@ -16,6 +16,11 @@ use crate::{
 /// across artifact commits. Dropping an interrupted session must close its
 /// connection; an unresolved durable claim must never expire automatically.
 pub trait Session: Connection {
+    /// The execution policies this session can honour. A catalog containing
+    /// any other policy is rejected before the target is touched; a policy is
+    /// never downgraded.
+    const POLICIES: &'static [Policy] = &[Policy::TransactionalRequired];
+
     /// Acquires exclusion, validates/initializes metadata and checks outstanding attempts.
     fn acquire(&mut self, stream: &str, scheme: VersionScheme) -> Result<(), Error<Self::Error>>;
 
@@ -25,13 +30,16 @@ pub trait Session: Connection {
     /// Durably journals an attempt before starting its user transaction.
     fn start_attempt(&mut self, entry: &CatalogEntry) -> Result<i64, Error<Self::Error>>;
 
-    /// Opens an artifact transaction after verifying ownership.
-    fn begin_migration(&mut self) -> Result<(), Error<Self::Error>>;
+    /// Prepares the body of a journaled attempt under `policy` after verifying
+    /// ownership: an artifact transaction, or autocommit for nontransactional work.
+    fn begin_migration(&mut self, policy: Policy) -> Result<(), Error<Self::Error>>;
 
     /// Records history/completion and commits them with the artifact's effects.
     fn complete(&mut self, attempt: i64, entry: &CatalogEntry) -> Result<(), Error<Self::Error>>;
 
-    /// Rolls back an unsuccessful body and records its failure only after acknowledgement.
+    /// Rolls back an unsuccessful body and records its failure only after
+    /// acknowledgement. A nontransactional body cannot be rolled back: its
+    /// attempt stays unresolved and this reports [`Error::Uncertain`].
     fn abort(&mut self, attempt: i64) -> Result<(), Error<Self::Error>>;
 
     /// Releases exclusion only after all transaction and attempt state is known.

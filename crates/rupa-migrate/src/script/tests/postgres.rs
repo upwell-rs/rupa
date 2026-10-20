@@ -114,3 +114,63 @@ fn rejects_runner_owned_statement_classes() {
         assert_eq!(validate(script), forbidden(rule, at), "{script}");
     }
 }
+
+fn split(sql: &str) -> Vec<&str> {
+    split_script(sql, DialectId::Postgres)
+        .expect("valid script")
+        .into_iter()
+        .map(|range| &sql[range])
+        .collect()
+}
+
+#[test]
+fn splits_statements_at_unquoted_semicolons_only() {
+    let script = "CREATE TABLE a (s text DEFAULT ';');\nDO $$ BEGIN PERFORM 1; END $$;\n/* ; */ SELECT \"x;y\" FROM a";
+
+    assert_eq!(
+        split(script),
+        [
+            "CREATE TABLE a (s text DEFAULT ';')",
+            "\nDO $$ BEGIN PERFORM 1; END $$",
+            "\n/* ; */ SELECT \"x;y\" FROM a",
+        ]
+    );
+}
+
+#[test]
+fn skips_empty_and_comment_only_statements() {
+    let script = ";; -- leading\nSELECT 1; ; /* only */ ;\n-- trailing\n";
+
+    assert_eq!(split(script), [" -- leading\nSELECT 1"]);
+    assert!(split("  -- nothing\n/* at all */").is_empty());
+}
+
+#[test]
+fn splitting_validates_the_whole_script_first() {
+    let scripts = [
+        (
+            "CREATE INDEX CONCURRENTLY i ON t (a); COMMIT;",
+            forbidden(ScriptRule::TransactionControl, 38),
+        ),
+        ("SELECT 1; SELECT 'oops", Err(ScriptError::Unterminated(17))),
+    ];
+
+    for (script, expected) in scripts {
+        assert_eq!(
+            split_script(script, DialectId::Postgres).map(drop),
+            expected,
+            "{script}"
+        );
+    }
+}
+
+#[test]
+fn refuses_to_split_dialects_without_known_boundaries() {
+    for dialect in [DialectId::Sqlite, DialectId::MySql, DialectId::Memory] {
+        assert_eq!(
+            split_script("SELECT 1; SELECT 2", dialect),
+            Err(ScriptError::Dialect(dialect)),
+            "{dialect:?}"
+        );
+    }
+}

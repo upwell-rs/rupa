@@ -34,7 +34,7 @@ pub use model::{
 pub use plan::Plan;
 pub use report::{ApplyReport, RunError};
 pub use rupa_core::schema;
-pub use script::{ScriptError, ScriptRule, validate_script};
+pub use script::{ScriptError, ScriptRule, split_script, validate_script};
 pub use state::StateError;
 pub use target::{Engine, Target};
 pub use version::{Version, VersionError, VersionScheme};

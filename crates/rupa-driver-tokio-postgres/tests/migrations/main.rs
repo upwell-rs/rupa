@@ -94,6 +94,10 @@ impl Target for Pg {
             "CREATE TABLE marker(id INTEGER); PREPARE TRANSACTION 'escape';",
         ]
     }
+
+    fn outside_transaction_script(&self) -> &'static str {
+        "CREATE INDEX CONCURRENTLY notes_title ON notes (title); CREATE INDEX CONCURRENTLY notes_id ON notes (id);"
+    }
 }
 
 #[test]

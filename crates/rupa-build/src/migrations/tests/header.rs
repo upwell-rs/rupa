@@ -10,6 +10,7 @@ fn leading_comment_lines_become_the_description_and_leave_the_body_intact() {
         parsed,
         Split {
             description: Some("Create notes with a seed row".into()),
+            frontmatter: None,
             body: "SELECT 1; -- trailing\n",
         }
     );
@@ -40,4 +41,20 @@ fn editing_only_the_description_keeps_the_hashed_body() {
 
     assert_ne!(before.description, after.description);
     assert_eq!(before.body, after.body);
+}
+
+#[test]
+fn frontmatter_starts_at_rupa_and_keeps_its_indentation() {
+    let source = "-- Index notes without blocking writes.\n-- rupa:\n--   policy: nontransactional\nCREATE INDEX CONCURRENTLY i ON notes (title);\n";
+
+    let parsed = split(source, "--");
+
+    assert_eq!(
+        parsed,
+        Split {
+            description: Some("Index notes without blocking writes.".into()),
+            frontmatter: Some("rupa:\n  policy: nontransactional".into()),
+            body: "CREATE INDEX CONCURRENTLY i ON notes (title);\n",
+        }
+    );
 }

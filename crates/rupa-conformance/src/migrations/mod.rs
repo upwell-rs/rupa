@@ -54,6 +54,12 @@ macro_rules! all_cases {
                 case_raw_queries_cannot_escape_the_runner,
                 case_renaming_into_reserved_names_cannot_commit,
             ],
+            nontransactional: [
+                case_policies_apply_in_catalog_order_once,
+                case_failed_body_keeps_effects_and_blocks_replay,
+                case_interrupted_body_is_uncertain,
+                case_statements_outside_transactions_need_the_policy,
+            ],
         )
     };
 }
@@ -78,6 +84,13 @@ pub trait Target {
 
     /// Scripts this engine must refuse beyond the shared ones.
     fn forbidden_scripts(&self) -> &'static [&'static str];
+
+    /// Statements that run against the `notes (id, title)` table this engine
+    /// refuses inside a transaction, such as concurrent index creation. Only
+    /// read when the session supports nontransactional bodies.
+    fn outside_transaction_script(&self) -> &'static str {
+        ""
+    }
 }
 
 fn catalog<M: MigrationInfo>(entries: &[M]) -> Catalog<'_, M> {

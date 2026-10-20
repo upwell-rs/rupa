@@ -51,16 +51,20 @@ a native authorizer), the canonical target identity (`Target`) that derives
 lock keys independently of driver and URL, and the typed `StateError` drivers
 report for misused migration connections. No boxed body errors or erased catalog dispatch is required.
 
-The first slice applies transactional incrementals. Changed/missing applied
-artifacts, duplicate versions, late arrivals and unsupported policies fail
-explicitly. Each successful body commits with history and attempt completion;
-a failed later body rolls back without undoing earlier commits. SQLite uses a
+The runner applies incrementals under the policies a session declares in
+`Session::POLICIES`. Changed/missing applied artifacts, duplicate versions, late
+arrivals and policies the session cannot honour fail explicitly before the
+target is touched. Each successful transactional body commits with history and
+attempt completion; a failed later body rolls back without undoing earlier
+commits. A nontransactional body (`Policy::NonTransactional`, PostgreSQL only so
+far) runs in autocommit. Drivers dispatch its statements one by one using
+`split_script`. A failure leaves its attempt unresolved (`Error::Uncertain`) instead of
+recording a replayable failure. SQLite uses a
 durable cooperative claim across commits, PostgreSQL a session advisory lock;
 interruption can require explicit reconciliation. There is no automatic takeover or replay.
 
-Native async driver sessions, dynamic adapters, MySQL, nontransactional work, snapshots, adoption, authored reversal,
-out-of-order permission and operator recovery remain subsequent implementation
-slices. Declaring their
+Dynamic adapters, MySQL, snapshots, adoption, authored reversal, out-of-order
+permission and operator recovery remain subsequent implementation slices. Declaring their
 metadata is not a claim that this slice executes them.
 
 ## Feature flags

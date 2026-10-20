@@ -1,5 +1,6 @@
 use rupa::migrate::{
-    Catalog, Error, Plan, Planned, Policy, RunError, ScriptError, ValidationError, VersionScheme,
+    Catalog, Error, Metadata, MigrationKind, Plan, Planned, Policy, RunError, ScriptError,
+    ValidationError, VersionScheme,
 };
 
 use super::{Apply, Harness, Session, catalog, versions};
@@ -189,20 +190,35 @@ pub(super) fn case_version_scheme_cannot_change<H: Harness>(h: &mut H) {
 }
 
 pub(super) fn case_unsupported_policy_is_rejected_before_bootstrap<H: Harness>(h: &mut H) {
-    let entries = [with_policy(
-        "1",
-        "CREATE TABLE forbidden (id INTEGER);",
-        Policy::NonTransactional,
-    )];
+    let sql = "CREATE TABLE forbidden (id INTEGER);";
+    let snapshot = Body(Box::leak(Box::new(Metadata {
+        kind: MigrationKind::Snapshot,
+        ..*body("1", sql).0
+    })));
+    let nontransactional = with_policy("1", sql, Policy::NonTransactional);
+    let mut unsupported = vec![snapshot];
 
-    assert!(matches!(
-        wait!(h, h.connect().apply(&catalog(&entries))),
-        Err(RunError::Infrastructure {
-            source: Error::Validation(ValidationError::Unsupported(_)),
-            ..
-        })
-    ));
-    assert!(!h.table_exists("_rupa_migration_meta"));
+    if !super::nontransactional::supported::<H>() {
+        unsupported.push(nontransactional);
+    }
+
+    for entry in unsupported {
+        let entries = [entry];
+
+        assert!(
+            matches!(
+                wait!(h, h.connect().apply(&catalog(&entries))),
+                Err(RunError::Infrastructure {
+                    source: Error::Validation(ValidationError::Unsupported(_)),
+                    ..
+                })
+            ),
+            "{:?} {:?} must be rejected",
+            entry.0.kind,
+            entry.0.policy
+        );
+        assert!(!h.table_exists("_rupa_migration_meta"));
+    }
 }
 
 pub(super) fn case_malformed_planned_sql_is_rejected_before_bootstrap<H: Harness>(h: &mut H) {

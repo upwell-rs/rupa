@@ -46,14 +46,15 @@ impl<E: std::error::Error + 'static, M: std::error::Error + 'static> RunError<E,
     }
 }
 
-/// Rejects what this runner cannot execute, before the target is touched.
+/// Rejects what the session cannot execute, before the target is touched.
 pub(crate) fn preflight<M: MigrationInfo>(
     catalog: &Catalog<'_, M>,
     dialect: DialectId,
+    policies: &[Policy],
 ) -> Result<(), ValidationError> {
     for entry in &catalog.entries {
         if entry.metadata.kind != MigrationKind::Incremental
-            || entry.metadata.policy != Policy::TransactionalRequired
+            || !policies.contains(&entry.metadata.policy)
         {
             return Err(ValidationError::Unsupported(entry.metadata.version.into()));
         }
@@ -208,8 +209,12 @@ macro_rules! mode {
         ) -> Result<crate::ApplyReport, crate::RunError<S::Error, M::Error>> {
             let mut applied = Vec::new();
 
-            crate::runner::preflight(catalog, rupa_core::dialect::Dialect::id(session.dialect()))
-                .map_err(|e| crate::RunError::infrastructure(crate::Error::Validation(e)))?;
+            crate::runner::preflight(
+                catalog,
+                rupa_core::dialect::Dialect::id(session.dialect()),
+                S::POLICIES,
+            )
+            .map_err(|e| crate::RunError::infrastructure(crate::Error::Validation(e)))?;
 
             let mut guard = RunGuard { session, armed: true };
             let acquired = guard.session.acquire(catalog.stream, catalog.scheme) $($await)*;
@@ -262,7 +267,7 @@ macro_rules! mode {
                     $($await)*
                     .map_err(crate::RunError::infrastructure)?;
 
-                if let Err(source) = session.begin_migration() $($await)* {
+                if let Err(source) = session.begin_migration(entry.metadata.policy) $($await)* {
                     return Err(
                         abort(session, attempt, crate::RunError::infrastructure(source)) $($await)*
                     );
