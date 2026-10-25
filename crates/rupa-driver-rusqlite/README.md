@@ -21,4 +21,4 @@ Values are bound without copying text or blobs; dates use `rupa_core::chrono_tex
 | `pool` | `SqlitePool` on r2d2 |
 | `dynamic` | `SqliteDriver`, the registry entry (implies `pool`) |
 
-`migrations` implements the standalone migration session contract on the native executor. Use `catalog.apply(connection)`; no additional session/runner handle is required. Connections are dedicated and owned for the invocation. See [the migration guide](../../docs/migrations.md).
+`migrations` implements the standalone migration session contract on the native executor, over the SQLite protocol and authorization policy it shares with sqlx (`rupa_migrate::protocol::sqlite`). Use `catalog.apply(connection)`; no additional session/runner handle is required. Connections are dedicated and owned for the invocation. See [the migration guide](../../docs/migrations.md).

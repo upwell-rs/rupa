@@ -8,9 +8,10 @@ dispatch, a pool, or Upwell.
 
 ## Usage
 
-Enable `rupa/migrations` and a supported driver: native synchronous SQLite
+Enable `rupa/migrations` and a supported driver: synchronous SQLite
 (`sqlite` or `sqlite-unbundled`), PostgreSQL (`postgres-sync`) or MySQL
-(`mysql`):
+(`mysql`), or asynchronous PostgreSQL (`postgres`) or sqlx (`sqlx-postgres`,
+`sqlx-mysql`, `sqlx-sqlite`):
 
 ```rust,ignore
 let entries = application_migrations();
@@ -66,7 +67,7 @@ refused before dispatching anything records an ordinary failed attempt. SQLite
 uses a durable cooperative claim across commits, PostgreSQL a session advisory
 lock and MySQL a named session lock; interruption can require explicit reconciliation. There is no automatic takeover or replay.
 
-Dynamic and sqlx adapters, snapshots, adoption, authored reversal, out-of-order
+Dynamic adapters, snapshots, adoption, authored reversal, out-of-order
 permission and operator recovery remain subsequent implementation slices. Declaring their
 metadata is not a claim that this slice executes them.
 
@@ -76,6 +77,7 @@ metadata is not a claim that this slice executes them.
 |---|---|
 | `sync` | `sync::{Session, Migration, Context, Apply}` |
 | `async` | `asynchronous::{Session, Migration, Context, Apply}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
+| `protocol` | the engine session protocols (`protocol::{postgres, mysql, sqlite}`) and their per-mode `Io` traits, for driver crates; not public API |
 
 Neither is default. With exactly one enabled, all four of its names are
 re-exported at the crate root, and `prelude` brings its method traits (`Apply`,

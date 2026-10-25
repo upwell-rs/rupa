@@ -46,6 +46,6 @@ paths macro output refers to.
 | `memory` | the in-memory backend |
 | `sqlx-postgres`, `sqlx-mysql`, `sqlx-sqlite`, `sqlx-sqlite-unbundled` | async drivers on sqlx + deadpool (imply `async`) |
 | `tls-rustls` | TLS on rustls (ring) for every enabled networked driver |
-| `migrations` | explicit SQL/Rust migrations, applied on the enabled native SQLite, PostgreSQL and MySQL drivers ([guide](../../docs/migrations.md)) |
+| `migrations` | explicit SQL/Rust migrations, applied on every enabled SQLite, PostgreSQL and MySQL driver, native or sqlx ([guide](../../docs/migrations.md)) |
 | `full` | every driver, plus `dynamic` and `migrations` |
 | `upwell` | the Upwell DI integration (in development) |

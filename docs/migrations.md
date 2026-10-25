@@ -2,8 +2,16 @@
 
 Enable `migrations` and a supported driver: `sqlite` (bundled SQLite),
 `sqlite-unbundled` (system SQLite), `postgres-sync` (the sync `postgres`
-crate) or `postgres` (async, tokio-postgres). Sync drivers need neither async
-nor runtime driver selection.
+crate), `mysql` (the sync `mysql` crate), `postgres` (async, tokio-postgres) or
+an async sqlx driver (`sqlx-postgres`, `sqlx-mysql`, `sqlx-sqlite`,
+`sqlx-sqlite-unbundled`). Sync drivers need neither async nor runtime driver
+selection.
+
+Every driver of an engine runs that engine's one session protocol
+(`rupa_migrate::protocol`, which drivers implement through a small IO trait):
+the same lock identity, reserved tables, checks and policies. So a native and
+a sqlx runner on one database exclude each other and continue each other's
+history, in either mode.
 
 ## Execution modes
 
@@ -297,7 +305,9 @@ catalog.
 `Context::run` accepts ordinary typed Rupa queries. `Context::script` runs SQL on
 the same transaction, and `Context::schema` a rendered schema operation. Neither exposes transaction control, connection extraction
 or pool access. SQLite authorization denies transaction/savepoint control,
-ATTACH/DETACH, PRAGMAs and framework metadata access; PostgreSQL uses the grammar
+ATTACH/DETACH, PRAGMAs and framework metadata access, with one policy for every
+SQLite driver: rusqlite installs it through its authorizer hook, sqlx (which has
+none) through the raw connection handle. PostgreSQL and MySQL use the grammar
 above. This is an ownership API,
 not a sandbox against trusted Rust independently doing IO or opening connections.
 
@@ -327,18 +337,17 @@ On SQLite the driver atomically claims the target under `BEGIN IMMEDIATE`, then 
 durable owner token between separately committed migration transactions. Another
 cooperative runner cannot take over between commits or during first bootstrap.
 The writer-lock timeout is configurable using
-`SqliteExecutor::with_migration_lock_timeout`; an existing owner fails immediately.
+`with_migration_lock_timeout` on the rusqlite or sqlx executor; an existing
+owner fails immediately.
 
-On PostgreSQL, the sync (`postgres`) and async (`tokio-postgres`) drivers run
-one shared session protocol, so they exclude each other and continue each
-other's history. `apply` takes a session advisory lock before creating or
+On PostgreSQL (`postgres`, `tokio-postgres` and sqlx), `apply` takes a session advisory lock before creating or
 reading history (standalone `Session::history()` inspection reads without it),
 holds it across the separately committed migration
 transactions and checks it before every write phase. The key is derived from
 the canonical target (`rupa_migrate::Target`: engine, `current_database()`,
 `current_schema()`), never from the driver, credentials or URL, so every runner
 of one schema contends for the same lock and different schemas are independent
-targets. `PgExecutor::with_migration_lock_timeout` bounds the wait (zero tries
+targets. `with_migration_lock_timeout` bounds the wait (zero tries
 once; longer than PostgreSQL's `lock_timeout` maximum is clamped); a timeout
 reports `Error::Busy` with no user work done. A connection that
 loses the lock, or whose artifact transaction was committed or replaced, is
@@ -347,11 +356,11 @@ lock, so a dropped or crashed runner leaves only its running attempt behind,
 which blocks the next apply with `Error::Uncertain`. A connection already inside
 an application transaction is rejected.
 
-On MySQL (`mysql` driver, feature `migrations`), `apply` takes a named session
+On MySQL (the `mysql` and sqlx drivers), `apply` takes a named session
 lock, `GET_LOCK('rupa:…')` with the first 56 hex digits of the canonical target
 digest (engine, `DATABASE()` as database and namespace), and keeps it across the
 per-artifact commits, checking `IS_USED_LOCK` before every write phase.
-`MySqlExecutor::with_migration_lock_timeout` bounds the wait in whole seconds,
+`with_migration_lock_timeout` bounds the wait in whole seconds,
 rounded up; zero tries once. A connection without a selected database, with
 `autocommit` off or inside an open transaction (even an untouched read-only
 snapshot) is rejected: MySQL's implicit DDL commits would otherwise commit the
@@ -412,7 +421,7 @@ ownership; a supported recovery command is a later slice. Do not delete history
 or clear a claim merely because a client timeout elapsed. This first slice
 reports uncertainty and blocks further apply instead of guessing.
 
-sqlx sessions (including async MySQL), transactional work on MySQL,
+Dynamic (registry) sessions, transactional work on MySQL,
 nontransactional work on SQLite, snapshots/adoption,
 authored down migrations, allowed late application and operator recovery
 (asserting that uncertain work completed or was restored) are not yet

@@ -15,7 +15,7 @@ mod error;
 mod macros;
 mod model;
 mod plan;
-#[cfg(feature = "protocol")]
+#[cfg(all(feature = "protocol", any(feature = "sync", feature = "async")))]
 #[doc(hidden)]
 pub mod protocol;
 mod report;
