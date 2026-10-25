@@ -169,6 +169,12 @@ macro_rules! __session {
                 $crate::protocol::$engine::$mode::history(self) $($await)*
             }
 
+            $($async)* fn inspect(
+                &mut self,
+            ) -> Result<$crate::Inspection, $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
+                $crate::protocol::$engine::$mode::inspect(self) $($await)*
+            }
+
             $($async)* fn start_attempt(
                 &mut self,
                 entry: &$crate::CatalogEntry,

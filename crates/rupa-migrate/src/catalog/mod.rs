@@ -7,7 +7,7 @@ use rupa_sql::RenderError;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    Metadata, MigrationInfo, MigrationKind, Operation, Plan, Policy, ScriptError, Version,
+    Engine, Metadata, MigrationInfo, MigrationKind, Operation, Plan, Policy, ScriptError, Version,
     VersionError, VersionScheme,
 };
 
@@ -152,26 +152,37 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         })
     }
 
-    /// Lexically checks every planned script with the session dialect's
-    /// grammar, and renders every planned schema operation for it. Runs
-    /// before acquisition, so a rejected plan never touches the target.
-    #[cfg_attr(not(any(feature = "sync", feature = "async")), allow(dead_code))]
-    pub(crate) fn validate_plans(&self, dialect: DialectId) -> Result<(), ValidationError> {
-        let operations = self
+    /// Checks the catalog offline against what `engine`'s sessions can
+    /// execute: every kind and policy is supported, every planned script
+    /// passes the engine's grammar and every planned schema operation renders.
+    /// Apply runs the same checks before it touches a target.
+    pub fn validate(&self, engine: Engine) -> Result<(), ValidationError> {
+        self.check(engine.dialect(), engine.policies())
+    }
+
+    /// Rejects what a session of `dialect` honouring `policies` cannot
+    /// execute: only incremental artifacts run, under a supported policy, and
+    /// every planned script and schema operation must pass the dialect.
+    pub(crate) fn check(
+        &self,
+        dialect: DialectId,
+        policies: &[Policy],
+    ) -> Result<(), ValidationError> {
+        for entry in &self.entries {
+            if entry.metadata.kind != MigrationKind::Incremental
+                || !policies.contains(&entry.metadata.policy)
+            {
+                return Err(ValidationError::Unsupported(entry.metadata.version.into()));
+            }
+        }
+
+        for operation in self
             .entries
             .iter()
             .filter_map(|e| e.plan.as_ref())
-            .flat_map(Plan::operations);
-
-        for operation in operations {
-            match operation {
-                Operation::Sql(sql) => {
-                    crate::validate_script(&normalize(sql, "planned SQL")?, dialect)?
-                }
-                Operation::Schema(op) => {
-                    rupa_sql::render_schema(op, &DynDialect::new(dialect))?;
-                }
-            }
+            .flat_map(Plan::operations)
+        {
+            render(operation, dialect)?;
         }
 
         Ok(())
@@ -180,6 +191,22 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
     /// Static ordered entries; inspection does not run user code.
     pub fn entries(&self) -> impl ExactSizeIterator<Item = &CatalogEntry> {
         self.entries.iter()
+    }
+}
+
+/// An operation's script exactly as apply sends it: a planned script
+/// normalized and checked by `dialect`'s grammar, or a schema operation
+/// rendered for it.
+pub(crate) fn render(operation: &Operation, dialect: DialectId) -> Result<String, ValidationError> {
+    match operation {
+        Operation::Sql(sql) => {
+            let sql = normalize(sql, "planned SQL")?;
+
+            crate::validate_script(&sql, dialect)?;
+
+            Ok(sql)
+        }
+        Operation::Schema(op) => Ok(rupa_sql::render_schema(op, &DynDialect::new(dialect))?),
     }
 }
 

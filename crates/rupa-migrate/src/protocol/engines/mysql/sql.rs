@@ -102,3 +102,23 @@ pub const ATTEMPT: &str = "
 
 /// Whether this session holds the named lock `?`.
 pub const HOLDS_LOCK: &str = "SELECT COALESCE(IS_USED_LOCK(?) = CONNECTION_ID(), 0)";
+
+/// Opens the read-only snapshot inspection reads in, which the server
+/// refuses to write through.
+pub const READ_ONLY: &str = "START TRANSACTION WITH CONSISTENT SNAPSHOT, READ ONLY";
+
+/// Whether any session holds the named lock `?`.
+pub const LOCKED: &str = "SELECT IS_USED_LOCK(?) IS NOT NULL";
+
+/// The stored stream and scheme.
+pub const STORED: &str = "
+    SELECT stream, scheme
+    FROM _rupa_migrations
+    WHERE kind = 'init'";
+
+/// The running attempts, oldest first.
+pub const RUNNING: &str = "
+    SELECT id, version, checksum, policy
+    FROM _rupa_migrations
+    WHERE kind = 'up' AND status = 'running'
+    ORDER BY id";

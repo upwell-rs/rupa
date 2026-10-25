@@ -6,11 +6,12 @@
 mod blocking;
 
 use rupa_core::asynchronous::Connection;
+use rupa_core::dialect::Dialect;
 
 use crate::runner::mode;
 use crate::{
-    ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, MigrationInfo, Plan, Policy, Recovery,
-    RunError, VersionScheme,
+    ApplyPlan, ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, Inspection, MigrationInfo,
+    Plan, Policy, Recovery, RunError, Status, VersionScheme,
 };
 
 /// Driver-owned dedicated physical migration connection, awaited.
@@ -39,6 +40,11 @@ pub trait Session: Connection {
     fn history(
         &mut self,
     ) -> impl Future<Output = Result<Vec<HistoryEntry>, Error<Self::Error>>> + Send;
+
+    /// Reads the target's journal and whether another runner excludes it,
+    /// without acquiring exclusion, writing or executing user code. Only
+    /// possible on a session that owns no run.
+    fn inspect(&mut self) -> impl Future<Output = Result<Inspection, Error<Self::Error>>> + Send;
 
     /// Durably journals an attempt before starting its user transaction.
     fn start_attempt(
@@ -151,6 +157,39 @@ pub trait Recover {
         connection: S,
         recovery: &Recovery<'_>,
     ) -> impl Future<Output = Result<(), Error<S::Error>>> + Send;
+}
+
+/// Reads a target on a dedicated native connection, then closes it, without
+/// acquiring exclusion, writing or executing a body.
+pub trait Inspect {
+    /// This catalog against the target.
+    fn status<S: Session>(
+        &self,
+        connection: S,
+    ) -> impl Future<Output = Result<Status<'_>, Error<S::Error>>> + Send;
+
+    /// What apply would run on the target: its status and the pending steps,
+    /// rendered for the session's dialect after the checks apply runs first.
+    fn plan<S: Session>(
+        &self,
+        connection: S,
+    ) -> impl Future<Output = Result<ApplyPlan<'_>, Error<S::Error>>> + Send;
+}
+
+impl<M: MigrationInfo + Sync> Inspect for Catalog<'_, M> {
+    async fn status<S: Session>(&self, mut connection: S) -> Result<Status<'_>, Error<S::Error>> {
+        Ok(self.classify(inspect(&mut connection).await?))
+    }
+
+    async fn plan<S: Session>(&self, connection: S) -> Result<ApplyPlan<'_>, Error<S::Error>> {
+        let dialect = Dialect::id(connection.dialect());
+
+        self.check(dialect, S::POLICIES)?;
+
+        let status = self.status(connection).await?;
+
+        Ok(self.plan_for(status, dialect)?)
+    }
 }
 
 impl<M> Recover for Catalog<'_, M> {

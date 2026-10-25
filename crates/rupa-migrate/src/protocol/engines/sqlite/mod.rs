@@ -4,16 +4,17 @@
 //! transaction. User statements run under [`authorize`], installed through
 //! the driver's `SqliteIo` (in `protocol::sync` or `protocol::asynchronous`).
 
+mod inspect;
 mod recovery;
 pub mod sql;
 mod steps;
 
 use std::time::Duration;
 
-use crate::{Policy, StateError};
+use crate::{Engine, Policy, StateError};
 
 /// The policies SQLite sessions honour.
-pub const POLICIES: &[Policy] = &[Policy::TransactionalRequired];
+pub const POLICIES: &[Policy] = Engine::Sqlite.policies();
 
 /// Per-connection ownership and attempt state.
 #[derive(Debug)]

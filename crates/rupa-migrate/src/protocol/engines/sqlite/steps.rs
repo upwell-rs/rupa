@@ -8,8 +8,14 @@ macro_rules! steps {
 
             use super::{State, sql};
             use crate::protocol::$mode::SqliteIo;
-            use crate::protocol::{HISTORY_COLUMNS, decode_history, finish, int, policy, single, status, text};
-            use crate::{CHECKSUM_FORMAT, CatalogEntry, Error, HistoryEntry, Policy, StateError, VersionScheme};
+            use crate::protocol::{
+                HISTORY_COLUMNS, RUNNING_COLUMNS, absent, decode_history, finish, int, policy,
+                records, single, status, text,
+            };
+            use crate::{
+                CHECKSUM_FORMAT, CatalogEntry, Error, Exclusion, HistoryEntry, Inspection, Policy,
+                StateError, VersionScheme,
+            };
 
             $($async)* fn query<T: SqliteIo<State = State>>(
                 io: &mut T,
@@ -509,6 +515,7 @@ macro_rules! steps {
                 result.and(ended).map_err(Error::Database)
             }
 
+            super::inspect::inspect!([$($async)*] [$($await)*]);
             super::recovery::recovery!([$($async)*] [$($await)*]);
         }
     };

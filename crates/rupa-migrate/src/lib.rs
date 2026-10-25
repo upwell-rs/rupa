@@ -2,8 +2,8 @@
 //!
 //! Execution comes in two modes with identical names, selected by import:
 //! `sync` (feature `sync`) and `asynchronous` (feature `async`). With
-//! exactly one mode enabled, its `Session`, `Migration`, `Context`, `Apply`
-//! and `Recover` are also re-exported here; with both enabled, import them
+//! exactly one mode enabled, its `Session`, `Migration`, `Context`, `Apply`,
+//! `Inspect` and `Recover` are also re-exported here; with both enabled, import them
 //! from the mode module to avoid ambiguity.
 
 #![warn(missing_docs)]
@@ -24,6 +24,7 @@ mod report;
 mod runner;
 mod script;
 mod state;
+mod status;
 #[cfg(feature = "sync")]
 pub mod sync;
 mod target;
@@ -41,6 +42,10 @@ pub use report::{ApplyReport, RunError};
 pub use rupa_core::schema;
 pub use script::{ScriptError, ScriptRule, split_script, validate_script};
 pub use state::StateError;
+pub use status::{
+    ApplyPlan, Attempt, Blocker, Classification, Exclusion, Execution, Inspection, Journal,
+    Records, Status, Step,
+};
 pub use target::{Engine, Target};
 pub use version::{Version, VersionError, VersionScheme};
 
@@ -48,12 +53,12 @@ pub use version::{Version, VersionError, VersionScheme};
 /// `catalog.apply(connection)` and session calls then need no import.
 pub mod prelude {
     #[cfg(all(feature = "async", not(feature = "sync")))]
-    pub use crate::asynchronous::{Apply as _, Recover as _, Session as _};
+    pub use crate::asynchronous::{Apply as _, Inspect as _, Recover as _, Session as _};
     #[cfg(all(feature = "sync", not(feature = "async")))]
-    pub use crate::sync::{Apply as _, Recover as _, Session as _};
+    pub use crate::sync::{Apply as _, Inspect as _, Recover as _, Session as _};
 }
 
 #[cfg(all(feature = "async", not(feature = "sync")))]
-pub use asynchronous::{Apply, Context, Migration, Recover, Session};
+pub use asynchronous::{Apply, Context, Inspect, Migration, Recover, Session};
 #[cfg(all(feature = "sync", not(feature = "async")))]
-pub use sync::{Apply, Context, Migration, Recover, Session};
+pub use sync::{Apply, Context, Inspect, Migration, Recover, Session};

@@ -12,19 +12,6 @@ fn refusal<E: std::error::Error>(result: Result<(), Error<E>>) -> Option<Recover
     }
 }
 
-/// Runs a body that panics on a dedicated session, which is then dropped
-/// without cleanup, as when a runner process dies.
-macro_rules! interrupt {
-    ($h:expr, $catalog:expr) => {{
-        let session = $h.connect();
-        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = wait!($h, $catalog.apply(session));
-        }));
-
-        assert!(interrupted.is_err(), "the body panics");
-    }};
-}
-
 pub(super) fn case_interrupted_transactional_attempt_is_reconciled<H: Harness>(h: &mut H) {
     if !transactional::<H>() {
         return;

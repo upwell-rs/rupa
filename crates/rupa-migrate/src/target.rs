@@ -1,4 +1,7 @@
+use rupa_core::DialectId;
 use sha2::{Digest, Sha256};
+
+use crate::Policy;
 
 /// Domain tag and version of the canonical target identity bytes.
 const IDENTITY_FORMAT: &str = "rupa-migration-target-v1";
@@ -25,6 +28,26 @@ impl Engine {
             Self::Postgres => "postgresql",
             Self::MySql => "mysql",
             Self::Sqlite => "sqlite",
+        }
+    }
+
+    /// The SQL dialect the engine speaks.
+    pub const fn dialect(self) -> DialectId {
+        match self {
+            Self::Postgres => DialectId::Postgres,
+            Self::MySql => DialectId::MySql,
+            Self::Sqlite => DialectId::Sqlite,
+        }
+    }
+
+    /// The execution policies the engine's sessions honour. MySQL commits DDL
+    /// implicitly, so it runs nontransactional bodies only; SQLite has no
+    /// autocommit body protocol, so it runs transactional ones only.
+    pub const fn policies(self) -> &'static [Policy] {
+        match self {
+            Self::Postgres => &[Policy::TransactionalRequired, Policy::NonTransactional],
+            Self::MySql => &[Policy::NonTransactional],
+            Self::Sqlite => &[Policy::TransactionalRequired],
         }
     }
 }

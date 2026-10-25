@@ -4,10 +4,7 @@ use std::collections::BTreeSet;
 
 use rupa_core::dialect::DialectId;
 
-use crate::{
-    ApplyReport, Catalog, Error, HistoryEntry, MigrationInfo, MigrationKind, Policy, RunError,
-    ValidationError, Version,
-};
+use crate::{ApplyReport, Catalog, Error, HistoryEntry, RunError, Version};
 
 impl<E: std::error::Error + 'static, M: std::error::Error + 'static> RunError<E, M> {
     pub(crate) fn infrastructure(source: Error<E>) -> Self {
@@ -44,23 +41,6 @@ impl<E: std::error::Error + 'static, M: std::error::Error + 'static> RunError<E,
 
         self
     }
-}
-
-/// Rejects what the session cannot execute, before the target is touched.
-pub(crate) fn preflight<M: MigrationInfo>(
-    catalog: &Catalog<'_, M>,
-    dialect: DialectId,
-    policies: &[Policy],
-) -> Result<(), ValidationError> {
-    for entry in &catalog.entries {
-        if entry.metadata.kind != MigrationKind::Incremental
-            || !policies.contains(&entry.metadata.policy)
-        {
-            return Err(ValidationError::Unsupported(entry.metadata.version.into()));
-        }
-    }
-
-    catalog.validate_plans(dialect)
 }
 
 /// The installed versions, after checking history against the catalog:
@@ -209,12 +189,9 @@ macro_rules! mode {
         ) -> Result<crate::ApplyReport, crate::RunError<S::Error, M::Error>> {
             let mut applied = Vec::new();
 
-            crate::runner::preflight(
-                catalog,
-                rupa_core::dialect::Dialect::id(session.dialect()),
-                S::POLICIES,
-            )
-            .map_err(|e| crate::RunError::infrastructure(crate::Error::Validation(e)))?;
+            catalog
+                .check(rupa_core::dialect::Dialect::id(session.dialect()), S::POLICIES)
+                .map_err(|e| crate::RunError::infrastructure(crate::Error::Validation(e)))?;
 
             let mut guard = RunGuard { session, armed: true };
             let reconciled = match guard.session.acquire(catalog.stream, catalog.scheme) $($await)* {
@@ -249,6 +226,19 @@ macro_rules! mode {
         ) -> Result<(), crate::Error<S::Error>> {
             let mut guard = RunGuard { session, armed: true };
             let result = guard.session.recover(stream, scheme, entries, recovery) $($await)*;
+
+            guard.armed = false;
+
+            result
+        }
+
+        /// Reads the target without exclusion, abandoning the session if the
+        /// call ends without returning.
+        pub(crate) $($async)* fn inspect<S: Session>(
+            session: &mut S,
+        ) -> Result<crate::Inspection, crate::Error<S::Error>> {
+            let mut guard = RunGuard { session, armed: true };
+            let result = guard.session.inspect() $($await)*;
 
             guard.armed = false;
 

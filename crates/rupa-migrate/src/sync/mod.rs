@@ -1,12 +1,13 @@
 //! Synchronous migration execution. The same names exist in
 //! `asynchronous`; the import selects the mode.
 
+use rupa_core::dialect::Dialect;
 use rupa_core::sync::Connection;
 
 use crate::runner::mode;
 use crate::{
-    ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, MigrationInfo, Plan, Policy, Recovery,
-    RunError, VersionScheme,
+    ApplyPlan, ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, Inspection, MigrationInfo,
+    Plan, Policy, Recovery, RunError, Status, VersionScheme,
 };
 
 /// Driver-owned dedicated physical migration connection.
@@ -34,6 +35,11 @@ pub trait Session: Connection {
 
     /// Reads installed history without executing user code or creating metadata.
     fn history(&mut self) -> Result<Vec<HistoryEntry>, Error<Self::Error>>;
+
+    /// Reads the target's journal and whether another runner excludes it,
+    /// without acquiring exclusion, writing or executing user code. Only
+    /// possible on a session that owns no run.
+    fn inspect(&mut self) -> Result<Inspection, Error<Self::Error>>;
 
     /// Durably journals an attempt before starting its user transaction.
     fn start_attempt(&mut self, entry: &CatalogEntry) -> Result<i64, Error<Self::Error>>;
@@ -127,6 +133,33 @@ pub trait Recover {
         connection: S,
         recovery: &Recovery<'_>,
     ) -> Result<(), Error<S::Error>>;
+}
+
+/// Reads a target on a dedicated native connection, then closes it, without
+/// acquiring exclusion, writing or executing a body.
+pub trait Inspect {
+    /// This catalog against the target.
+    fn status<S: Session>(&self, connection: S) -> Result<Status<'_>, Error<S::Error>>;
+
+    /// What apply would run on the target: its status and the pending steps,
+    /// rendered for the session's dialect after the checks apply runs first.
+    fn plan<S: Session>(&self, connection: S) -> Result<ApplyPlan<'_>, Error<S::Error>>;
+}
+
+impl<M: MigrationInfo> Inspect for Catalog<'_, M> {
+    fn status<S: Session>(&self, mut connection: S) -> Result<Status<'_>, Error<S::Error>> {
+        Ok(self.classify(inspect(&mut connection)?))
+    }
+
+    fn plan<S: Session>(&self, connection: S) -> Result<ApplyPlan<'_>, Error<S::Error>> {
+        let dialect = Dialect::id(connection.dialect());
+
+        self.check(dialect, S::POLICIES)?;
+
+        let status = self.status(connection)?;
+
+        Ok(self.plan_for(status, dialect)?)
+    }
 }
 
 impl<M> Recover for Catalog<'_, M> {

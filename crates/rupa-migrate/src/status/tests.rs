@@ -1,0 +1,320 @@
+use super::*;
+use crate::{
+    ArtifactInput, Engine, Metadata, MigrationInfo, MigrationKind, Plan, Planned, PlannedMigration,
+    Provenance, VersionScheme,
+};
+
+/// An imperative entry.
+struct Imperative(&'static Metadata);
+
+impl MigrationInfo for Imperative {
+    fn info(&self) -> &'static Metadata {
+        self.0
+    }
+}
+
+/// A planned entry with one script.
+struct Scripted(&'static Metadata);
+
+impl MigrationInfo for Scripted {
+    fn info(&self) -> &'static Metadata {
+        self.0
+    }
+}
+
+impl PlannedMigration for Scripted {
+    fn plan(&self) -> Plan {
+        Plan::new().sql("CREATE TABLE planned (id INTEGER)\r\n")
+    }
+}
+
+/// An entry of either kind.
+enum Entry {
+    Imperative(Imperative),
+    Planned(Planned<Scripted>),
+}
+
+impl MigrationInfo for Entry {
+    fn info(&self) -> &'static Metadata {
+        match self {
+            Self::Imperative(entry) => entry.info(),
+            Self::Planned(entry) => entry.info(),
+        }
+    }
+
+    fn planned(&self) -> Option<Plan> {
+        match self {
+            Self::Imperative(entry) => entry.planned(),
+            Self::Planned(entry) => entry.planned(),
+        }
+    }
+}
+
+fn metadata(version: &'static str, inputs: &'static [ArtifactInput]) -> &'static Metadata {
+    Box::leak(Box::new(Metadata {
+        version,
+        description: "fixture",
+        policy: Policy::TransactionalRequired,
+        kind: MigrationKind::Incremental,
+        inputs,
+    }))
+}
+
+fn imperative(version: &'static str) -> Entry {
+    const INPUTS: &[ArtifactInput] = &[ArtifactInput::new("body.rs", "fn up() {}")];
+
+    Entry::Imperative(Imperative(metadata(version, INPUTS)))
+}
+
+fn planned(version: &'static str) -> Entry {
+    Entry::Planned(Planned(Scripted(metadata(version, &[]))))
+}
+
+fn catalog(entries: &[Entry]) -> Catalog<'_, Entry> {
+    Catalog::new("primary", VersionScheme::Numbered, entries).expect("valid catalog")
+}
+
+/// History recording `version` with the checksum `catalog` holds for it.
+fn installed(catalog: &Catalog<'_, Entry>, version: &str, rank: u64) -> HistoryEntry {
+    let checksum = catalog
+        .entries()
+        .find(|entry| entry.version.to_string() == version)
+        .map_or(Checksum::from_bytes([0; 32]), |entry| entry.checksum);
+
+    HistoryEntry {
+        installation_rank: rank,
+        version: version.into(),
+        checksum,
+        provenance: Provenance::Executed,
+    }
+}
+
+fn managed(history: Vec<HistoryEntry>, attempts: Vec<Attempt>) -> Journal {
+    Journal::Managed(Records {
+        stream: "primary".into(),
+        scheme: "numbered".into(),
+        history,
+        attempts,
+    })
+}
+
+fn inspection(exclusion: Exclusion, journal: Journal) -> Inspection {
+    Inspection { exclusion, journal }
+}
+
+fn attempt(id: i64, policy: Policy) -> Attempt {
+    Attempt {
+        id,
+        version: "2".into(),
+        checksum: Checksum::from_bytes([7; 32]),
+        policy,
+    }
+}
+
+fn pending(status: &Status<'_>) -> Vec<String> {
+    status
+        .pending
+        .iter()
+        .map(|entry| entry.version.to_string())
+        .collect()
+}
+
+#[test]
+fn a_fresh_target_has_every_entry_pending() {
+    let entries = [imperative("2"), planned("1")];
+    let catalog = catalog(&entries);
+
+    let status = catalog.classify(inspection(Exclusion::Free, Journal::Fresh));
+
+    assert_eq!(status.classification, Classification::Fresh);
+    assert_eq!(pending(&status), ["1", "2"]);
+    assert!(status.blockers.is_empty());
+}
+
+#[test]
+fn an_unmanaged_target_is_blocked_and_has_nothing_pending() {
+    let entries = [imperative("1")];
+    let catalog = catalog(&entries);
+
+    let status = catalog.classify(inspection(Exclusion::Free, Journal::Unmanaged));
+
+    assert_eq!(status.classification, Classification::Unmanaged);
+    assert!(status.pending.is_empty());
+    assert_eq!(status.blockers, [Blocker::Unmanaged]);
+}
+
+#[test]
+fn installed_history_leaves_the_rest_pending() {
+    let entries = [imperative("1"), planned("2")];
+    let catalog = catalog(&entries);
+    let history = vec![installed(&catalog, "1", 1)];
+
+    let status = catalog.classify(inspection(Exclusion::Free, managed(history, Vec::new())));
+
+    assert_eq!(status.classification, Classification::Managed);
+    assert_eq!(pending(&status), ["2"]);
+    assert_eq!(status.history.len(), 1);
+    assert!(status.blockers.is_empty());
+}
+
+#[test]
+fn missing_changed_duplicate_and_late_artifacts_are_each_reported() {
+    let entries = [imperative("1"), imperative("2"), imperative("3")];
+    let catalog = catalog(&entries);
+    let changed = HistoryEntry {
+        checksum: Checksum::from_bytes([1; 32]),
+        ..installed(&catalog, "3", 3)
+    };
+    let history = vec![
+        installed(&catalog, "9", 1),
+        installed(&catalog, "1", 2),
+        installed(&catalog, "1", 4),
+        changed,
+    ];
+    let catalog_checksum = |version: &str| {
+        catalog
+            .entries()
+            .find(|entry| entry.version.to_string() == version)
+            .expect("catalog entry")
+            .checksum
+    };
+    let version = |text: &str| VersionScheme::Numbered.parse(text).expect("version");
+
+    let status = catalog.classify(inspection(Exclusion::Free, managed(history, Vec::new())));
+
+    assert_eq!(
+        status.blockers,
+        [
+            Blocker::Missing {
+                version: "9".into(),
+                checksum: Checksum::from_bytes([0; 32]),
+            },
+            Blocker::Duplicate(version("1")),
+            Blocker::Changed {
+                version: version("3"),
+                installed: Checksum::from_bytes([1; 32]),
+                catalog: catalog_checksum("3"),
+            },
+            Blocker::Late {
+                version: version("2"),
+                checksum: catalog_checksum("2"),
+            },
+        ]
+    );
+    assert_eq!(pending(&status), ["2"], "a late entry is still pending");
+}
+
+#[test]
+fn running_attempts_make_the_target_uncertain() {
+    let entries = [imperative("1"), imperative("2")];
+    let catalog = catalog(&entries);
+    let attempts = vec![
+        attempt(4, Policy::TransactionalRequired),
+        attempt(5, Policy::NonTransactional),
+    ];
+
+    let free = catalog.classify(inspection(
+        Exclusion::Free,
+        managed(Vec::new(), attempts.clone()),
+    ));
+    let locked = catalog.classify(inspection(Exclusion::Locked, managed(Vec::new(), attempts)));
+
+    assert_eq!(free.classification, Classification::Uncertain);
+    assert_eq!(
+        free.blockers,
+        [
+            Blocker::Interrupted(attempt(4, Policy::TransactionalRequired)),
+            Blocker::Unresolved(attempt(5, Policy::NonTransactional)),
+        ]
+    );
+    assert_eq!(
+        locked.blockers,
+        [Blocker::Locked],
+        "a live runner's attempts may be in progress"
+    );
+    assert_eq!(locked.attempts.len(), 2);
+}
+
+#[test]
+fn an_owner_claim_makes_the_target_uncertain() {
+    let entries = [imperative("1")];
+    let catalog = catalog(&entries);
+
+    let status = catalog.classify(inspection(
+        Exclusion::Claimed,
+        managed(Vec::new(), Vec::new()),
+    ));
+
+    assert_eq!(status.classification, Classification::Uncertain);
+    assert_eq!(status.blockers, [Blocker::Claimed]);
+    assert_eq!(pending(&status), ["1"]);
+}
+
+#[test]
+fn another_stream_is_not_compared() {
+    let entries = [imperative("1")];
+    let catalog = catalog(&entries);
+    let journal = Journal::Managed(Records {
+        stream: "other".into(),
+        scheme: "numbered".into(),
+        history: vec![installed(&catalog, "7", 1)],
+        attempts: Vec::new(),
+    });
+
+    let status = catalog.classify(inspection(Exclusion::Free, journal));
+
+    assert_eq!(
+        status.blockers,
+        [Blocker::Stream {
+            stream: "other".into(),
+            scheme: "numbered".into(),
+        }]
+    );
+    assert!(status.pending.is_empty());
+}
+
+#[test]
+fn a_plan_renders_planned_bodies_and_keeps_imperative_ones_opaque() {
+    let entries = [planned("1"), imperative("2")];
+    let catalog = catalog(&entries);
+    let status = catalog.classify(inspection(Exclusion::Free, Journal::Fresh));
+
+    let plan = catalog
+        .plan_for(status, DialectId::Postgres)
+        .expect("renderable plan");
+    let steps: Vec<_> = plan
+        .steps
+        .iter()
+        .map(|step| (step.entry.version.to_string(), &step.execution))
+        .collect();
+
+    assert_eq!(
+        steps,
+        [
+            (
+                "1".to_owned(),
+                &Execution::Static(vec!["CREATE TABLE planned (id INTEGER)\n".into()])
+            ),
+            ("2".to_owned(), &Execution::Opaque),
+        ]
+    );
+}
+
+#[test]
+fn validation_checks_the_engine_offline() {
+    let entries = [planned("1")];
+    let supported = catalog(&entries);
+    let nontransactional = Box::leak(Box::new(Metadata {
+        policy: Policy::NonTransactional,
+        ..*metadata("1", &[])
+    }));
+    let unsupported = [Entry::Planned(Planned(Scripted(nontransactional)))];
+    let unsupported = catalog(&unsupported);
+
+    assert!(supported.validate(Engine::Sqlite).is_ok());
+    assert!(matches!(
+        unsupported.validate(Engine::Sqlite),
+        Err(ValidationError::Unsupported(version)) if version == "1"
+    ));
+    assert!(unsupported.validate(Engine::Postgres).is_ok());
+}

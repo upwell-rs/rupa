@@ -3,6 +3,7 @@
 //! [`Target::lock_name`] keeps runners exclusive across the per-artifact
 //! commits, and the InnoDB journal table lives in the selected database.
 
+mod inspect;
 mod recovery;
 pub mod sql;
 mod steps;
@@ -14,7 +15,7 @@ use rupa_core::{DialectId, Value};
 use crate::{Engine, Error, Policy, StateError, Target};
 
 /// The policies MySQL sessions honour.
-pub const POLICIES: &[Policy] = &[Policy::NonTransactional];
+pub const POLICIES: &[Policy] = Engine::MySql.policies();
 
 /// The `sql_mode` flag the migration script grammar assumes.
 const NO_BACKSLASH_ESCAPES: &str = "NO_BACKSLASH_ESCAPES";

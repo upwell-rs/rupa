@@ -47,3 +47,16 @@ pub(super) fn busy<E: std::error::Error, M: std::error::Error>(
         })
     )
 }
+
+/// Runs a body that panics on a dedicated session, which is then dropped
+/// without cleanup, as when a runner process dies.
+macro_rules! interrupt {
+    ($h:expr, $catalog:expr) => {{
+        let session = $h.connect();
+        let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = wait!($h, $catalog.apply(session));
+        }));
+
+        assert!(interrupted.is_err(), "the body panics");
+    }};
+}
