@@ -9,7 +9,7 @@ description = "Synchronous RUPA executor on the postgres crate"
 
 [features]
 # `rupa_migrate::sync::Session` on `PgExecutor`: advisory-lock exclusion and history tables.
-migrations = ["dep:rupa-migrate", "rupa-migrate/sync", "rupa-driver-tokio-postgres/migration-protocol"]
+migrations = ["dep:rupa-migrate", "rupa-migrate/sync", "rupa-migrate/protocol", "rupa-driver-tokio-postgres/migration-protocol"]
 default = ["chrono", "uuid"]
 # Date, time and UUID columns.
 chrono = ["rupa-driver-tokio-postgres/chrono", "postgres/with-chrono-0_4"]

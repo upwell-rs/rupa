@@ -18,7 +18,7 @@ pool = ["dep:r2d2", "rupa-core/r2d2"]
 dynamic = ["pool", "rupa-core/dynamic", "rupa-core/async"]
 # `rupa_migrate::sync::Session` on `MySqlExecutor`: named-lock exclusion and
 # nontransactional migrations.
-migrations = ["dep:rupa-migrate", "rupa-migrate/sync"]
+migrations = ["dep:rupa-migrate", "rupa-migrate/sync", "rupa-migrate/protocol"]
 # TLS on rustls (ring), configured in the URL (`?require_ssl=true`).
 tls-rustls = ["mysql/rustls-tls-ring"]
 

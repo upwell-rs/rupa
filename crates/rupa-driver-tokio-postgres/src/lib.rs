@@ -33,11 +33,11 @@
 mod driver;
 #[cfg(feature = "migrations")]
 mod migration_session;
-#[cfg(feature = "migration-protocol")]
-#[doc(hidden)]
-pub mod migrations;
 #[cfg(feature = "pool")]
 pub mod pool;
+#[cfg(feature = "migration-protocol")]
+#[doc(hidden)]
+pub mod protocol;
 #[doc(hidden)]
 pub mod shared;
 
@@ -69,7 +69,7 @@ pub struct PgExecutor {
     pending: PendingRollback,
     statements: StatementCache,
     #[cfg(feature = "migrations")]
-    migration: migrations::State,
+    migration: rupa_migrate::protocol::postgres::State,
 }
 
 impl PgExecutor {
@@ -82,7 +82,7 @@ impl PgExecutor {
             pending: PendingRollback::default(),
             statements: StatementCache::default(),
             #[cfg(feature = "migrations")]
-            migration: migrations::State::default(),
+            migration: rupa_migrate::protocol::postgres::State::default(),
         }
     }
 
@@ -184,7 +184,7 @@ impl AsyncExecutor for PgExecutor {
 
     async fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
         #[cfg(feature = "migrations")]
-        if self.migration.owner.is_some() || self.migration.poisoned {
+        if self.migration.is_running() {
             return self.execute_migration_statement(statement, expect).await;
         }
 
