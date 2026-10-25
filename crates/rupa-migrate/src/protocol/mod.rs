@@ -1,15 +1,13 @@
 //! The engine migration session protocols, shared by every driver of an
 //! engine. Not public API: driver crates enable the `protocol` feature.
 //!
-//! Each engine module ([`postgres`], [`mysql`], [`sqlite`]) owns the lock
-//! identity, reserved tables and attempt journal of its engine, so two drivers
-//! on one database exclude each other and read the same history by
-//! construction. The steps are written once and instantiated per mode as
-//! `<engine>::sync` and `<engine>::asynchronous`, over the mode's [`Io`]
-//! trait, which is all a driver implements; [`session!`](crate::__session)
-//! then forwards its `Session` to the steps.
-//!
-//! [`Io`]: sync::Io
+//! Each engine module (`postgres`, `mysql`, `sqlite`, present with a mode)
+//! owns the lock identity, reserved tables and attempt journal of its engine,
+//! so two drivers on one database exclude each other and read the same history
+//! by construction. The steps are written once and instantiated per mode as
+//! `<engine>::sync` and `<engine>::asynchronous`, over the mode's `Io` trait,
+//! which is all a driver implements; `__session!` then forwards its `Session`
+//! to the steps. Without a mode, only [`SqlState`] exists.
 
 #[cfg(any(feature = "sync", feature = "async"))]
 mod engines;
@@ -67,7 +65,7 @@ pub mod sync {
         /// Whether no transaction is open.
         fn is_autocommit(&mut self) -> Result<bool, Self::Error>;
 
-        /// Installs (`true`) or removes the [`authorize`](super::sqlite::authorize)
+        /// Installs (`true`) or removes the [`authorize`](crate::protocol::sqlite::authorize)
         /// policy, forgetting prepared statements authorized under the other.
         fn authorizer(&mut self, enabled: bool) -> Result<(), Self::Error>;
     }
@@ -127,7 +125,7 @@ pub mod asynchronous {
         /// Whether no transaction is open.
         fn is_autocommit(&mut self) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
-        /// Installs (`true`) or removes the [`authorize`](super::sqlite::authorize)
+        /// Installs (`true`) or removes the [`authorize`](crate::protocol::sqlite::authorize)
         /// policy, forgetting prepared statements authorized under the other.
         fn authorizer(
             &mut self,
