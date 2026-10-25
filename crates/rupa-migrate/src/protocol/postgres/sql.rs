@@ -1,4 +1,4 @@
-//! The PostgreSQL migration protocol's SQL, shared by both drivers.
+//! The PostgreSQL migration protocol's SQL.
 
 pub const META: &str = "_rupa_migration_meta";
 pub const HISTORY: &str = "_rupa_migration_history";
@@ -39,10 +39,14 @@ pub const TABLES: [(&str, &str, &str); 3] = [
 
 pub const SIGNATURE: &str = "SELECT coalesce(string_agg(a.attname || ' ' || format_type(a.atttypid, a.atttypmod) || CASE WHEN a.attnotnull THEN ' not null' ELSE '' END, ', ' ORDER BY a.attnum), '') FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped";
 
-/// One row describing the connection: autocommit, the string setting, the
-/// database and the current schema. Sent with the simple query protocol,
-/// where an implicit transaction starts with its statement.
-pub const DESCRIBE: &str = "SELECT transaction_timestamp() = statement_timestamp(), current_setting('standard_conforming_strings'), current_database(), current_schema()";
+/// One row describing the connection: the transaction start, the string
+/// setting, the database and the current schema.
+pub const DESCRIBE: &str = "SELECT transaction_timestamp()::text, current_setting('standard_conforming_strings'), current_database(), current_schema()";
+
+/// The transaction start, read again in a later request: outside a
+/// transaction every request runs in its own implicit one, so the two reads
+/// agree only inside an application transaction, under either protocol.
+pub const TRANSACTION_START: &str = "SELECT transaction_timestamp()::text";
 
 /// Whether this session holds the advisory lock split into `$1`/`$2`.
 pub const HOLDS_LOCK: &str = "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND granted AND objsubid = 1 AND classid::bigint = $1 AND objid::bigint = $2)";
@@ -54,11 +58,24 @@ pub const RESERVED_COUNT: &str = "SELECT count(*) FROM pg_class c JOIN pg_namesp
 pub const USER_OBJECTS: &str = "SELECT (SELECT count(*) FROM pg_class c WHERE c.relnamespace = n.oid) + (SELECT count(*) FROM pg_proc p WHERE p.pronamespace = n.oid) + (SELECT count(*) FROM pg_type t WHERE t.typnamespace = n.oid AND t.typtype <> 'c' AND t.typcategory <> 'A') FROM pg_namespace n WHERE n.nspname = $1";
 
 /// Unexpected reserved relations, triggers on metadata tables, and the
-/// number of valid singleton headers, in namespace `ns`.
+/// number of valid singleton headers, in namespace `ns` (`$1`), for checksum
+/// format `$2`. The reserved names are framework constants, inlined.
 pub fn integrity(ns: &str) -> String {
+    let relations = literals(&RELATIONS);
+    let tables = literals(&RELATIONS[..3]);
+
     format!(
-        "SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND left(lower(c.relname), 6) = '_rupa_' AND c.relname <> ALL($2)), (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($3) AND NOT t.tgisinternal), (SELECT count(*) FROM {ns}.{META} WHERE schema_version = 1 AND checksum_format = $4)"
+        "SELECT (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND left(lower(c.relname), 6) = '_rupa_' AND c.relname NOT IN ({relations})), (SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname IN ({tables}) AND NOT t.tgisinternal), (SELECT count(*) FROM {ns}.{META} WHERE schema_version = 1 AND checksum_format = $2)"
     )
+}
+
+/// Framework-owned names as a SQL literal list.
+fn literals(names: &[&str]) -> String {
+    names
+        .iter()
+        .map(|name| format!("'{name}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Inserts the singleton header into `ns`.

@@ -63,7 +63,7 @@ pub struct PgExecutor {
     pending: PendingRollback,
     statements: StatementCache,
     #[cfg(feature = "migrations")]
-    migration: rupa_driver_tokio_postgres::migrations::State,
+    migration: rupa_migrate::protocol::postgres::State,
 }
 
 impl PgExecutor {
@@ -75,7 +75,7 @@ impl PgExecutor {
             pending: PendingRollback::default(),
             statements: StatementCache::default(),
             #[cfg(feature = "migrations")]
-            migration: rupa_driver_tokio_postgres::migrations::State::default(),
+            migration: rupa_migrate::protocol::postgres::State::default(),
         }
     }
 
@@ -175,7 +175,7 @@ impl Executor for PgExecutor {
 
     fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
         #[cfg(feature = "migrations")]
-        if self.migration.owner.is_some() || self.migration.poisoned {
+        if self.migration.is_running() {
             return self.execute_migration_statement(statement, expect);
         }
 

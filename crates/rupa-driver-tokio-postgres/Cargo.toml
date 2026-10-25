@@ -8,9 +8,9 @@ license.workspace = true
 description = "Async RUPA executor on tokio-postgres"
 
 [features]
-# The PostgreSQL migration session protocol shared with the sync driver; no
-# async migration code by itself.
-migration-protocol = ["dep:rupa-migrate"]
+# What both PostgreSQL drivers need for the shared migration protocol
+# (`PgError::Migration`, row decoding); no async migration code by itself.
+migration-protocol = ["dep:rupa-migrate", "rupa-migrate/protocol"]
 # `rupa_migrate::asynchronous::Session` on `PgExecutor`.
 migrations = ["migration-protocol", "rupa-migrate/async"]
 default = ["chrono", "uuid"]

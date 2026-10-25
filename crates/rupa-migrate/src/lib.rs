@@ -15,6 +15,9 @@ mod error;
 mod macros;
 mod model;
 mod plan;
+#[cfg(feature = "protocol")]
+#[doc(hidden)]
+pub mod protocol;
 mod report;
 #[cfg(any(feature = "sync", feature = "async"))]
 mod runner;

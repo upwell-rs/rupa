@@ -70,7 +70,7 @@ pub struct MySqlExecutor {
     dialect: MySql,
     pending: PendingRollback,
     #[cfg(feature = "migrations")]
-    migration: migrations::State,
+    migration: rupa_migrate::protocol::mysql::State,
 }
 
 impl MySqlExecutor {
@@ -81,7 +81,7 @@ impl MySqlExecutor {
             dialect: MySql,
             pending: PendingRollback::default(),
             #[cfg(feature = "migrations")]
-            migration: migrations::State::default(),
+            migration: rupa_migrate::protocol::mysql::State::default(),
         }
     }
 
