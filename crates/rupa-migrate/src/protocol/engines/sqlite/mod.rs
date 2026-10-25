@@ -2,7 +2,7 @@
 //! runner claims the target durably in the metadata header under a
 //! `BEGIN IMMEDIATE` writer lock, and each body runs in its own immediate
 //! transaction. User statements run under [`authorize`], installed through
-//! the driver's [`SqliteIo`](super::sync::SqliteIo).
+//! the driver's `SqliteIo` (in `protocol::sync` or `protocol::asynchronous`).
 
 pub mod sql;
 mod steps;
