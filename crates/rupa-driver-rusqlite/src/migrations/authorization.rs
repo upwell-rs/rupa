@@ -1,87 +1,81 @@
+use rupa_migrate::protocol::sqlite::{action, authorize};
 use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
 
-use crate::{SqliteError, SqliteExecutor};
+use crate::SqliteError;
 
-/// Scope-bound native authorization, removed before framework history writes.
-pub(super) struct Authorized<'a> {
-    pub(super) executor: &'a mut SqliteExecutor,
-}
+/// Installs or removes the shared migration authorizer. Prepared statements
+/// were authorized under the previous policy, so the cache is flushed first.
+pub(super) fn install(conn: &mut rusqlite::Connection, enabled: bool) -> Result<(), SqliteError> {
+    conn.flush_prepared_statement_cache();
 
-impl<'a> Authorized<'a> {
-    pub(super) fn new(executor: &'a mut SqliteExecutor) -> Result<Self, SqliteError> {
-        executor.connection().flush_prepared_statement_cache();
-        executor.connection().authorizer(Some(authorize))?;
-
-        Ok(Self { executor })
-    }
-}
-
-impl Drop for Authorized<'_> {
-    fn drop(&mut self) {
-        self.executor.connection().flush_prepared_statement_cache();
-        // This hook is owned by a dedicated connection, which is discarded if unwinding interrupts cleanup.
-        let _ = self
-            .executor
-            .connection()
-            .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
-    }
-}
-
-fn reserved(name: &str) -> bool {
-    name.to_ascii_lowercase().starts_with("_rupa_")
-}
-
-fn authorize(context: AuthContext<'_>) -> Authorization {
-    let allowed = if context.database_name == Some("temp") {
-        match context.action {
-            AuthAction::Read { table_name, .. } | AuthAction::Update { table_name, .. } => {
-                matches!(table_name, "sqlite_temp_master" | "sqlite_temp_schema")
-            }
-            _ => false,
-        }
-    } else if context.database_name.is_some_and(|name| name != "main") {
-        false
+    if enabled {
+        conn.authorizer(Some(decide))?;
     } else {
-        match context.action {
-            AuthAction::CreateTable { table_name }
-            | AuthAction::DropTable { table_name }
-            | AuthAction::Insert { table_name }
-            | AuthAction::Delete { table_name }
-            | AuthAction::Update { table_name, .. }
-            | AuthAction::Read { table_name, .. }
-            | AuthAction::AlterTable { table_name, .. }
-            | AuthAction::Analyze { table_name } => !reserved(table_name),
-            AuthAction::CreateIndex {
-                index_name,
-                table_name,
-            }
-            | AuthAction::DropIndex {
-                index_name,
-                table_name,
-            } => !reserved(index_name) && !reserved(table_name),
-            AuthAction::CreateTrigger {
-                trigger_name,
-                table_name,
-            }
-            | AuthAction::DropTrigger {
-                trigger_name,
-                table_name,
-            } => !reserved(trigger_name) && !reserved(table_name),
-            AuthAction::CreateView { view_name } | AuthAction::DropView { view_name } => {
-                !reserved(view_name)
-            }
-            AuthAction::Reindex { index_name } => !reserved(index_name),
-            AuthAction::Function { function_name } => {
-                !function_name.eq_ignore_ascii_case("load_extension")
-            }
-            AuthAction::Select | AuthAction::Recursive => true,
-            _ => false,
-        }
-    };
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>)?;
+    }
+
+    Ok(())
+}
+
+fn decide(context: AuthContext<'_>) -> Authorization {
+    let allowed = raw(&context.action)
+        .is_some_and(|(code, first, second)| authorize(code, first, second, context.database_name));
 
     if allowed {
         Authorization::Allow
     } else {
         Authorization::Deny
+    }
+}
+
+/// The authorizer action code and arguments of an action the policy can
+/// allow; every other action is denied.
+fn raw<'c>(action: &AuthAction<'c>) -> Option<(i32, Option<&'c str>, Option<&'c str>)> {
+    let named = |code, first| Some((code, Some(first), None));
+    let pair = |code, first, second| Some((code, Some(first), Some(second)));
+
+    match *action {
+        AuthAction::CreateIndex {
+            index_name,
+            table_name,
+        } => pair(action::CREATE_INDEX, index_name, table_name),
+        AuthAction::DropIndex {
+            index_name,
+            table_name,
+        } => pair(action::DROP_INDEX, index_name, table_name),
+        AuthAction::CreateTrigger {
+            trigger_name,
+            table_name,
+        } => pair(action::CREATE_TRIGGER, trigger_name, table_name),
+        AuthAction::DropTrigger {
+            trigger_name,
+            table_name,
+        } => pair(action::DROP_TRIGGER, trigger_name, table_name),
+        AuthAction::Read {
+            table_name,
+            column_name,
+        } => pair(action::READ, table_name, column_name),
+        AuthAction::Update {
+            table_name,
+            column_name,
+        } => pair(action::UPDATE, table_name, column_name),
+        AuthAction::AlterTable {
+            database_name,
+            table_name,
+        } => pair(action::ALTER_TABLE, database_name, table_name),
+        AuthAction::CreateTable { table_name } => named(action::CREATE_TABLE, table_name),
+        AuthAction::DropTable { table_name } => named(action::DROP_TABLE, table_name),
+        AuthAction::Insert { table_name } => named(action::INSERT, table_name),
+        AuthAction::Delete { table_name } => named(action::DELETE, table_name),
+        AuthAction::Analyze { table_name } => named(action::ANALYZE, table_name),
+        AuthAction::CreateView { view_name } => named(action::CREATE_VIEW, view_name),
+        AuthAction::DropView { view_name } => named(action::DROP_VIEW, view_name),
+        AuthAction::Reindex { index_name } => named(action::REINDEX, index_name),
+        AuthAction::Function { function_name } => {
+            Some((action::FUNCTION, None, Some(function_name)))
+        }
+        AuthAction::Select => Some((action::SELECT, None, None)),
+        AuthAction::Recursive => Some((action::RECURSIVE, None, None)),
+        _ => None,
     }
 }

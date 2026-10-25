@@ -1,40 +1,98 @@
-//! Migration control stays inside the native SQLite executor.
+//! The sync migration session on [`SqliteExecutor`], from the shared SQLite
+//! protocol.
 
 mod authorization;
-mod schema;
-mod session;
 
 use std::time::Duration;
 
+use rupa_core::exec::Outcome;
+use rupa_core::ir::Statement;
+use rupa_core::query::Expect;
 use rupa_core::tx::TxConnection;
-use rupa_migrate::{Error, StateError};
+use rupa_core::{SqlType, Value};
+use rupa_migrate::StateError;
+use rupa_migrate::protocol::SqlState;
+use rupa_migrate::protocol::sqlite::{self, State};
+use rupa_migrate::protocol::sync::{Io, SqliteIo};
+use rusqlite::types::Value as SqlValue;
 
+use crate::value::{Param, from_sql};
 use crate::{SqliteError, SqliteExecutor};
 
-/// Private per-connection ownership and attempt state.
-pub(super) struct State {
-    pub(super) owner: Option<String>,
-    attempt: Option<i64>,
-    pub(super) poisoned: bool,
-    lock_timeout: Duration,
-}
+rupa_migrate::__session!(sync, sqlite, SqliteExecutor);
 
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            owner: None,
-            attempt: None,
-            poisoned: false,
-            lock_timeout: Duration::from_secs(5),
-        }
+impl From<StateError> for SqliteError {
+    fn from(state: StateError) -> Self {
+        Self::Migration(state)
     }
 }
 
-impl State {
-    /// Whether a run left state on the connection: owned, mid-attempt or
-    /// poisoned. Pools must discard such connections.
-    pub(super) fn is_active(&self) -> bool {
-        self.owner.is_some() || self.attempt.is_some() || self.poisoned
+/// SQLite reports result codes, not SQLSTATEs.
+impl SqlState for SqliteError {
+    fn sqlstate(&self) -> Option<String> {
+        None
+    }
+}
+
+impl Io for SqliteExecutor {
+    type Error = SqliteError;
+    type State = State;
+
+    fn state(&mut self) -> &mut State {
+        &mut self.migration
+    }
+
+    fn query(
+        &mut self,
+        sql: &str,
+        bound: &[Value],
+        columns: &[SqlType],
+    ) -> Result<Vec<Vec<Value>>, SqliteError> {
+        let mut statement = self.conn.prepare(sql)?;
+        let mut rows = statement.query(rusqlite::params_from_iter(bound.iter().map(Param)))?;
+        let mut out = Vec::new();
+
+        while let Some(row) = rows.next()? {
+            let values = columns
+                .iter()
+                .enumerate()
+                .map(|(index, want)| {
+                    let value = row.get::<_, SqlValue>(index)?;
+
+                    from_sql(&value, *want, index).map_err(|e| SqliteError::Result(e.into()))
+                })
+                .collect::<Result<_, _>>()?;
+
+            out.push(values);
+        }
+
+        Ok(out)
+    }
+
+    fn execute(&mut self, sql: &str, bound: &[Value]) -> Result<u64, SqliteError> {
+        let count = self
+            .conn
+            .execute(sql, rusqlite::params_from_iter(bound.iter().map(Param)))?;
+
+        Ok(count as u64)
+    }
+
+    fn batch(&mut self, sql: &str) -> Result<(), SqliteError> {
+        Ok(self.conn.execute_batch(sql)?)
+    }
+
+    fn clean(&mut self) -> Result<(), SqliteError> {
+        TxConnection::clean(self)
+    }
+}
+
+impl SqliteIo for SqliteExecutor {
+    fn is_autocommit(&mut self) -> Result<bool, SqliteError> {
+        Ok(self.conn.is_autocommit())
+    }
+
+    fn authorizer(&mut self, enabled: bool) -> Result<(), SqliteError> {
+        authorization::install(&mut self.conn, enabled)
     }
 }
 
@@ -46,96 +104,17 @@ impl SqliteExecutor {
         self
     }
 
-    fn validate_migration_connection(&mut self) -> Result<(), Error<SqliteError>> {
-        self.clean().map_err(Error::Database)?;
-        if !self.connection().is_autocommit() {
-            return Err(Error::History(
-                "connection is already inside an application transaction".into(),
-            ));
-        }
-
-        let writable_schema: i64 = self
-            .connection()
-            .query_row("PRAGMA writable_schema", [], |r| r.get(0))
-            .map_err(db)?;
-        if writable_schema != 0 {
-            return Err(Error::History(
-                "writable_schema must be disabled on migration connections".into(),
-            ));
-        }
-
-        let attached: i64 = self
-            .connection()
-            .query_row(
-                "SELECT count(*) FROM pragma_database_list WHERE name NOT IN ('main', 'temp')",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(db)?;
-        let temporary: i64 = self
-            .connection()
-            .query_row("SELECT count(*) FROM temp.sqlite_schema", [], |r| r.get(0))
-            .map_err(db)?;
-        if attached != 0 || temporary != 0 {
-            return Err(Error::History(
-                "migration sessions require only main and an empty temp namespace".into(),
-            ));
-        }
-
-        Ok(())
-    }
-
-    fn verify_owner(&mut self) -> Result<(), Error<SqliteError>> {
-        let owner =
-            self.migration.owner.as_deref().ok_or_else(|| {
-                Error::History("migration connection does not own the target".into())
-            })?;
-        let stored: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT owner FROM main._rupa_migration_meta WHERE id = 1",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(db)?;
-        if stored.as_deref() != Some(owner) || self.migration.poisoned {
-            return Err(Error::History(
-                "migration ownership was lost or connection is uncertain".into(),
-            ));
-        }
-
-        Ok(())
-    }
-
+    /// Runs a typed user statement under the migration authorizer.
     pub(super) fn execute_migration_statement(
         &mut self,
-        statement: &rupa_core::ir::Statement,
-        expect: rupa_core::query::Expect,
-    ) -> Result<rupa_core::exec::Outcome, SqliteError> {
-        self.user_executor()?.executor.run(statement, expect)
+        statement: &Statement,
+        expect: Expect,
+    ) -> Result<Outcome, SqliteError> {
+        sqlite::sync::user_begin(self)?;
+
+        let result = self.run(statement, expect);
+        let ended = sqlite::sync::user_end(self);
+
+        result.and_then(|outcome| ended.map(|()| outcome))
     }
-
-    fn user_executor(&mut self) -> Result<authorization::Authorized<'_>, SqliteError> {
-        let state = if self.migration.owner.is_none() {
-            Some(StateError::NotOwner)
-        } else if self.migration.poisoned {
-            Some(StateError::Poisoned)
-        } else if self.migration.attempt.is_none() {
-            Some(StateError::NoAttempt)
-        } else if self.connection().is_autocommit() {
-            Some(StateError::NoTransaction)
-        } else {
-            None
-        };
-
-        if let Some(state) = state {
-            return Err(SqliteError::Migration(state));
-        }
-
-        authorization::Authorized::new(self)
-    }
-}
-
-fn db(error: rusqlite::Error) -> Error<SqliteError> {
-    Error::Database(SqliteError::Db(error))
 }

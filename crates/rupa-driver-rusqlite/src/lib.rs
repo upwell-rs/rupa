@@ -83,7 +83,7 @@ pub struct SqliteExecutor {
     dialect: Sqlite,
     pending: PendingRollback,
     #[cfg(feature = "migrations")]
-    migration: migrations::State,
+    migration: rupa_migrate::protocol::sqlite::State,
 }
 
 impl SqliteExecutor {
@@ -96,7 +96,7 @@ impl SqliteExecutor {
             dialect: Sqlite,
             pending: PendingRollback::default(),
             #[cfg(feature = "migrations")]
-            migration: migrations::State::default(),
+            migration: rupa_migrate::protocol::sqlite::State::default(),
         })
     }
 
@@ -174,7 +174,7 @@ impl Executor for SqliteExecutor {
 
     fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqliteError> {
         #[cfg(feature = "migrations")]
-        if self.migration.owner.is_some() || self.migration.poisoned {
+        if self.migration.is_running() {
             return self.execute_migration_statement(statement, expect);
         }
 

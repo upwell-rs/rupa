@@ -8,7 +8,7 @@ license.workspace = true
 description = "Synchronous RUPA executor on rusqlite (SQLite 3.38+)"
 
 [features]
-migrations = ["dep:rupa-migrate", "rupa-migrate/sync", "rusqlite/hooks"]
+migrations = ["dep:rupa-migrate", "rupa-migrate/sync", "rupa-migrate/protocol", "rusqlite/hooks"]
 default = ["bundled", "chrono", "uuid"]
 # Compile SQLite from source (rusqlite's `bundled`); turn off to link a system SQLite >= 3.38.
 bundled = ["rusqlite/bundled"]
