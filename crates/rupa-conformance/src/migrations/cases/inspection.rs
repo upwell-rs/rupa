@@ -29,16 +29,22 @@ fn pending(status: &Status<'_>) -> Vec<String> {
 
 /// The status once the server has ended an interrupted runner's session.
 /// It does so asynchronously after the connection closed, and holds the
-/// runner's lock until then, so this reads again while the target is locked.
+/// runner's lock until then, so this reads again while the target is locked,
+/// and fails naming the lock if the server still holds it at the deadline.
 fn settled<'c, H: Harness>(h: &H, catalog: &'c Catalog<'_, Body>) -> Status<'c> {
     let deadline = Instant::now() + Duration::from_secs(5);
 
     loop {
         let status = wait!(h, catalog.status(h.connect())).expect("status");
 
-        if status.exclusion != Exclusion::Locked || Instant::now() > deadline {
+        if status.exclusion != Exclusion::Locked {
             return status;
         }
+
+        assert!(
+            Instant::now() < deadline,
+            "the server still holds the interrupted runner's lock after 5s: {status:?}"
+        );
 
         std::thread::sleep(Duration::from_millis(20));
     }
