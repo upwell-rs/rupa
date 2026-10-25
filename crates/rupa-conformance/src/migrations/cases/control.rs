@@ -6,9 +6,9 @@ const SHARED: [&str; 6] = [
     "CREATE TABLE marker(id INTEGER); COMMIT;",
     "CREATE TABLE marker(id INTEGER); ROLLBACK;",
     "CREATE TABLE marker(id INTEGER); SAVEPOINT escape;",
-    "CREATE TABLE marker(id INTEGER); DELETE FROM _rupa_migration_history;",
+    "CREATE TABLE marker(id INTEGER); DELETE FROM _rupa_migrations;",
     "CREATE TABLE marker(id INTEGER); DELETE FROM _RUPA_MIGRATION_ATTEMPTS;",
-    "CREATE TABLE marker(id INTEGER); SELECT * FROM _rupa_migration_history;",
+    "CREATE TABLE marker(id INTEGER); SELECT * FROM _rupa_migrations;",
 ];
 
 pub(super) fn case_scripts_cannot_escape_the_runner<H: Harness>(h: &mut H) {

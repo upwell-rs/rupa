@@ -84,7 +84,7 @@ fn application_transactions_are_rejected(my: &mut My) {
     assert!(rejected_history(open.apply(&numbered(&entries))));
     assert!(rejected_history(plain.apply(&numbered(&entries))));
     assert!(rejected_history(manual.apply(&numbered(&entries))));
-    assert!(!my.table_exists("_rupa_migration_meta"));
+    assert!(!my.table_exists("_rupa_migrations"));
 }
 
 fn connections_without_a_database_are_rejected(my: &mut My) {
@@ -157,7 +157,7 @@ fn backslashes_are_literal_in_migration_scripts(my: &mut My) {
 fn double_quotes_are_strings_under_ansi_sessions(my: &mut My) {
     let entries = [with_policy(
         "1",
-        "CREATE TABLE quoted (q VARCHAR(32)); INSERT INTO quoted VALUES (\"_rupa_migration_history\");",
+        "CREATE TABLE quoted (q VARCHAR(32)); INSERT INTO quoted VALUES (\"_rupa_migrations\");",
         Policy::NonTransactional,
     )];
 
@@ -184,10 +184,13 @@ fn double_quotes_are_strings_under_ansi_sessions(my: &mut My) {
     assert!(original.contains("ANSI_QUOTES"), "{original}");
     assert_eq!(restored, original);
     assert_eq!(
-        my.count("SELECT COUNT(*) FROM quoted WHERE q = '_rupa_migration_history'"),
+        my.count("SELECT COUNT(*) FROM quoted WHERE q = '_rupa_migrations'"),
         1
     );
-    assert_eq!(my.count("SELECT COUNT(*) FROM _rupa_migration_history"), 1);
+    assert_eq!(
+        my.count("SELECT COUNT(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'applied'"),
+        1
+    );
 }
 
 fn lost_named_lock_poisons_instead_of_completing(my: &mut My) {
@@ -208,9 +211,12 @@ fn lost_named_lock_poisons_instead_of_completing(my: &mut My) {
         Err(MySqlError::Migration(StateError::Poisoned))
     ));
     assert!(my.table_exists("marker"), "autocommit effects persist");
-    assert_eq!(my.count("SELECT COUNT(*) FROM _rupa_migration_history"), 0);
     assert_eq!(
-        my.count("SELECT COUNT(*) FROM _rupa_migration_attempts WHERE status = 'running'"),
+        my.count("SELECT COUNT(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'applied'"),
+        0
+    );
+    assert_eq!(
+        my.count("SELECT COUNT(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'running'"),
         1
     );
 }

@@ -1,9 +1,10 @@
 //! The SQLite migration session protocol. SQLite has no session locks, so a
-//! runner claims the target durably in the metadata header under a
+//! runner claims the target durably in the journal's init row under a
 //! `BEGIN IMMEDIATE` writer lock, and each body runs in its own immediate
 //! transaction. User statements run under [`authorize`], installed through
 //! the driver's `SqliteIo` (in `protocol::sync` or `protocol::asynchronous`).
 
+mod recovery;
 pub mod sql;
 mod steps;
 

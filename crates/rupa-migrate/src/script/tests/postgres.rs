@@ -93,11 +93,7 @@ fn rejects_runner_owned_statement_classes() {
             ScriptRule::AdvisoryLock,
             7,
         ),
-        (
-            "DELETE FROM _rupa_migration_history",
-            ScriptRule::ReservedName,
-            12,
-        ),
+        ("DELETE FROM _rupa_migrations", ScriptRule::ReservedName, 12),
         (
             "ALTER TABLE t RENAME TO \"_RUPA_hidden\"",
             ScriptRule::ReservedName,

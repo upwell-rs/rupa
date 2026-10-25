@@ -51,7 +51,7 @@ pub(super) fn case_policies_apply_in_catalog_order_once<H: Harness>(h: &mut H) {
     );
     assert_eq!(h.count("SELECT count(*) FROM audit"), 1);
     assert_eq!(
-        h.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'applied'"),
+        h.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'applied'"),
         3
     );
 }
@@ -105,11 +105,11 @@ pub(super) fn case_failed_body_keeps_effects_and_blocks_replay<H: Harness>(h: &m
         "earlier statements stay committed"
     );
     assert_eq!(
-        h.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'running'"),
+        h.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'running'"),
         1
     );
     assert_eq!(
-        h.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'failed'"),
+        h.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'failed'"),
         0
     );
 }
@@ -144,7 +144,7 @@ pub(super) fn case_interrupted_body_is_uncertain<H: Harness>(h: &mut H) {
         "nontransactional effects persist"
     );
     assert_eq!(
-        h.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'running'"),
+        h.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'running'"),
         1
     );
 }
@@ -169,7 +169,10 @@ pub(super) fn case_statements_outside_transactions_need_the_policy<H: Harness>(h
         "the engine refuses these statements inside the artifact transaction"
     );
     assert_eq!(versions(&report), ["2"]);
-    assert_eq!(h.count("SELECT count(*) FROM _rupa_migration_history"), 2);
+    assert_eq!(
+        h.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'applied'"),
+        2
+    );
 }
 
 pub(super) fn case_body_refused_before_dispatch_fails_without_uncertainty<H: Harness>(h: &mut H) {
@@ -205,7 +208,7 @@ pub(super) fn case_body_refused_before_dispatch_fails_without_uncertainty<H: Har
     assert_eq!(versions(&report), ["1"]);
     assert!(!h.table_exists("never"));
     assert_eq!(
-        h.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'failed'"),
+        h.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'failed'"),
         1
     );
 }

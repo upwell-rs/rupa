@@ -15,8 +15,8 @@ const SPEC: Spec = Spec {
     forbidden: &[
         "CREATE TABLE marker(id INTEGER); ATTACH ':memory:' AS other;",
         "CREATE TABLE marker(id INTEGER); PRAGMA writable_schema = ON;",
-        "CREATE TABLE marker(id INTEGER); UPDATE _rupa_migration_meta SET owner = NULL;",
-        "CREATE TABLE marker(id INTEGER); CREATE TRIGGER hijack AFTER INSERT ON _rupa_migration_history BEGIN DELETE FROM marker; END;",
+        "CREATE TABLE marker(id INTEGER); UPDATE _rupa_migrations SET owner = NULL;",
+        "CREATE TABLE marker(id INTEGER); CREATE TRIGGER hijack AFTER INSERT ON _rupa_migrations BEGIN DELETE FROM marker; END;",
     ],
     outside: "",
 };

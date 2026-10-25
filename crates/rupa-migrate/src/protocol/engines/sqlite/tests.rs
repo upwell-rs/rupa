@@ -25,20 +25,20 @@ fn user_objects_in_main_are_allowed() {
 fn reserved_objects_are_refused_in_any_case() {
     assert!(!authorize(
         INSERT,
-        Some("_rupa_migration_history"),
+        Some("_rupa_migrations"),
         None,
         Some("main")
     ));
     assert!(!authorize(
         READ,
-        Some("_RUPA_migration_meta"),
+        Some("_RUPA_Migrations"),
         Some("owner"),
         Some("main")
     ));
     assert!(!authorize(
         CREATE_INDEX,
         Some("notes_title"),
-        Some("_rupa_migration_meta"),
+        Some("_rupa_migrations"),
         Some("main")
     ));
     assert!(!authorize(
@@ -50,7 +50,7 @@ fn reserved_objects_are_refused_in_any_case() {
     assert!(!authorize(
         ALTER_TABLE,
         Some("main"),
-        Some("_rupa_migration_attempts"),
+        Some("_rupa_migrations"),
         Some("main")
     ));
 }

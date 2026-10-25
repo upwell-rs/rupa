@@ -1,4 +1,4 @@
-use crate::{Checksum, ValidationError};
+use crate::{Checksum, RecoveryError, ValidationError};
 
 /// Migration infrastructure failed without erasing the driver's error type.
 #[derive(Debug, thiserror::Error)]
@@ -23,6 +23,9 @@ pub enum Error<E: std::error::Error + 'static> {
     /// An interrupted attempt prevents blind replay.
     #[error("migration attempt {0} is unresolved; explicit reconciliation is required")]
     Uncertain(i64),
+    /// An operator's recovery assertion was refused before anything was recorded.
+    #[error(transparent)]
+    Recovery(#[from] RecoveryError),
 }
 
 /// Durable successfully executed incremental history.
@@ -34,4 +37,26 @@ pub struct HistoryEntry {
     pub version: String,
     /// Checksum of the installed source closure.
     pub checksum: Checksum,
+    /// Whether the runner observed completion or an operator asserted it.
+    pub provenance: Provenance,
+}
+
+/// How a history entry came to be recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// The runner executed the body and recorded its completion.
+    Executed,
+    /// An operator asserted that an uncertain attempt's effects are complete;
+    /// the runner never observed the body finish.
+    Recovered,
+}
+
+impl Provenance {
+    /// The name reports use.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Executed => "executed",
+            Self::Recovered => "recovered",
+        }
+    }
 }

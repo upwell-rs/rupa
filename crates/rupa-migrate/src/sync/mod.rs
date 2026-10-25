@@ -5,8 +5,8 @@ use rupa_core::sync::Connection;
 
 use crate::runner::mode;
 use crate::{
-    ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, MigrationInfo, Plan, Policy, RunError,
-    VersionScheme,
+    ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, MigrationInfo, Plan, Policy, Recovery,
+    RunError, VersionScheme,
 };
 
 /// Driver-owned dedicated physical migration connection.
@@ -21,8 +21,15 @@ pub trait Session: Connection {
     /// never downgraded.
     const POLICIES: &'static [Policy] = &[Policy::TransactionalRequired];
 
-    /// Acquires exclusion, validates/initializes metadata and checks outstanding attempts.
-    fn acquire(&mut self, stream: &str, scheme: VersionScheme) -> Result<(), Error<Self::Error>>;
+    /// Acquires exclusion, validates/initializes metadata and checks
+    /// outstanding attempts. Returns the interrupted transactional attempts it
+    /// recorded as rolled back; an unresolved nontransactional attempt fails
+    /// with [`Error::Uncertain`].
+    fn acquire(
+        &mut self,
+        stream: &str,
+        scheme: VersionScheme,
+    ) -> Result<Vec<i64>, Error<Self::Error>>;
 
     /// Reads installed history without executing user code or creating metadata.
     fn history(&mut self) -> Result<Vec<HistoryEntry>, Error<Self::Error>>;
@@ -47,6 +54,17 @@ pub trait Session: Connection {
 
     /// Executes an authorized user script on this session's current transaction.
     fn script(&mut self, sql: &str) -> Result<(), Error<Self::Error>>;
+
+    /// Records an operator's `recovery` assertion under newly acquired
+    /// exclusion, with `entries` as the catalog the assertion is checked
+    /// against, then releases exclusion. Executes no body.
+    fn recover(
+        &mut self,
+        stream: &str,
+        scheme: VersionScheme,
+        entries: &[CatalogEntry],
+        recovery: &Recovery<'_>,
+    ) -> Result<(), Error<Self::Error>>;
 
     /// Marks the session unusable after a run ended without returning (a
     /// dropped future or an unwinding panic). Called from `Drop`, so it must
@@ -97,6 +115,33 @@ pub trait Apply {
     fn apply<S: Session>(&self, connection: S) -> ApplyResult<S, Self::Entry>
     where
         Self::Entry: Migration<S>;
+}
+
+/// Records an operator's recovery assertion on a dedicated native
+/// connection, then closes it.
+pub trait Recover {
+    /// Records `recovery` under exclusion, checked against this catalog.
+    fn recover<S: Session>(
+        &self,
+        connection: S,
+        recovery: &Recovery<'_>,
+    ) -> Result<(), Error<S::Error>>;
+}
+
+impl<M> Recover for Catalog<'_, M> {
+    fn recover<S: Session>(
+        &self,
+        mut connection: S,
+        recovery: &Recovery<'_>,
+    ) -> Result<(), Error<S::Error>> {
+        recover(
+            &mut connection,
+            self.stream,
+            self.scheme,
+            &self.entries,
+            recovery,
+        )
+    }
 }
 
 impl<M: MigrationInfo> Apply for Catalog<'_, M> {

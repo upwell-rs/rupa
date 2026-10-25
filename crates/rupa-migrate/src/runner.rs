@@ -114,9 +114,13 @@ pub(crate) fn finish<E: std::error::Error + 'static, M: std::error::Error + 'sta
     result: Result<(), RunError<E, M>>,
     released: Result<(), Error<E>>,
     applied: Vec<Version>,
+    reconciled: Vec<i64>,
 ) -> Result<ApplyReport, RunError<E, M>> {
     match (result, released) {
-        (Ok(()), Ok(())) => Ok(ApplyReport { applied }),
+        (Ok(()), Ok(())) => Ok(ApplyReport {
+            applied,
+            reconciled,
+        }),
         (Ok(()), Err(source)) => Err(RunError::infrastructure(source).with_applied(applied)),
         (Err(mut error), released) => {
             if let Err(cleanup) = released {
@@ -217,20 +221,38 @@ macro_rules! mode {
             .map_err(|e| crate::RunError::infrastructure(crate::Error::Validation(e)))?;
 
             let mut guard = RunGuard { session, armed: true };
-            let acquired = guard.session.acquire(catalog.stream, catalog.scheme) $($await)*;
+            let reconciled = match guard.session.acquire(catalog.stream, catalog.scheme) $($await)* {
+                Ok(reconciled) => reconciled,
+                Err(source) => {
+                    guard.armed = false;
 
-            if let Err(source) = acquired {
-                guard.armed = false;
-
-                return Err(crate::RunError::infrastructure(source));
-            }
+                    return Err(crate::RunError::infrastructure(source));
+                }
+            };
 
             let result = apply_locked(&mut *guard.session, catalog, &mut applied) $($await)*;
             let released = guard.session.release() $($await)*;
 
             guard.armed = false;
 
-            crate::runner::finish(result, released, applied)
+            crate::runner::finish(result, released, applied, reconciled)
+        }
+
+        /// Records `recovery` against `entries`, abandoning the session if the
+        /// call ends without returning.
+        pub(crate) $($async)* fn recover<S: Session>(
+            session: &mut S,
+            stream: &str,
+            scheme: crate::VersionScheme,
+            entries: &[crate::CatalogEntry],
+            recovery: &crate::Recovery<'_>,
+        ) -> Result<(), crate::Error<S::Error>> {
+            let mut guard = RunGuard { session, armed: true };
+            let result = guard.session.recover(stream, scheme, entries, recovery) $($await)*;
+
+            guard.armed = false;
+
+            result
         }
 
         /// Abandons the session unless disarmed: the run ended without

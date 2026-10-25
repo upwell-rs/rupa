@@ -23,7 +23,7 @@ fn ordinary_indexes_can_be_created_and_dropped() {
 fn user_sql_cannot_corrupt_framework_autoincrement_sequences() {
     let corrupt = [body(
         "1",
-        "UPDATE sqlite_sequence SET seq = 9223372036854775807 WHERE name = '_rupa_migration_attempts';",
+        "UPDATE sqlite_sequence SET seq = 9223372036854775807 WHERE name = '_rupa_migrations';",
     )];
     let valid = [body(
         "1",
@@ -53,7 +53,7 @@ fn user_sql_cannot_corrupt_framework_autoincrement_sequences() {
 fn internal_sequence_names_cannot_be_reassigned_and_user_autoincrement_tables_can_be_dropped() {
     let corrupt = [body(
         "1",
-        "UPDATE sqlite_sequence SET name = 'stolen' WHERE name = '_rupa_migration_attempts';",
+        "UPDATE sqlite_sequence SET name = 'stolen' WHERE name = '_rupa_migrations';",
     )];
     let valid = [body(
         "1",
