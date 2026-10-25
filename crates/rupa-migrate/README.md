@@ -65,18 +65,26 @@ MySQL) runs in autocommit. Drivers dispatch its statements one by one using
 unresolved (`Error::Uncertain`) instead of recording a replayable failure; a body
 refused before dispatching anything records an ordinary failed attempt. SQLite
 uses a durable cooperative claim across commits, PostgreSQL a session advisory
-lock and MySQL a named session lock; interruption can require explicit reconciliation. There is no automatic takeover or replay.
+lock and MySQL a named session lock. There is no automatic takeover or replay.
+An interrupted transactional attempt is reconciled as rolled back by the next
+apply (`ApplyReport::reconciled`); uncertain nontransactional attempts and stale
+SQLite claims need an operator's `Recover::recover` assertion (`Recovery`,
+`RecoveryAction`), which is audited and runs no body.
 
-Dynamic adapters, snapshots, adoption, authored reversal, out-of-order
-permission and operator recovery remain subsequent implementation slices. Declaring their
+Every engine keeps its state in one reserved journal table, `_rupa_migrations`,
+defined per engine in [`sql/`](sql/) (`postgres.sql`, `mysql.sql`,
+`sqlite.sql`), the files the runner executes on a fresh target.
+
+Dynamic adapters, snapshots, adoption, authored reversal and out-of-order
+permission remain subsequent implementation slices. Declaring their
 metadata is not a claim that this slice executes them.
 
 ## Feature flags
 
 | feature | adds |
 |---|---|
-| `sync` | `sync::{Session, Migration, Context, Apply}` |
-| `async` | `asynchronous::{Session, Migration, Context, Apply}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
+| `sync` | `sync::{Session, Migration, Context, Apply, Recover}` |
+| `async` | `asynchronous::{Session, Migration, Context, Apply, Recover}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
 | `protocol` | the engine session protocols (`protocol::{postgres, mysql, sqlite}`) and their per-mode `Io` traits, for driver crates; not public API |
 
 Neither is default. With exactly one enabled, all four of its names are

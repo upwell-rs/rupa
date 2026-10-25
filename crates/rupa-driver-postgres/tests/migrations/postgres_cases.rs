@@ -65,7 +65,7 @@ fn application_transactions_are_rejected(pg: &mut Pg) {
         .batch_execute("ROLLBACK")
         .expect("end application transaction");
 
-    assert!(!pg.table_exists("_rupa_migration_meta"));
+    assert!(!pg.table_exists("_rupa_migrations"));
 }
 
 fn nonstandard_strings_are_rejected(pg: &mut Pg) {
@@ -78,7 +78,7 @@ fn nonstandard_strings_are_rejected(pg: &mut Pg) {
         .expect("legacy string setting");
 
     assert!(rejected_history(session.apply(&numbered(&entries))));
-    assert!(!pg.table_exists("_rupa_migration_meta"));
+    assert!(!pg.table_exists("_rupa_migrations"));
 }
 
 fn dollar_bodies_and_escape_strings_run_whole(pg: &mut Pg) {
@@ -149,7 +149,9 @@ fn schemas_are_independent_targets(pg: &mut Pg) {
     public.release().expect("release public");
 
     assert_eq!(
-        pg.count("SELECT count(*) FROM tenant._rupa_migration_history"),
+        pg.count(
+            "SELECT count(*) FROM tenant._rupa_migrations WHERE kind = 'up' AND status = 'applied'"
+        ),
         1
     );
     assert!(!pg.table_exists("tenant_rows"));
@@ -172,9 +174,12 @@ fn lost_advisory_lock_poisons_instead_of_committing(pg: &mut Pg) {
         Err(PgError::Migration(StateError::Poisoned))
     ));
     assert!(!pg.table_exists("marker"));
-    assert_eq!(pg.count("SELECT count(*) FROM _rupa_migration_history"), 0);
     assert_eq!(
-        pg.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'running'"),
+        pg.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'applied'"),
+        0
+    );
+    assert_eq!(
+        pg.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'running'"),
         1
     );
 }
@@ -251,7 +256,10 @@ fn sync_and_async_drivers_share_one_lock_and_history(pg: &mut Pg) {
             .collect::<Vec<_>>(),
         ["2"]
     );
-    assert_eq!(pg.count("SELECT count(*) FROM _rupa_migration_history"), 2);
+    assert_eq!(
+        pg.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'applied'"),
+        2
+    );
 }
 
 fn an_abandoned_pooled_session_is_discarded(pg: &mut Pg) {

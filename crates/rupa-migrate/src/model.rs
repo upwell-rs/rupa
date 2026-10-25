@@ -33,6 +33,16 @@ pub enum Policy {
     NonTransactional,
 }
 
+impl Policy {
+    /// The frontmatter spelling, which history also records.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TransactionalRequired => "transactional",
+            Self::NonTransactional => "nontransactional",
+        }
+    }
+}
+
 /// The kind of immutable executable artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MigrationKind {

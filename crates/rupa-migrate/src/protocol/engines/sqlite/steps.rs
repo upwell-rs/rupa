@@ -8,7 +8,7 @@ macro_rules! steps {
 
             use super::{State, sql};
             use crate::protocol::$mode::SqliteIo;
-            use crate::protocol::{HISTORY_COLUMNS, decode_history, int, single, text};
+            use crate::protocol::{HISTORY_COLUMNS, decode_history, finish, int, policy, single, status, text};
             use crate::{CHECKSUM_FORMAT, CatalogEntry, Error, HistoryEntry, Policy, StateError, VersionScheme};
 
             $($async)* fn query<T: SqliteIo<State = State>>(
@@ -99,7 +99,7 @@ macro_rules! steps {
                 Ok(())
             }
 
-            $($async)* fn has_metadata<T: SqliteIo<State = State>>(io: &mut T) -> Result<bool, Error<T::Error>> {
+            $($async)* fn has_journal<T: SqliteIo<State = State>>(io: &mut T) -> Result<bool, Error<T::Error>> {
                 let names = query(io, sql::RESERVED, &[], &[SqlType::Text]) $($await)*?;
 
                 if names.is_empty() {
@@ -112,81 +112,49 @@ macro_rules! steps {
             }
 
             $($async)* fn validate_schema<T: SqliteIo<State = State>>(io: &mut T) -> Result<(), Error<T::Error>> {
-                for (name, expected) in sql::TABLES {
-                    let actual = query(io, sql::TABLE_SQL, &[bound(name)], &[SqlType::Text]) $($await)*?;
-                    let actual = actual.into_iter().next().and_then(|mut row| text(row.swap_remove(0)));
+                let actual = query(io, sql::TABLE_SQL, &[bound(sql::JOURNAL)], &[SqlType::Text]) $($await)*?;
+                let actual = actual.into_iter().next().and_then(|mut row| text(row.swap_remove(0)));
 
-                    if actual.as_deref() != Some(expected) {
-                        return Err(Error::History(format!(
-                            "reserved metadata table {name} has an incompatible schema"
-                        )));
-                    }
-                }
-
-                let extra = scalar(
-                    io,
-                    sql::EXTRA,
-                    &[bound(sql::META), bound(sql::HISTORY), bound(sql::ATTEMPTS)],
-                    SqlType::I64,
-                ) $($await)*?;
-                let headers = scalar(io, sql::HEADERS, &[bound(CHECKSUM_FORMAT)], SqlType::I64) $($await)*?;
-
-                if int(&extra) != Some(0) || int(&headers) != Some(1) {
+                if actual.as_deref() != Some(sql::definition()) {
                     return Err(Error::History(
-                        "metadata ownership/signature or singleton header is invalid".into(),
+                        "the migration journal has an incompatible schema".into(),
                     ));
                 }
 
-                for (table, maximum_query) in sql::SEQUENCES {
-                    let maximum = scalar(io, maximum_query, &[], SqlType::I64) $($await)*?;
-                    let sequences = query(io, sql::SEQUENCE, &[bound(table)], &[SqlType::I64]) $($await)*?;
-                    let sequences: Vec<Option<i64>> = sequences.iter().map(|row| int(&row[0])).collect();
-                    let maximum = int(&maximum);
+                let extra = scalar(io, sql::EXTRA, &[], SqlType::I64) $($await)*?;
+                let headers = query(io, sql::HEADERS, &[bound(CHECKSUM_FORMAT)], &[SqlType::I64; 2]) $($await)*?;
+                let headers: Vec<Option<i64>> = single(headers, "journal headers")?.iter().map(int).collect();
 
-                    if !(sequences.is_empty() && maximum == Some(0) || sequences == [maximum]) {
-                        return Err(Error::History(format!(
-                            "reserved sequence for {table} was changed"
-                        )));
-                    }
+                if int(&extra) != Some(0) || headers != [Some(1), Some(1)] {
+                    return Err(Error::History(
+                        "journal ownership/signature or singleton header is invalid".into(),
+                    ));
+                }
+
+                let maximum = scalar(io, sql::MAX_ID, &[], SqlType::I64) $($await)*?;
+                let sequences = query(io, sql::SEQUENCE, &[], &[SqlType::I64]) $($await)*?;
+                let sequences: Vec<Option<i64>> = sequences.iter().map(|row| int(&row[0])).collect();
+                let maximum = int(&maximum);
+
+                if !(sequences.is_empty() && maximum == Some(0) || sequences == [maximum]) {
+                    return Err(Error::History(
+                        "the migration journal's id sequence was changed".into(),
+                    ));
                 }
 
                 Ok(())
             }
 
-            /// Classifies `main`, creates metadata on a fresh target, checks the
-            /// stream and outstanding attempts, and claims the target durably.
-            $($async)* fn claim<T: SqliteIo<State = State>>(
+            /// Checks the stored stream and scheme, returning the owner claim.
+            $($async)* fn check_header<T: SqliteIo<State = State>>(
                 io: &mut T,
                 stream: &str,
                 scheme: VersionScheme,
-            ) -> Result<String, Error<T::Error>> {
-                if !has_metadata(io) $($await)*? {
-                    let objects = scalar(io, sql::USER_OBJECTS, &[], SqlType::I64) $($await)*?;
-
-                    if int(&objects) != Some(0) {
-                        return Err(Error::Unmanaged);
-                    }
-
-                    for (_, ddl) in sql::TABLES {
-                        batch(io, ddl) $($await)*?;
-                    }
-
-                    execute(
-                        io,
-                        sql::INSERT_HEADER,
-                        &[bound(stream), bound(scheme.as_str()), bound(CHECKSUM_FORMAT)],
-                    ) $($await)*?;
-                }
-
-                let rows = query(
-                    io,
-                    sql::HEADER,
-                    &[],
-                    &[SqlType::Text, SqlType::Text, SqlType::Text],
-                ) $($await)*?;
+            ) -> Result<Option<String>, Error<T::Error>> {
+                let rows = query(io, sql::HEADER, &[], &[SqlType::Text; 3]) $($await)*?;
                 let [stored_stream, stored_scheme, owner] =
-                    <[Value; 3]>::try_from(single(rows, "metadata header")?)
-                        .map_err(|_| Error::History("invalid metadata header".into()))?;
+                    <[Value; 3]>::try_from(single(rows, "journal header")?)
+                        .map_err(|_| Error::History("invalid journal header".into()))?;
 
                 if text(stored_stream).as_deref() != Some(stream)
                     || text(stored_scheme).as_deref() != Some(scheme.as_str())
@@ -196,7 +164,44 @@ macro_rules! steps {
                     ));
                 }
 
-                if text(owner).is_some() {
+                Ok(text(owner))
+            }
+
+            /// Records the running transactional attempts as rolled back. Once
+            /// no runner owns the target, their transactions have ended, and
+            /// completion commits with the body, so none of them committed.
+            $($async)* fn reconcile<T: SqliteIo<State = State>>(io: &mut T) -> Result<Vec<i64>, Error<T::Error>> {
+                let rows = query(io, sql::RECONCILABLE, &[], &[SqlType::I64]) $($await)*?;
+
+                execute(io, sql::RECONCILE, &[]) $($await)*?;
+
+                Ok(rows.iter().filter_map(|row| int(&row[0])).collect())
+            }
+
+            /// Classifies `main`, creates the journal on a fresh target, checks
+            /// the stream and outstanding attempts, reconciles interrupted
+            /// transactional ones, and claims the target durably.
+            $($async)* fn claim<T: SqliteIo<State = State>>(
+                io: &mut T,
+                stream: &str,
+                scheme: VersionScheme,
+            ) -> Result<(String, Vec<i64>), Error<T::Error>> {
+                if !has_journal(io) $($await)*? {
+                    let objects = scalar(io, sql::USER_OBJECTS, &[], SqlType::I64) $($await)*?;
+
+                    if int(&objects) != Some(0) {
+                        return Err(Error::Unmanaged);
+                    }
+
+                    batch(io, sql::CREATE) $($await)*?;
+                    execute(
+                        io,
+                        sql::INSERT_HEADER,
+                        &[bound(stream), bound(scheme.as_str()), bound(CHECKSUM_FORMAT)],
+                    ) $($await)*?;
+                }
+
+                if check_header(io, stream, scheme) $($await)*?.is_some() {
                     return Err(Error::Busy);
                 }
 
@@ -206,6 +211,7 @@ macro_rules! steps {
                     return Err(Error::Uncertain(attempt));
                 }
 
+                let reconciled = reconcile(io) $($await)*?;
                 let token = scalar(io, sql::TOKEN, &[], SqlType::Text) $($await)*?;
                 let Some(token) = text(token) else {
                     return Err(Error::History("could not create an owner token".into()));
@@ -213,7 +219,7 @@ macro_rules! steps {
 
                 execute(io, sql::CLAIM, &[bound(&token)]) $($await)*?;
 
-                Ok(token)
+                Ok((token, reconciled))
             }
 
             /// Admits user statements: owned, unpoisoned, inside the attempt's
@@ -248,14 +254,10 @@ macro_rules! steps {
                 })
             }
 
-            /// Claims the target under the writer lock, waiting at most the lock
-            /// timeout. The connection's own `busy_timeout` is restored at
-            /// release, or here when the claim fails.
-            pub $($async)* fn acquire<T: SqliteIo<State = State>>(
-                io: &mut T,
-                stream: &str,
-                scheme: VersionScheme,
-            ) -> Result<(), Error<T::Error>> {
+            /// Opens a `BEGIN IMMEDIATE` writer transaction on a clean session,
+            /// waiting at most the lock timeout, and returns the connection's
+            /// own `busy_timeout`, which is restored here if it fails.
+            $($async)* fn begin_writer<T: SqliteIo<State = State>>(io: &mut T) -> Result<i64, Error<T::Error>> {
                 let state = io.state();
                 let busy = state.owner.is_some() || state.poisoned;
                 let millis = state.lock_timeout.as_millis().min(i32::MAX as u128) as i64;
@@ -273,17 +275,27 @@ macro_rules! steps {
 
                 batch(io, &format!("PRAGMA busy_timeout = {millis}")) $($await)*?;
 
-                let claimed = match io.batch("BEGIN IMMEDIATE") $($await)* {
-                    Ok(()) => claim(io, stream, scheme) $($await)*,
-                    Err(error) => {
-                        set_busy_timeout(io, original) $($await)*?;
+                if let Err(error) = io.batch("BEGIN IMMEDIATE") $($await)* {
+                    set_busy_timeout(io, original) $($await)*?;
 
-                        return Err(Error::Database(error));
-                    }
-                };
+                    return Err(Error::Database(error));
+                }
 
-                match claimed {
-                    Ok(token) => {
+                Ok(original)
+            }
+
+            /// Claims the target under the writer lock, waiting at most the lock
+            /// timeout. The connection's own `busy_timeout` is restored at
+            /// release, or here when the claim fails.
+            pub $($async)* fn acquire<T: SqliteIo<State = State>>(
+                io: &mut T,
+                stream: &str,
+                scheme: VersionScheme,
+            ) -> Result<Vec<i64>, Error<T::Error>> {
+                let original = begin_writer(io) $($await)*?;
+
+                match claim(io, stream, scheme) $($await)* {
+                    Ok((token, reconciled)) => {
                         let state = io.state();
 
                         state.owner = Some(token);
@@ -295,7 +307,7 @@ macro_rules! steps {
                             return Err(Error::Database(error));
                         }
 
-                        Ok(())
+                        Ok(reconciled)
                     }
                     Err(error) => {
                         if io.batch("ROLLBACK") $($await)* .is_err() {
@@ -313,11 +325,11 @@ macro_rules! steps {
             pub $($async)* fn history<T: SqliteIo<State = State>>(
                 io: &mut T,
             ) -> Result<Vec<HistoryEntry>, Error<T::Error>> {
-                if !has_metadata(io) $($await)*? {
+                if !has_journal(io) $($await)*? {
                     return Ok(Vec::new());
                 }
 
-                let rows = query(io, sql::HISTORY_ROWS, &[], &HISTORY_COLUMNS) $($await)*?;
+                let rows = query(io, sql::HISTORY, &[], &HISTORY_COLUMNS) $($await)*?;
 
                 decode_history(rows)
             }
@@ -341,6 +353,7 @@ macro_rules! steps {
                         &[
                             Value::Text(entry.version.to_string()),
                             Value::Bytes(entry.checksum.as_bytes().to_vec()),
+                            policy(entry.metadata.policy),
                         ],
                     )
                     $($await)*;
@@ -382,18 +395,8 @@ macro_rules! steps {
             $($async)* fn record_completion<T: SqliteIo<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
-                execute(
-                    io,
-                    sql::INSERT_HISTORY,
-                    &[
-                        Value::Text(entry.version.to_string()),
-                        Value::Bytes(entry.checksum.as_bytes().to_vec()),
-                    ],
-                ) $($await)*?;
-
-                let count = execute(io, sql::ATTEMPT_APPLIED, &[Value::I64(attempt)]) $($await)*?;
+                let count = execute(io, sql::FINISH, &finish(attempt, status::APPLIED, None)) $($await)*?;
 
                 if count != 1 {
                     return Err(Error::History(
@@ -404,11 +407,12 @@ macro_rules! steps {
                 batch(io, "COMMIT") $($await)*
             }
 
-            /// Commits history and attempt completion with the artifact's effects.
+            /// Commits the attempt's completion with the artifact's effects. The
+            /// journal row already names the entry it runs.
             pub $($async)* fn complete<T: SqliteIo<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                entry: &CatalogEntry,
+                _entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
                 verify_owner(io) $($await)*?;
                 validate_schema(io) $($await)*?;
@@ -419,7 +423,7 @@ macro_rules! steps {
                     ));
                 }
 
-                let result = record_completion(io, attempt, entry) $($await)*;
+                let result = record_completion(io, attempt) $($await)*;
                 let state = io.state();
 
                 if result.is_err() {
@@ -446,7 +450,7 @@ macro_rules! steps {
 
                 verify_owner(io) $($await)*?;
 
-                let count = execute(io, sql::ATTEMPT_FAILED, &[Value::I64(attempt)]) $($await)*?;
+                let count = execute(io, sql::FINISH, &finish(attempt, status::FAILED, None)) $($await)*?;
                 let state = io.state();
 
                 if count != 1 || state.attempt != Some(attempt) {
@@ -504,6 +508,8 @@ macro_rules! steps {
 
                 result.and(ended).map_err(Error::Database)
             }
+
+            super::recovery::recovery!([$($async)*] [$($await)*]);
         }
     };
 }

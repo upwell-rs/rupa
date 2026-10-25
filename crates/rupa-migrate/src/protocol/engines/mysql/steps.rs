@@ -6,10 +6,16 @@ macro_rules! steps {
         pub mod $mode {
             use rupa_core::{DialectId, SqlType, Value};
 
-            use super::{Connection, Owner, State, bound, lock_failed, sql};
+            use super::{Connection, Owner, State, bound, finish, lock_failed, sql};
             use crate::protocol::$mode::Io;
-            use crate::protocol::{HISTORY_COLUMNS, SqlState as _, decode_history, int, single, text};
-            use crate::{CHECKSUM_FORMAT, CatalogEntry, Error, HistoryEntry, Policy, VersionScheme};
+            use crate::protocol::{
+                ATTEMPT_COLUMNS, HISTORY_COLUMNS, SqlState as _, check_reason, decode_history,
+                int, policy, resolve, single, status, text,
+            };
+            use crate::{
+                CHECKSUM_FORMAT, CatalogEntry, Error, HistoryEntry, Policy, Recovery, RecoveryAction,
+                RecoveryError, VersionScheme,
+            };
 
             $($async)* fn query<T: Io<State = State>>(
                 io: &mut T,
@@ -140,8 +146,8 @@ macro_rules! steps {
                 }
             }
 
-            /// Whether the database holds reserved tables, which must then be valid metadata.
-            $($async)* fn has_metadata<T: Io<State = State>>(io: &mut T) -> Result<bool, Error<T::Error>> {
+            /// Whether the database holds reserved tables, which must then be a valid journal.
+            $($async)* fn has_journal<T: Io<State = State>>(io: &mut T) -> Result<bool, Error<T::Error>> {
                 let count = scalar(io, sql::RESERVED_COUNT, &[], SqlType::I64) $($await)*?;
 
                 if int(&count) == Some(0) {
@@ -154,55 +160,45 @@ macro_rules! steps {
             }
 
             $($async)* fn validate_schema<T: Io<State = State>>(io: &mut T) -> Result<(), Error<T::Error>> {
-                for (table, _, expected) in sql::TABLES {
-                    let actual = scalar(io, sql::SIGNATURE, &[bound(table)], SqlType::Text) $($await)*?;
+                let actual = scalar(io, sql::SIGNATURE, &[bound(sql::JOURNAL)], SqlType::Text) $($await)*?;
 
-                    if text(actual).as_deref() != Some(expected) {
-                        return Err(Error::History(format!(
-                            "reserved metadata table {table} has an incompatible schema"
-                        )));
-                    }
+                if text(actual).as_deref() != Some(sql::COLUMNS) {
+                    return Err(Error::History(
+                        "the migration journal has an incompatible schema".into(),
+                    ));
                 }
 
-                let rows = query(
-                    io,
-                    sql::INTEGRITY,
-                    &[bound(CHECKSUM_FORMAT)],
-                    &[SqlType::I64, SqlType::I64, SqlType::I64, SqlType::I64],
-                ) $($await)*?;
-                let counts: Vec<Option<i64>> = single(rows, "metadata integrity")?.iter().map(int).collect();
+                let rows = query(io, sql::INTEGRITY, &[bound(CHECKSUM_FORMAT)], &[SqlType::I64; 5]) $($await)*?;
+                let counts: Vec<Option<i64>> = single(rows, "journal integrity")?.iter().map(int).collect();
 
-                if counts != [Some(0), Some(0), Some(0), Some(1)] {
+                if counts != [Some(0), Some(0), Some(0), Some(1), Some(1)] {
                     return Err(Error::History(
-                        "metadata ownership/signature or singleton header is invalid".into(),
+                        "journal ownership or singleton header is invalid".into(),
                     ));
                 }
 
                 Ok(())
             }
 
-            /// Classifies the database and creates metadata on a fresh target, then
-            /// checks the stream and outstanding attempts, under the named lock.
+            /// Classifies the database and creates the journal on a fresh target,
+            /// then checks the stream and outstanding attempts, under the named lock.
             ///
-            /// MySQL commits each `CREATE TABLE` implicitly, so creation is not
-            /// atomic: an interrupted bootstrap leaves partial metadata, which the
-            /// next run refuses as incompatible instead of completing it.
+            /// MySQL commits `CREATE TABLE` implicitly, so creation is not atomic
+            /// with the header: an interrupted bootstrap leaves a journal without
+            /// one, which the next run refuses as invalid instead of completing it.
             $($async)* fn bootstrap<T: Io<State = State>>(
                 io: &mut T,
                 stream: &str,
                 scheme: VersionScheme,
             ) -> Result<(), Error<T::Error>> {
-                if !has_metadata(io) $($await)*? {
+                if !has_journal(io) $($await)*? {
                     let objects = scalar(io, sql::USER_OBJECTS, &[], SqlType::I64) $($await)*?;
 
                     if int(&objects) != Some(0) {
                         return Err(Error::Unmanaged);
                     }
 
-                    for (_, ddl, _) in sql::TABLES {
-                        batch(io, ddl) $($await)*?;
-                    }
-
+                    batch(io, sql::CREATE) $($await)*?;
                     execute(
                         io,
                         sql::INSERT_HEADER,
@@ -211,6 +207,19 @@ macro_rules! steps {
                     validate_schema(io) $($await)*?;
                 }
 
+                if let Some(attempt) = check_header(io, stream, scheme) $($await)*? {
+                    return Err(Error::Uncertain(attempt));
+                }
+
+                Ok(())
+            }
+
+            /// Checks the stored stream and scheme, returning the oldest unresolved attempt.
+            $($async)* fn check_header<T: Io<State = State>>(
+                io: &mut T,
+                stream: &str,
+                scheme: VersionScheme,
+            ) -> Result<Option<i64>, Error<T::Error>> {
                 let rows = query(
                     io,
                     sql::HEADER,
@@ -218,10 +227,10 @@ macro_rules! steps {
                     &[SqlType::Text, SqlType::Text, SqlType::I64],
                 ) $($await)*?;
                 let Some(header) = rows.into_iter().next() else {
-                    return Err(Error::History("missing migration metadata header".into()));
+                    return Err(Error::History("missing journal header".into()));
                 };
                 let [stored_stream, stored_scheme, unresolved] = <[Value; 3]>::try_from(header)
-                    .map_err(|_| Error::History("invalid metadata header".into()))?;
+                    .map_err(|_| Error::History("invalid journal header".into()))?;
 
                 if text(stored_stream).as_deref() != Some(stream)
                     || text(stored_scheme).as_deref() != Some(scheme.as_str())
@@ -231,19 +240,13 @@ macro_rules! steps {
                     ));
                 }
 
-                if let Some(attempt) = int(&unresolved) {
-                    return Err(Error::Uncertain(attempt));
-                }
-
-                Ok(())
+                Ok(int(&unresolved))
             }
 
-            /// Commits history and attempt completion in one InnoDB transaction,
-            /// after the body's effects already committed.
+            /// Records the attempt applied, after the body's effects already committed.
             $($async)* fn checked_completion<T: Io<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
                 let state = io.state();
 
@@ -255,17 +258,8 @@ macro_rules! steps {
 
                 verify_owner(io) $($await)*?;
                 validate_schema(io) $($await)*?;
-                batch(io, "START TRANSACTION") $($await)*?;
-                execute(
-                    io,
-                    sql::INSERT_HISTORY,
-                    &[
-                        Value::Text(entry.version.to_string()),
-                        Value::Bytes(entry.checksum.as_bytes().to_vec()),
-                    ],
-                ) $($await)*?;
 
-                let count = execute(io, sql::ATTEMPT_APPLIED, &[Value::I64(attempt)]) $($await)*?;
+                let count = execute(io, sql::FINISH, &finish(attempt, status::APPLIED, None)) $($await)*?;
 
                 if count != 1 {
                     return Err(Error::History(
@@ -273,23 +267,18 @@ macro_rules! steps {
                     ));
                 }
 
-                batch(io, "COMMIT") $($await)*
+                Ok(())
             }
 
             /// Takes the named lock, sets the migration `sql_mode`, and validates
-            /// or creates the metadata.
+            /// or creates the journal. MySQL journals no transactional
+            /// attempts, so there are none to reconcile.
             pub $($async)* fn acquire<T: Io<State = State>>(
                 io: &mut T,
                 stream: &str,
                 scheme: VersionScheme,
-            ) -> Result<(), Error<T::Error>> {
-                let state = io.state();
-
-                if state.owner.is_some() || state.poisoned {
-                    return Err(Error::History(
-                        "session already owns a run or is not clean".into(),
-                    ));
-                }
+            ) -> Result<Vec<i64>, Error<T::Error>> {
+                io.state().idle()?;
 
                 let connection = describe_connection(io) $($await)*?;
                 let lock_name = connection.lock();
@@ -317,7 +306,7 @@ macro_rules! steps {
                     sql_mode: connection.sql_mode,
                 });
 
-                Ok(())
+                Ok(Vec::new())
             }
 
             /// Reads installed history from the selected database.
@@ -326,11 +315,11 @@ macro_rules! steps {
             ) -> Result<Vec<HistoryEntry>, Error<T::Error>> {
                 io.clean() $($await)* .map_err(Error::Database)?;
 
-                if !has_metadata(io) $($await)*? {
+                if !has_journal(io) $($await)*? {
                     return Ok(Vec::new());
                 }
 
-                let rows = query(io, sql::HISTORY_ROWS, &[], &HISTORY_COLUMNS) $($await)*?;
+                let rows = query(io, sql::HISTORY, &[], &HISTORY_COLUMNS) $($await)*?;
 
                 decode_history(rows)
             }
@@ -356,6 +345,7 @@ macro_rules! steps {
                         &[
                             Value::Text(entry.version.to_string()),
                             Value::Bytes(entry.checksum.as_bytes().to_vec()),
+                            policy(entry.metadata.policy),
                         ],
                     )
                     $($await)*;
@@ -396,13 +386,14 @@ macro_rules! steps {
                 Ok(())
             }
 
-            /// Records history and completion, poisoning the session on failure.
+            /// Records the attempt applied, poisoning the session on failure.
+            /// The journal row already names the entry it runs.
             pub $($async)* fn complete<T: Io<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                entry: &CatalogEntry,
+                _entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
-                let result = checked_completion(io, attempt, entry) $($await)*;
+                let result = checked_completion(io, attempt) $($await)*;
                 let state = io.state();
 
                 if result.is_err() {
@@ -436,7 +427,7 @@ macro_rules! steps {
 
                 verify_owner(io) $($await)*?;
 
-                let count = execute(io, sql::ATTEMPT_FAILED, &[Value::I64(attempt)]) $($await)*?;
+                let count = execute(io, sql::FINISH, &finish(attempt, status::FAILED, None)) $($await)*?;
                 let state = io.state();
 
                 if count != 1 || state.attempt != Some(attempt) {
@@ -523,6 +514,8 @@ macro_rules! steps {
 
                 Ok(())
             }
+
+            super::recovery::recovery!([$($async)*] [$($await)*]);
         }
     };
 }

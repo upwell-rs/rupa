@@ -1,8 +1,9 @@
 //! The MySQL migration session protocol. MySQL commits DDL implicitly, so
 //! sessions run nontransactional bodies only; a named session lock keyed by
 //! [`Target::lock_name`] keeps runners exclusive across the per-artifact
-//! commits, and reserved InnoDB tables live in the selected database.
+//! commits, and the InnoDB journal table lives in the selected database.
 
+mod recovery;
 pub mod sql;
 mod steps;
 
@@ -65,6 +66,17 @@ impl State {
     /// Whether statements route through [`State::user_statement`].
     pub fn is_running(&self) -> bool {
         self.owner.is_some() || self.poisoned
+    }
+
+    /// Refuses to start a run or recovery on a session that owns one or is poisoned.
+    fn idle<E: std::error::Error>(&self) -> Result<(), Error<E>> {
+        if self.owner.is_some() || self.poisoned {
+            return Err(Error::History(
+                "session already owns a run or is not clean".into(),
+            ));
+        }
+
+        Ok(())
     }
 
     /// Whether user statements may run: owned, unpoisoned, inside a begun attempt body.
@@ -152,6 +164,15 @@ impl Connection {
 /// `value` as text.
 fn bound(value: &str) -> Value {
     Value::Text(value.to_owned())
+}
+
+/// The parameters of [`sql::FINISH`]: the shared ones, with the attempt id last.
+fn finish(attempt: i64, status: &str, recovery: Option<&crate::Recovery<'_>>) -> [Value; 4] {
+    let mut params = crate::protocol::finish(attempt, status, recovery);
+
+    params.rotate_left(1);
+
+    params
 }
 
 /// The failure `GET_LOCK` or `RELEASE_LOCK` reports as `NULL`.

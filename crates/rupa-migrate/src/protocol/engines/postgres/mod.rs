@@ -1,7 +1,8 @@
 //! The PostgreSQL migration session protocol: a session advisory lock keyed
-//! by [`Target::advisory_key`], reserved tables in the current schema, and
+//! by [`Target::advisory_key`], the journal table in the current schema, and
 //! transactional or autocommit bodies.
 
+mod recovery;
 pub mod sql;
 mod steps;
 
@@ -25,7 +26,7 @@ const MAX_LOCK_TIMEOUT_MS: u128 = i32::MAX as u128;
 pub struct Owner {
     /// The advisory lock key derived from the canonical target.
     pub key: i64,
-    /// The schema owning the migration metadata.
+    /// The schema owning the migration journal.
     pub namespace: String,
 }
 
@@ -81,6 +82,17 @@ impl State {
         self.owner.is_some() || self.poisoned
     }
 
+    /// Refuses to start a run or recovery on a session that owns one or is poisoned.
+    fn idle<E: std::error::Error>(&self) -> Result<(), Error<E>> {
+        if self.owner.is_some() || self.poisoned {
+            return Err(Error::History(
+                "session already owns a run or is not clean".into(),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Records that an autocommit body sends a statement, before sending it:
     /// a send that fails has an unknown outcome.
     pub fn dispatch(&mut self) {
@@ -127,9 +139,9 @@ impl State {
             .ok_or_else(|| Error::History("migration connection does not own the target".into()))
     }
 
-    /// The qualified name of a reserved metadata table in the owned namespace.
-    fn reserved<E: std::error::Error>(&self, table: &str) -> Result<String, Error<E>> {
-        Ok(format!("{}.{table}", quote(&self.owned_namespace()?)))
+    /// The qualified journal of the owned namespace.
+    fn journal<E: std::error::Error>(&self) -> Result<String, Error<E>> {
+        Ok(journal(&self.owned_namespace()?))
     }
 }
 
@@ -208,6 +220,11 @@ fn lock_parts(key: i64) -> [Value; 2] {
         Value::I64(i64::from((key >> 32) as u32)),
         Value::I64(i64::from(key as u32)),
     ]
+}
+
+/// The journal of `namespace`, qualified for interpolation into framework-owned SQL.
+fn journal(namespace: &str) -> String {
+    format!("{}.{}", quote(namespace), sql::JOURNAL)
 }
 
 /// Quotes an identifier for interpolation into framework-owned SQL.

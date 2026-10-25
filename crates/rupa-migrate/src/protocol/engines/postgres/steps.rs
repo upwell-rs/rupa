@@ -6,10 +6,16 @@ macro_rules! steps {
         pub mod $mode {
             use rupa_core::{DialectId, SqlType, Value};
 
-            use super::{Body, Connection, LOCK_NOT_AVAILABLE, Owner, State, lock_parts, quote, sql};
+            use super::{Body, Connection, LOCK_NOT_AVAILABLE, Owner, State, journal, lock_parts, sql};
             use crate::protocol::$mode::Io;
-            use crate::protocol::{HISTORY_COLUMNS, SqlState as _, decode_history, int, single, text};
-            use crate::{CHECKSUM_FORMAT, CatalogEntry, Error, HistoryEntry, Policy, VersionScheme};
+            use crate::protocol::{
+                ATTEMPT_COLUMNS, HISTORY_COLUMNS, SqlState as _, check_reason, decode_history,
+                finish, int, policy, resolve, single, status, text,
+            };
+            use crate::{
+                CHECKSUM_FORMAT, CatalogEntry, Error, HistoryEntry, Policy, Recovery, RecoveryAction,
+                RecoveryError, VersionScheme,
+            };
 
             $($async)* fn query<T: Io<State = State>>(
                 io: &mut T,
@@ -160,8 +166,8 @@ macro_rules! steps {
                 int(&id).ok_or_else(|| Error::History("txid_current() returned no id".into()))
             }
 
-            /// Whether the namespace holds reserved objects, which must then be valid metadata.
-            $($async)* fn has_metadata<T: Io<State = State>>(
+            /// Whether the namespace holds reserved objects, which must then be a valid journal.
+            $($async)* fn has_journal<T: Io<State = State>>(
                 io: &mut T,
                 namespace: &str,
             ) -> Result<bool, Error<T::Error>> {
@@ -185,53 +191,93 @@ macro_rules! steps {
                 io: &mut T,
                 namespace: &str,
             ) -> Result<(), Error<T::Error>> {
-                for (table, _, expected) in sql::TABLES {
-                    let actual = scalar(
-                        io,
-                        sql::SIGNATURE,
-                        &[Value::Text(namespace.to_owned()), Value::Text(table.to_owned())],
-                        SqlType::Text,
-                    ) $($await)*?;
+                let actual = scalar(
+                    io,
+                    sql::SIGNATURE,
+                    &[Value::Text(namespace.to_owned()), Value::Text(sql::JOURNAL.to_owned())],
+                    SqlType::Text,
+                ) $($await)*?;
 
-                    if text(actual).as_deref() != Some(expected) {
-                        return Err(Error::History(format!(
-                            "reserved metadata table {table} has an incompatible schema"
-                        )));
-                    }
+                if text(actual).as_deref() != Some(sql::COLUMNS) {
+                    return Err(Error::History(
+                        "the migration journal has an incompatible schema".into(),
+                    ));
                 }
 
                 let rows = query(
                     io,
-                    &sql::integrity(&quote(namespace)),
+                    &sql::integrity(&journal(namespace)),
                     &[Value::Text(namespace.to_owned()), Value::Text(CHECKSUM_FORMAT.to_owned())],
-                    &[SqlType::I64, SqlType::I64, SqlType::I64],
+                    &[SqlType::I64; 4],
                 ) $($await)*?;
-                let row = single(rows, "metadata integrity")?;
+                let row = single(rows, "journal integrity")?;
                 let counts: Vec<Option<i64>> = row.iter().map(int).collect();
 
-                if counts != [Some(0), Some(0), Some(1)] {
+                if counts != [Some(0), Some(0), Some(1), Some(1)] {
                     return Err(Error::History(
-                        "metadata ownership/signature or singleton header is invalid".into(),
+                        "journal ownership or singleton header is invalid".into(),
                     ));
                 }
 
                 Ok(())
             }
 
-            /// Classifies the namespace and creates metadata on a fresh target,
-            /// then checks the stream and outstanding attempts, in one
-            /// transaction under the advisory lock.
+            /// Checks the stored stream and scheme, returning the oldest
+            /// unresolved nontransactional attempt.
+            $($async)* fn check_header<T: Io<State = State>>(
+                io: &mut T,
+                journal: &str,
+                stream: &str,
+                scheme: VersionScheme,
+            ) -> Result<Option<i64>, Error<T::Error>> {
+                let rows = query(
+                    io,
+                    &sql::header(journal),
+                    &[],
+                    &[SqlType::Text, SqlType::Text, SqlType::I64],
+                ) $($await)*?;
+                let [stored_stream, stored_scheme, unresolved] =
+                    <[Value; 3]>::try_from(single(rows, "journal header")?)
+                        .map_err(|_| Error::History("invalid journal header".into()))?;
+
+                if text(stored_stream).as_deref() != Some(stream)
+                    || text(stored_scheme).as_deref() != Some(scheme.as_str())
+                {
+                    return Err(Error::History(
+                        "stream or version scheme differs from managed history".into(),
+                    ));
+                }
+
+                Ok(int(&unresolved))
+            }
+
+            /// Records the running transactional attempts as rolled back. Under
+            /// the advisory lock their sessions have ended, and completion
+            /// commits with the body, so none of them committed.
+            $($async)* fn reconcile<T: Io<State = State>>(
+                io: &mut T,
+                journal: &str,
+            ) -> Result<Vec<i64>, Error<T::Error>> {
+                let rows = query(io, &sql::reconcile(journal), &[], &[SqlType::I64]) $($await)*?;
+
+                Ok(rows.iter().filter_map(|row| int(&row[0])).collect())
+            }
+
+            /// Classifies the namespace and creates the journal on a fresh target,
+            /// then checks the stream and outstanding attempts and reconciles
+            /// interrupted transactional ones, in one transaction under the
+            /// advisory lock.
             $($async)* fn bootstrap<T: Io<State = State>>(
                 io: &mut T,
                 namespace: &str,
                 stream: &str,
                 scheme: VersionScheme,
-            ) -> Result<(), Error<T::Error>> {
-                let ns = quote(namespace);
+            ) -> Result<Vec<i64>, Error<T::Error>> {
+                let journal = journal(namespace);
 
                 batch(io, "BEGIN") $($await)*?;
 
-                if !has_metadata(io, namespace) $($await)*? {
+                if !has_journal(io, namespace) $($await)*? {
                     let objects = scalar(
                         io,
                         sql::USER_OBJECTS,
@@ -243,13 +289,10 @@ macro_rules! steps {
                         return Err(Error::Unmanaged);
                     }
 
-                    for (_, ddl, _) in sql::TABLES {
-                        batch(io, &ddl.replace("{ns}", &ns)) $($await)*?;
-                    }
-
+                    batch(io, &sql::create(&journal)) $($await)*?;
                     execute(
                         io,
-                        &sql::insert_header(&ns),
+                        &sql::insert_header(&journal),
                         &[
                             Value::Text(stream.to_owned()),
                             Value::Text(scheme.as_str().to_owned()),
@@ -258,40 +301,24 @@ macro_rules! steps {
                     ) $($await)*?;
                 }
 
-                let rows = query(
-                    io,
-                    &sql::header(&ns),
-                    &[],
-                    &[SqlType::Text, SqlType::Text, SqlType::I64],
-                ) $($await)*?;
-                let [stored_stream, stored_scheme, unresolved] =
-                    <[Value; 3]>::try_from(single(rows, "metadata header")?)
-                        .map_err(|_| Error::History("invalid metadata header".into()))?;
-
-                if text(stored_stream).as_deref() != Some(stream)
-                    || text(stored_scheme).as_deref() != Some(scheme.as_str())
-                {
-                    return Err(Error::History(
-                        "stream or version scheme differs from managed history".into(),
-                    ));
-                }
-
-                if let Some(attempt) = int(&unresolved) {
+                if let Some(attempt) = check_header(io, &journal, stream, scheme) $($await)*? {
                     return Err(Error::Uncertain(attempt));
                 }
 
-                batch(io, "COMMIT") $($await)*
+                let reconciled = reconcile(io, &journal) $($await)*?;
+
+                batch(io, "COMMIT") $($await)*?;
+
+                Ok(reconciled)
             }
 
-            /// Commits history and attempt completion with the artifact's
-            /// effects. A transactional body must have left the artifact
+            /// Commits the attempt's completion with the artifact's effects. A transactional body must have left the artifact
             /// transaction it was given: the transaction id proves no statement
             /// committed or replaced it. A nontransactional body's effects are
             /// already committed, so completion opens its own transaction.
             $($async)* fn checked_completion<T: Io<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
                 let state = io.state();
                 let body = state.body;
@@ -316,24 +343,11 @@ macro_rules! steps {
 
                 let state = io.state();
                 let namespace = state.owned_namespace()?;
-                let history = state.reserved(sql::HISTORY)?;
-                let attempts = state.reserved(sql::ATTEMPTS)?;
+                let journal = state.journal()?;
 
                 validate_schema(io, &namespace) $($await)*?;
-                execute(
-                    io,
-                    &sql::insert_history(&history),
-                    &[
-                        Value::Text(entry.version.to_string()),
-                        Value::Bytes(entry.checksum.as_bytes().to_vec()),
-                    ],
-                ) $($await)*?;
 
-                let count = execute(
-                    io,
-                    &sql::finish_attempt(&attempts, "applied"),
-                    &[Value::I64(attempt)],
-                ) $($await)*?;
+                let count = execute(io, &sql::finish(&journal), &finish(attempt, status::APPLIED, None)) $($await)*?;
 
                 if count != 1 {
                     return Err(Error::History(
@@ -363,37 +377,34 @@ macro_rules! steps {
                 Ok(())
             }
 
-            /// Takes the advisory lock and validates or creates the metadata.
+            /// Takes the advisory lock and validates or creates the journal.
             pub $($async)* fn acquire<T: Io<State = State>>(
                 io: &mut T,
                 stream: &str,
                 scheme: VersionScheme,
-            ) -> Result<(), Error<T::Error>> {
-                let state = io.state();
-
-                if state.owner.is_some() || state.poisoned {
-                    return Err(Error::History(
-                        "session already owns a run or is not clean".into(),
-                    ));
-                }
+            ) -> Result<Vec<i64>, Error<T::Error>> {
+                io.state().idle()?;
 
                 let connection = describe_connection(io) $($await)*?;
                 let key = connection.key();
 
                 lock(io, key) $($await)*?;
 
-                if let Err(error) = bootstrap(io, &connection.namespace, stream, scheme) $($await)* {
-                    unlock_after_failure(io, key) $($await)*;
+                let reconciled = match bootstrap(io, &connection.namespace, stream, scheme) $($await)* {
+                    Ok(reconciled) => reconciled,
+                    Err(error) => {
+                        unlock_after_failure(io, key) $($await)*;
 
-                    return Err(error);
-                }
+                        return Err(error);
+                    }
+                };
 
                 io.state().owner = Some(Owner {
                     key,
                     namespace: connection.namespace,
                 });
 
-                Ok(())
+                Ok(reconciled)
             }
 
             /// Reads installed history from the owned or current namespace.
@@ -406,11 +417,11 @@ macro_rules! steps {
                     None => describe_connection(io) $($await)*?.namespace,
                 };
 
-                if !has_metadata(io, &namespace) $($await)*? {
+                if !has_journal(io, &namespace) $($await)*? {
                     return Ok(Vec::new());
                 }
 
-                let rows = query(io, &sql::history(&quote(&namespace)), &[], &HISTORY_COLUMNS) $($await)*?;
+                let rows = query(io, &sql::history(&journal(&namespace)), &[], &HISTORY_COLUMNS) $($await)*?;
 
                 decode_history(rows)
             }
@@ -430,13 +441,14 @@ macro_rules! steps {
                     ));
                 }
 
-                let attempts = state.reserved(sql::ATTEMPTS)?;
+                let journal = state.journal()?;
                 let inserted = io
                     .query(
-                        &sql::insert_attempt(&attempts),
+                        &sql::insert_attempt(&journal),
                         &[
                             Value::Text(entry.version.to_string()),
                             Value::Bytes(entry.checksum.as_bytes().to_vec()),
+                            policy(entry.metadata.policy),
                         ],
                         &[SqlType::I64],
                     )
@@ -485,13 +497,14 @@ macro_rules! steps {
                 verify_owner(io) $($await)*
             }
 
-            /// Records history and completion, poisoning the session on failure.
+            /// Records the attempt applied, poisoning the session on failure.
+            /// The journal row already names the entry it runs.
             pub $($async)* fn complete<T: Io<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                entry: &CatalogEntry,
+                _entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
-                let result = checked_completion(io, attempt, entry) $($await)*;
+                let result = checked_completion(io, attempt) $($await)*;
                 let state = io.state();
 
                 if result.is_err() {
@@ -530,12 +543,8 @@ macro_rules! steps {
 
                 verify_owner(io) $($await)*?;
 
-                let attempts = io.state().reserved(sql::ATTEMPTS)?;
-                let count = execute(
-                    io,
-                    &sql::finish_attempt(&attempts, "failed"),
-                    &[Value::I64(attempt)],
-                ) $($await)*?;
+                let journal = io.state().journal()?;
+                let count = execute(io, &sql::finish(&journal), &finish(attempt, status::FAILED, None)) $($await)*?;
                 let state = io.state();
 
                 if count != 1 || state.attempt != Some(attempt) {
@@ -617,6 +626,8 @@ macro_rules! steps {
 
                 result.and(forgotten)
             }
+
+            super::recovery::recovery!([$($async)*] [$($await)*]);
         }
     };
 }

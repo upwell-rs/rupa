@@ -1,20 +1,7 @@
-use rupa::migrate::{Error, RunError, VersionScheme};
+use rupa::migrate::VersionScheme;
 
-use super::support::{script, transactional};
+use super::support::{busy, script};
 use super::{Apply, Harness, Session, catalog};
-use crate::migrations::fixture::Interrupted;
-
-fn busy<E: std::error::Error, M: std::error::Error>(
-    result: &Result<impl Sized, RunError<E, M>>,
-) -> bool {
-    matches!(
-        result,
-        Err(RunError::Infrastructure {
-            source: Error::Busy,
-            ..
-        })
-    )
-}
 
 pub(super) fn case_owner_excludes_competitors_between_commits<H: Harness>(h: &mut H) {
     let entries = [script::<H>("1", "CREATE TABLE once_only(id INTEGER);")];
@@ -75,38 +62,6 @@ pub(super) fn case_concurrent_first_runners_execute_once<H: Harness + Sync>(h: &
 
     assert_eq!(applied, 1);
     assert_eq!(h.count("SELECT count(*) FROM marker"), 1);
-}
-
-pub(super) fn case_interrupted_body_leaves_an_unresolved_attempt<H: Harness>(h: &mut H) {
-    if !transactional::<H>() {
-        return;
-    }
-
-    let entries = [Interrupted];
-    let catalog = catalog(&entries);
-
-    let session = h.connect();
-    let interrupted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = wait!(h, catalog.apply(session));
-    }));
-    let competitor = wait!(h, h.connect().apply(&catalog));
-
-    assert!(interrupted.is_err());
-    assert!(
-        matches!(
-            competitor,
-            Err(RunError::Infrastructure {
-                source: Error::Busy | Error::Uncertain(_),
-                ..
-            })
-        ),
-        "an interrupted run blocks blind replay"
-    );
-    assert!(!h.table_exists("lost"));
-    assert_eq!(
-        h.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'running'"),
-        1
-    );
 }
 
 pub(super) fn case_apply_takes_and_closes_a_native_connection<H: Harness>(h: &mut H) {

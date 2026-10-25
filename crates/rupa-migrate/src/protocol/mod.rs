@@ -2,9 +2,8 @@
 //! engine. Not public API: driver crates enable the `protocol` feature.
 //!
 //! Each engine module (`postgres`, `mysql`, `sqlite`, present with a mode)
-//! owns the lock identity, reserved tables and attempt journal of its engine,
-//! so two drivers on one database exclude each other and read the same history
-//! by construction. The steps are written once and instantiated per mode as
+//! owns the lock identity and journal table of its engine, so two drivers on
+//! one database exclude each other and read the same history by construction. The steps are written once and instantiated per mode as
 //! `<engine>::sync` and `<engine>::asynchronous`, over the mode's `Io` trait,
 //! which is all a driver implements; `__session!` then forwards its `Session`
 //! to the steps. Without a mode, only [`SqlState`] exists.
@@ -160,7 +159,7 @@ macro_rules! __session {
                 &mut self,
                 stream: &str,
                 scheme: $crate::VersionScheme,
-            ) -> Result<(), $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
+            ) -> Result<Vec<i64>, $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
                 $crate::protocol::$engine::$mode::acquire(self, stream, scheme) $($await)*
             }
 
@@ -202,6 +201,16 @@ macro_rules! __session {
 
             $($async)* fn script(&mut self, sql: &str) -> Result<(), $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
                 $crate::protocol::$engine::$mode::script(self, sql) $($await)*
+            }
+
+            $($async)* fn recover(
+                &mut self,
+                stream: &str,
+                scheme: $crate::VersionScheme,
+                entries: &[$crate::CatalogEntry],
+                recovery: &$crate::Recovery<'_>,
+            ) -> Result<(), $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
+                $crate::protocol::$engine::$mode::recover(self, stream, scheme, entries, recovery) $($await)*
             }
 
             fn abandon(&mut self) {

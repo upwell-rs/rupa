@@ -46,8 +46,14 @@ macro_rules! all_cases {
             exclusion: [
                 case_owner_excludes_competitors_between_commits,
                 case_concurrent_first_runners_execute_once,
-                case_interrupted_body_leaves_an_unresolved_attempt,
                 case_apply_takes_and_closes_a_native_connection,
+            ],
+            recovery: [
+                case_interrupted_transactional_attempt_is_reconciled,
+                case_completed_recovery_records_without_running,
+                case_restored_recovery_allows_a_new_apply,
+                case_recovery_requires_exclusion,
+                case_recovery_refuses_what_it_cannot_assert,
             ],
             control: [
                 case_scripts_cannot_escape_the_runner,

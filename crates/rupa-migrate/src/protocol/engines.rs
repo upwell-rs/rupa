@@ -7,10 +7,108 @@ pub mod sqlite;
 
 use rupa_core::{SqlType, Value};
 
-use crate::{Checksum, Error, HistoryEntry};
+use crate::{
+    CatalogEntry, Checksum, Error, HistoryEntry, Policy, Provenance, Recovery, RecoveryAction,
+    RecoveryError,
+};
 
-/// Column types of a history row: rank, version, checksum.
-pub const HISTORY_COLUMNS: [SqlType; 3] = [SqlType::I64, SqlType::Text, SqlType::Bytes];
+/// Column types of a history row: rank, version, checksum, status.
+pub const HISTORY_COLUMNS: [SqlType; 4] =
+    [SqlType::I64, SqlType::Text, SqlType::Bytes, SqlType::Text];
+
+/// Column types of an attempt row: version, checksum, status.
+pub const ATTEMPT_COLUMNS: [SqlType; 3] = [SqlType::Text, SqlType::Bytes, SqlType::Text];
+
+/// The statuses of an `up` journal row, as `sql/<engine>.sql` documents them.
+pub mod status {
+    /// Journaled before the body ran, still unresolved.
+    pub const RUNNING: &str = "running";
+    /// The body completed and the runner recorded it.
+    pub const APPLIED: &str = "applied";
+    /// The body failed and rolled back, or never started.
+    pub const FAILED: &str = "failed";
+    /// An interrupted transactional attempt, found later under exclusion.
+    pub const ROLLED_BACK: &str = "rolled_back";
+    /// An operator asserted the effects complete.
+    pub const RECOVERED: &str = "recovered";
+    /// An operator asserted the effects undone.
+    pub const ABANDONED: &str = "abandoned";
+}
+
+/// The `policy` an attempt journals: a running transactional attempt has
+/// provably not committed once its session ended.
+pub fn policy(policy: Policy) -> Value {
+    Value::Text(policy.as_str().to_owned())
+}
+
+/// Refuses a recovery assertion without a reason, before the target is touched.
+pub fn check_reason<E: std::error::Error>(recovery: &Recovery<'_>) -> Result<(), Error<E>> {
+    if recovery.reason.trim().is_empty() {
+        return Err(RecoveryError::MissingReason.into());
+    }
+
+    Ok(())
+}
+
+/// Checks an assertion about `attempt` against its journal row, read under
+/// exclusion, and the catalog's `entries`, returning the status it records. A
+/// completed artifact must be the one the attempt ran; a restored one need
+/// not be in the catalog any more.
+pub fn resolve<E: std::error::Error>(
+    attempt: i64,
+    action: RecoveryAction,
+    rows: Vec<Vec<Value>>,
+    entries: &[CatalogEntry],
+) -> Result<&'static str, Error<E>> {
+    let Some(row) = rows.into_iter().next() else {
+        return Err(RecoveryError::UnknownAttempt(attempt).into());
+    };
+    let Ok(
+        [
+            Value::Text(version),
+            Value::Bytes(checksum),
+            Value::Text(current),
+        ],
+    ) = <[Value; 3]>::try_from(row)
+    else {
+        return Err(Error::History("invalid attempt row".into()));
+    };
+
+    if current != status::RUNNING {
+        return Err(RecoveryError::Resolved(attempt).into());
+    }
+
+    if action != RecoveryAction::Completed(attempt) {
+        return Ok(status::ABANDONED);
+    }
+
+    let Some(entry) = entries.iter().find(|e| e.version.to_string() == version) else {
+        return Err(RecoveryError::Missing { attempt, version }.into());
+    };
+
+    if entry.checksum.as_bytes().as_slice() != checksum.as_slice() {
+        return Err(RecoveryError::Changed { attempt, version }.into());
+    }
+
+    Ok(status::RECOVERED)
+}
+
+/// The parameters that finish running attempt `attempt` with `status`: the
+/// id, the status, and an operator's reason and evidence, if recovered.
+pub fn finish(attempt: i64, status: &str, recovery: Option<&Recovery<'_>>) -> [Value; 4] {
+    let text = |value: Option<&str>| {
+        value.map_or(Value::Null(SqlType::Text), |value| {
+            Value::Text(value.to_owned())
+        })
+    };
+
+    [
+        Value::I64(attempt),
+        Value::Text(status.to_owned()),
+        text(recovery.map(|r| r.reason)),
+        text(recovery.and_then(|r| r.evidence)),
+    ]
+}
 
 /// The single row a control query must return.
 pub fn single<E: std::error::Error>(
@@ -50,10 +148,20 @@ pub fn decode_history<E: std::error::Error>(
 ) -> Result<Vec<HistoryEntry>, Error<E>> {
     rows.into_iter()
         .map(|row| {
-            let [rank, Value::Text(version), Value::Bytes(checksum)] = <[Value; 3]>::try_from(row)
+            let [
+                rank,
+                Value::Text(version),
+                Value::Bytes(checksum),
+                Value::Text(recorded),
+            ] = <[Value; 4]>::try_from(row)
                 .map_err(|_| Error::History("invalid history row".into()))?
             else {
                 return Err(Error::History("invalid history row".into()));
+            };
+            let provenance = match recorded.as_str() {
+                status::APPLIED => Provenance::Executed,
+                status::RECOVERED => Provenance::Recovered,
+                _ => return Err(Error::History("invalid history status".into())),
             };
             let installation_rank = int(&rank)
                 .and_then(|rank| u64::try_from(rank).ok())
@@ -67,6 +175,7 @@ pub fn decode_history<E: std::error::Error>(
                 installation_rank,
                 version,
                 checksum: Checksum::from_bytes(bytes),
+                provenance,
             })
         })
         .collect()

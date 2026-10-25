@@ -53,7 +53,7 @@ pub(crate) fn run<N, A>(
 
     assert_eq!(report.applied.len(), 1);
     assert_eq!(summary(&native_history), summary(&sqlx_history));
-    assert_eq!(summary(&native_history)[0].0, 1);
+    assert_eq!(native_history.len(), 1);
 
     let mut owner = sqlx();
 

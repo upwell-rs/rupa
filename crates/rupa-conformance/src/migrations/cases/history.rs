@@ -28,13 +28,16 @@ pub(super) fn case_mixed_apply_records_history_and_never_replays<H: Harness>(h: 
             .applied
             .is_empty()
     );
-    assert_eq!(
-        wait!(h, session.history())
-            .expect("installed history")
-            .iter()
-            .map(|entry| entry.installation_rank)
-            .collect::<Vec<_>>(),
-        [1, 2]
+    let ranks: Vec<u64> = wait!(h, session.history())
+        .expect("installed history")
+        .iter()
+        .map(|entry| entry.installation_rank)
+        .collect();
+
+    assert_eq!(ranks.len(), 2);
+    assert!(
+        ranks[0] < ranks[1],
+        "ranks follow installation order: {ranks:?}"
     );
     assert_eq!(
         h.count("SELECT count(*) FROM notes WHERE title = 'HELLO; WORLD'"),
@@ -82,7 +85,7 @@ pub(super) fn case_failed_body_rolls_back_and_preserves_prior_commits<H: Harness
     assert_eq!(h.count("SELECT count(*) FROM kept"), 1);
     assert!(!h.table_exists("lost"));
     assert_eq!(
-        h.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'failed'"),
+        h.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'failed'"),
         1
     );
 }
@@ -149,7 +152,7 @@ pub(super) fn case_unmanaged_objects_are_never_a_fresh_target<H: Harness>(h: &mu
             ..
         })
     ));
-    assert!(!h.table_exists("_rupa_migration_meta"));
+    assert!(!h.table_exists("_rupa_migrations"));
     assert!(!h.table_exists("migration_body"));
 }
 
@@ -157,12 +160,12 @@ pub(super) fn case_incompatible_reserved_metadata_is_preserved<H: Harness>(h: &m
     let entries = [script::<H>("1", "SELECT 1;")];
 
     h.execute(
-        "CREATE TABLE _rupa_migration_meta (valuable TEXT); INSERT INTO _rupa_migration_meta VALUES ('preserve');",
+        "CREATE TABLE _rupa_migrations (valuable TEXT); INSERT INTO _rupa_migrations VALUES ('preserve');",
     );
 
     assert!(wait!(h, h.connect().apply(&catalog(&entries))).is_err());
     assert_eq!(
-        h.count("SELECT count(*) FROM _rupa_migration_meta WHERE valuable = 'preserve'"),
+        h.count("SELECT count(*) FROM _rupa_migrations WHERE valuable = 'preserve'"),
         1
     );
 }
@@ -174,13 +177,7 @@ pub(super) fn case_inspection_does_not_initialize_history<H: Harness>(h: &mut H)
             .is_empty()
     );
 
-    for table in [
-        "_rupa_migration_meta",
-        "_rupa_migration_history",
-        "_rupa_migration_attempts",
-    ] {
-        assert!(!h.table_exists(table), "{table}");
-    }
+    assert!(!h.table_exists("_rupa_migrations"));
 }
 
 pub(super) fn case_version_scheme_cannot_change<H: Harness>(h: &mut H) {
@@ -228,7 +225,7 @@ pub(super) fn case_unsupported_policy_is_rejected_before_bootstrap<H: Harness>(h
             entry.0.kind,
             entry.0.policy
         );
-        assert!(!h.table_exists("_rupa_migration_meta"));
+        assert!(!h.table_exists("_rupa_migrations"));
     }
 }
 
@@ -244,7 +241,7 @@ pub(super) fn case_malformed_planned_sql_is_rejected_before_bootstrap<H: Harness
             ..
         })
     ));
-    assert!(!h.table_exists("_rupa_migration_meta"));
+    assert!(!h.table_exists("_rupa_migrations"));
 }
 
 pub(super) fn case_application_errors_keep_their_types<H: Harness>(h: &mut H) {

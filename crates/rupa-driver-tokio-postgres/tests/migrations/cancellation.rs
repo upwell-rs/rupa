@@ -57,7 +57,7 @@ fn a_dropped_apply_closes_the_connection_and_leaves_an_unresolved_attempt(pg: &m
     );
     assert!(!pg.table_exists("lost"));
     assert_eq!(
-        pg.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'running'"),
+        pg.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'running'"),
         1
     );
 }

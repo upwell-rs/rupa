@@ -4,7 +4,7 @@ use std::future::Future;
 
 use rupa::core::asynchronous::Connection;
 use rupa::core::exec::Blocking;
-use rupa::migrate::asynchronous::{Apply, Session};
+use rupa::migrate::asynchronous::{Apply, Recover, Session};
 
 pub use super::Target;
 use super::{catalog, versions};
@@ -81,6 +81,9 @@ mod history {
 }
 mod nontransactional {
     include!("cases/nontransactional.rs");
+}
+mod recovery {
+    include!("cases/recovery.rs");
 }
 mod schema {
     include!("cases/schema.rs");

@@ -1,7 +1,7 @@
 //! The cases against `rupa::migrate::sync`.
 
 use rupa::core::sync::Connection;
-use rupa::migrate::sync::{Apply, Session};
+use rupa::migrate::sync::{Apply, Recover, Session};
 
 pub use super::Target;
 use super::{catalog, versions};
@@ -31,6 +31,8 @@ mod exclusion;
 mod history;
 #[path = "cases/nontransactional.rs"]
 mod nontransactional;
+#[path = "cases/recovery.rs"]
+mod recovery;
 #[path = "cases/schema.rs"]
 mod schema;
 #[path = "cases/support.rs"]

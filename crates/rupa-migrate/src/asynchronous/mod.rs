@@ -9,8 +9,8 @@ use rupa_core::asynchronous::Connection;
 
 use crate::runner::mode;
 use crate::{
-    ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, MigrationInfo, Plan, Policy, RunError,
-    VersionScheme,
+    ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, MigrationInfo, Plan, Policy, Recovery,
+    RunError, VersionScheme,
 };
 
 /// Driver-owned dedicated physical migration connection, awaited.
@@ -24,12 +24,15 @@ pub trait Session: Connection {
     /// never downgraded.
     const POLICIES: &'static [Policy] = &[Policy::TransactionalRequired];
 
-    /// Acquires exclusion, validates/initializes metadata and checks outstanding attempts.
+    /// Acquires exclusion, validates/initializes metadata and checks
+    /// outstanding attempts. Returns the interrupted transactional attempts it
+    /// recorded as rolled back; an unresolved nontransactional attempt fails
+    /// with [`Error::Uncertain`].
     fn acquire(
         &mut self,
         stream: &str,
         scheme: VersionScheme,
-    ) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
+    ) -> impl Future<Output = Result<Vec<i64>, Error<Self::Error>>> + Send;
 
     /// Reads installed history without executing user code or creating metadata.
     fn history(
@@ -69,6 +72,17 @@ pub trait Session: Connection {
 
     /// Executes an authorized user script on this session's current transaction.
     fn script(&mut self, sql: &str) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
+
+    /// Records an operator's `recovery` assertion under newly acquired
+    /// exclusion, with `entries` as the catalog the assertion is checked
+    /// against, then releases exclusion. Executes no body.
+    fn recover(
+        &mut self,
+        stream: &str,
+        scheme: VersionScheme,
+        entries: &[CatalogEntry],
+        recovery: &Recovery<'_>,
+    ) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
 
     /// Marks the session unusable after a run ended without returning (a
     /// dropped future or an unwinding panic). Called from `Drop`, so it must
@@ -125,6 +139,29 @@ pub trait Apply {
     ) -> impl Future<Output = ApplyResult<S, Self::Entry>> + Send
     where
         Self::Entry: Migration<S>;
+}
+
+/// Records an operator's recovery assertion on a dedicated native
+/// connection, then closes it.
+pub trait Recover {
+    /// Records `recovery` under exclusion, checked against this catalog.
+    fn recover<S: Session>(
+        &self,
+        connection: S,
+        recovery: &Recovery<'_>,
+    ) -> impl Future<Output = Result<(), Error<S::Error>>> + Send;
+}
+
+impl<M> Recover for Catalog<'_, M> {
+    fn recover<S: Session>(
+        &self,
+        mut connection: S,
+        recovery: &Recovery<'_>,
+    ) -> impl Future<Output = Result<(), Error<S::Error>>> + Send {
+        let (stream, scheme, entries) = (self.stream, self.scheme, &self.entries);
+
+        async move { recover(&mut connection, stream, scheme, entries, recovery).await }
+    }
 }
 
 impl<M: MigrationInfo + Send + Sync> Apply for Catalog<'_, M> {

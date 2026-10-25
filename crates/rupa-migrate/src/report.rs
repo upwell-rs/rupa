@@ -5,6 +5,9 @@ use crate::{Error, Version};
 pub struct ApplyReport {
     /// Versions executed in actual installation order.
     pub applied: Vec<Version>,
+    /// Interrupted transactional attempts found under exclusion and recorded
+    /// as rolled back: completion commits with the body, so none committed.
+    pub reconciled: Vec<i64>,
 }
 
 /// A run failed while retaining the typed body and infrastructure causes.

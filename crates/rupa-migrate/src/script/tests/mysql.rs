@@ -83,11 +83,7 @@ fn rejects_runner_owned_statement_classes() {
         ("SELECT 1\\G", ScriptRule::ClientCommand, 8),
         ("SELECT GET_LOCK('x', 1)", ScriptRule::AdvisoryLock, 7),
         ("DO release_all_locks()", ScriptRule::AdvisoryLock, 3),
-        (
-            "DELETE FROM _rupa_migration_history",
-            ScriptRule::ReservedName,
-            12,
-        ),
+        ("DELETE FROM _rupa_migrations", ScriptRule::ReservedName, 12),
         (
             "RENAME TABLE t TO `_RUPA_hidden`",
             ScriptRule::ReservedName,

@@ -326,12 +326,22 @@ crate-dependency closure records remain later authoring work.
 
 ## History and failure
 
-Every engine reserves `_rupa_migration_meta`, `_rupa_migration_history`, and
-`_rupa_migration_attempts`; on PostgreSQL they live in the connection's current
-schema, on MySQL as InnoDB tables in the selected database, the owned
-namespace. A versioned schema signature, stream, scheme and
-checksum format must match before managed execution. Incompatible same-named
-objects are never replaced.
+Every engine keeps one reserved table, the journal `_rupa_migrations`. On
+PostgreSQL it lives in the connection's current schema, on MySQL as an InnoDB
+table in the selected database (the owned namespace), and on SQLite in `main`.
+Its definition per engine, with every row kind and status explained, is in
+[`crates/rupa-migrate/sql/`](../crates/rupa-migrate/sql/): `postgres.sql`,
+`mysql.sql` and `sqlite.sql`. These files are what the runner executes on a
+fresh target, so they always describe the real table.
+
+One `init` row records the stream, version scheme and checksum format. Each
+attempt is an `up` row, journaled `running` before its body starts and finished
+as `applied`, `failed`, `rolled_back`, `recovered` or `abandoned`. Installed
+history is the applied and recovered rows; an installation rank is the row's
+id, so ranks increase in installation order but are not consecutive. The
+journal's columns, the header and the stream, scheme and checksum format must
+match before managed execution. Incompatible same-named objects are never
+replaced.
 
 On SQLite the driver atomically claims the target under `BEGIN IMMEDIATE`, then retains a
 durable owner token between separately committed migration transactions. Another
@@ -352,9 +362,9 @@ once; longer than PostgreSQL's `lock_timeout` maximum is clamped); a timeout
 reports `Error::Busy` with no user work done. A connection that
 loses the lock, or whose artifact transaction was committed or replaced, is
 poisoned instead of recording completion. Closing the connection releases the
-lock, so a dropped or crashed runner leaves only its running attempt behind,
-which blocks the next apply with `Error::Uncertain`. A connection already inside
-an application transaction is rejected.
+lock, so a dropped or crashed runner leaves only its running attempt behind
+(see [Interruption](#interruption)). A connection already inside an application
+transaction is rejected.
 
 On MySQL (the `mysql` and sqlx drivers), `apply` takes a named session
 lock, `GET_LOCK('rupa:…')` with the first 56 hex digits of the canonical target
@@ -364,12 +374,12 @@ per-artifact commits, checking `IS_USED_LOCK` before every write phase.
 rounded up; zero tries once. A connection without a selected database, with
 `autocommit` off or inside an open transaction (even an untouched read-only
 snapshot) is rejected: MySQL's implicit DDL commits would otherwise commit the
-caller's work. Each `CREATE TABLE` of the bootstrap commits on its own, so an
-interrupted first run can leave partial metadata, which later runs refuse as
-incompatible rather than complete.
+caller's work. Creating the journal commits on its own, before its `init` row
+is written, so an interrupted first run can leave a journal without a header,
+which later runs refuse as invalid rather than complete.
 
 Before dispatching a body, its attempt is durable. A transactional body's
-schema/data effects, installed history and attempt completion commit together.
+schema/data effects and its attempt's completion commit together.
 If a transactional body fails,
 acknowledged rollback records a failed attempt and releases the claim. Earlier completed
 migrations remain installed. Errors preserve the failed version, typed body or
@@ -395,8 +405,7 @@ Its attempt is journaled before the body starts. Each statement of a script is
 then sent on its own, because several statements in one PostgreSQL request share
 an implicit transaction (and MySQL commits each DDL statement anyway). The script is split by the same grammar that validated
 it as a whole before the first statement ran (`rupa_migrate::split_script`). After
-the body returns, history and attempt completion commit together in a
-framework transaction, still under the advisory lock. Transactional and
+the body returns, its attempt is recorded `applied`, still under the session lock. Transactional and
 nontransactional migrations can be mixed in one catalog and run in version order.
 Keep each nontransactional migration small: one artifact cannot mix policies.
 
@@ -406,24 +415,66 @@ catalog may replace. Once a statement was sent, statements that already ran stay
 committed. The attempt is therefore **not** recorded as failed, which would
 permit a replay. It stays unresolved, and the run's `RunError::Migration` lists
 `Error::Uncertain(attempt)` among its cleanup errors. The lock is released
-normally, and every later apply fails with `Error::Uncertain` until the
-attempt is reconciled. An interrupted body or a lost completion write leaves
+normally, and every later apply fails with `Error::Uncertain` until an
+operator [recovers](#recovery) the attempt. An interrupted body or a lost completion write leaves
 the same state. Write nontransactional statements so an operator can inspect
 what ran (e.g. `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, then checking for an
 invalid index).
 
 ### Interruption
 
-On interruption or an uncertain commit, a claim/running attempt can remain.
-There is no safe automatic timeout takeover. Stop the old runner, inspect history
-and database effects and perform explicit reconciliation before changing
-ownership; a supported recovery command is a later slice. Do not delete history
-or clear a claim merely because a client timeout elapsed. This first slice
-reports uncertainty and blocks further apply instead of guessing.
+A runner that dies mid-run (a crash, a killed process, a dropped future or a
+lost connection) leaves its attempt `running`. There is no timeout takeover.
+
+- **Transactional attempts reconcile themselves.** An attempt's completion
+  commits with its body, so a `running` transactional attempt never committed
+  once its session has ended. The next `apply` finds it under exclusion, records
+  it `rolled_back`, lists its id in `ApplyReport::reconciled`, and then runs the
+  artifact again under a new attempt, as it would after an ordinary failure.
+- **Nontransactional attempts need an operator.** Their statements may have
+  run, so the next `apply` fails with `Error::Uncertain(attempt)` until the
+  attempt is recovered.
+- **SQLite keeps the dead runner's claim.** SQLite has no session locks, so the
+  durable owner claim outlives its runner, and every later run fails with
+  `Error::Busy`. Once you have established that the old runner is stopped,
+  release the claim (below). Its transactional attempt then reconciles on the
+  next `apply`.
+
+### Recovery
+
+Recovery records an operator's assertion about an interrupted run. It requires
+a reason, accepts optional evidence, takes the same exclusion as `apply`, and
+executes no migration body. The catalog checks the assertion:
+
+```rust,ignore
+use rupa::migrate::{Recovery, RecoveryAction, sync::Recover};
+
+// The effects of uncertain attempt 7 are complete: record its artifact as
+// installed with `Provenance::Recovered`.
+let completed = Recovery::new(RecoveryAction::Completed(7), "index exists and is valid")
+    .with_evidence("INC-1234");
+catalog.recover(connection, &completed)?;
+
+// Or: its effects were undone by hand; the next apply runs it again.
+catalog.recover(connection, &Recovery::new(RecoveryAction::Restored(7), "dropped partial index"))?;
+
+// SQLite: the runner holding the claim has stopped.
+catalog.recover(connection, &Recovery::new(RecoveryAction::ReleaseClaim, "pod terminated"))?;
+```
+
+The reason and evidence are stored on the attempt's journal row; a released
+claim appends a `claim_released` row. `Completed` requires the catalog's
+artifact to have the checksum the attempt ran. `Restored` does not, so a
+corrected artifact may replace it. Recovery refuses with a typed
+`RecoveryError` when there is no reason, the attempt is unknown or already
+resolved, the catalog lacks or changed the artifact, or there is no claim to
+release. It fails with `Error::Busy` while another runner owns the target. An
+incorrect assertion is the operator's responsibility: check the database
+effects, and that the old runner is stopped, before asserting anything. Never
+edit the journal by hand.
 
 Dynamic (registry) sessions, transactional work on MySQL,
 nontransactional work on SQLite, snapshots/adoption,
-authored down migrations, allowed late application and operator recovery
-(asserting that uncertain work completed or was restored) are not yet
+authored down migrations and allowed late application are not yet
 implemented. Their accepted
 design is in [the migration contract](design/migrations-contract.md).

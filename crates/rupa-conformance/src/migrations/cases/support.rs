@@ -1,5 +1,5 @@
 use rupa::core::dialect::{Dialect, DialectId};
-use rupa::migrate::Policy;
+use rupa::migrate::{Error, Policy, RunError};
 
 use super::{Connection, Harness, Session};
 use crate::migrations::fixture::{Body, planned_with, with_policy};
@@ -33,4 +33,17 @@ pub(super) fn planned<H: Harness>(version: &'static str) -> &'static rupa::migra
 /// The dialect the harness's sessions speak.
 pub(super) fn dialect<H: Harness>(h: &H) -> DialectId {
     h.connect().dialect().id()
+}
+
+/// Whether a run found the target owned by another runner.
+pub(super) fn busy<E: std::error::Error, M: std::error::Error>(
+    result: &Result<impl Sized, RunError<E, M>>,
+) -> bool {
+    matches!(
+        result,
+        Err(RunError::Infrastructure {
+            source: Error::Busy,
+            ..
+        })
+    )
 }
