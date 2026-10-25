@@ -71,10 +71,15 @@ impl PlannedMigration for Plans {
 
 /// Metadata of a planned Rust migration: no inputs, its plan is its identity.
 pub fn planned(version: &'static str) -> &'static Metadata {
+    planned_with(version, Policy::TransactionalRequired)
+}
+
+/// Planned metadata with an explicit execution policy.
+pub fn planned_with(version: &'static str, policy: Policy) -> &'static Metadata {
     Box::leak(Box::new(Metadata {
         version,
         description: "planned fixture",
-        policy: Policy::TransactionalRequired,
+        policy,
         kind: MigrationKind::Incremental,
         inputs: &[],
     }))
@@ -171,12 +176,13 @@ pub struct Post {
     pub body: Option<String>,
 }
 
-/// Creates the author and post tables with a title index.
+/// Creates the author and post tables with an author index. The indexed
+/// column is bounded, so MySQL can key it.
 pub fn create_tables() -> Plan {
     Plan::new()
         .create_table(Table::of::<Author>())
         .create_table(Table::of::<Post>())
-        .create_index(Index::on("posts_title", Post::TITLE))
+        .create_index(Index::on("posts_author", Post::AUTHOR_ID))
 }
 
 /// Adds a defaulted column to posts, then inserts a post.

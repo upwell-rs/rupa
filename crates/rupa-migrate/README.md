@@ -9,7 +9,8 @@ dispatch, a pool, or Upwell.
 ## Usage
 
 Enable `rupa/migrations` and a supported driver: native synchronous SQLite
-(`sqlite` or `sqlite-unbundled`) or PostgreSQL (`postgres-sync`):
+(`sqlite` or `sqlite-unbundled`), PostgreSQL (`postgres-sync`) or MySQL
+(`mysql`):
 
 ```rust,ignore
 let entries = application_migrations();
@@ -46,7 +47,8 @@ Drivers implement `Session` on their native executor and keep lock/history
 machinery private. The runner holds a drop guard that calls `Session::abandon`
 when a run ends without returning (a dropped future or a panic), so a retained
 session refuses further use. Shared driver support also lives here: per-dialect script
-grammars (`validate_script`, refusing runner-owned statements on engines without
+grammars for SQLite, PostgreSQL and MySQL (`validate_script` and `split_script`,
+refusing runner-owned statements on engines without
 a native authorizer), the canonical target identity (`Target`) that derives
 lock keys independently of driver and URL, and the typed `StateError` drivers
 report for misused migration connections. No boxed body errors or erased catalog dispatch is required.
@@ -56,14 +58,15 @@ The runner applies incrementals under the policies a session declares in
 arrivals and policies the session cannot honour fail explicitly before the
 target is touched. Each successful transactional body commits with history and
 attempt completion; a failed later body rolls back without undoing earlier
-commits. A nontransactional body (`Policy::NonTransactional`, PostgreSQL only so
-far) runs in autocommit. Drivers dispatch its statements one by one using
-`split_script`. A failure leaves its attempt unresolved (`Error::Uncertain`) instead of
-recording a replayable failure. SQLite uses a
-durable cooperative claim across commits, PostgreSQL a session advisory lock;
-interruption can require explicit reconciliation. There is no automatic takeover or replay.
+commits. A nontransactional body (`Policy::NonTransactional`, on PostgreSQL and
+MySQL) runs in autocommit. Drivers dispatch its statements one by one using
+`split_script`. A failure after a statement was dispatched leaves its attempt
+unresolved (`Error::Uncertain`) instead of recording a replayable failure; a body
+refused before dispatching anything records an ordinary failed attempt. SQLite
+uses a durable cooperative claim across commits, PostgreSQL a session advisory
+lock and MySQL a named session lock; interruption can require explicit reconciliation. There is no automatic takeover or replay.
 
-Dynamic adapters, MySQL, snapshots, adoption, authored reversal, out-of-order
+Dynamic and sqlx adapters, snapshots, adoption, authored reversal, out-of-order
 permission and operator recovery remain subsequent implementation slices. Declaring their
 metadata is not a claim that this slice executes them.
 

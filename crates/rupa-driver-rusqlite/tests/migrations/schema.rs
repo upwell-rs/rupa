@@ -48,7 +48,7 @@ fn planned_schema_migrations_create_entity_tables_keys_and_indexes() {
             &mut runner,
             "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'posts' AND sql IS NOT NULL"
         ),
-        ["posts_title"]
+        ["posts_author"]
     );
     assert_eq!(
         rows(&mut runner, "SELECT title || ':' || pinned FROM posts"),

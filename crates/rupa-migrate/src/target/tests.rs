@@ -40,3 +40,17 @@ fn length_prefixes_keep_component_boundaries_distinct() {
 
     assert_ne!(split.digest(), shifted.digest());
 }
+
+#[test]
+fn mysql_lock_names_are_prefixed_digest_hex_within_the_server_limit() {
+    let target = Target {
+        engine: Engine::MySql,
+        database: "app",
+        namespace: "app",
+    };
+
+    let name = target.lock_name();
+
+    assert_eq!(name.len(), 61);
+    assert_eq!(name, format!("rupa:{}", &hex(target.digest())[..56]));
+}

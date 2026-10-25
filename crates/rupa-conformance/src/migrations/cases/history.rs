@@ -3,13 +3,18 @@ use rupa::migrate::{
     ValidationError, VersionScheme,
 };
 
+use super::support::{planned, script, supports, transactional};
 use super::{Apply, Harness, Session, catalog, versions};
 use crate::migrations::fixture::{
-    ApplicationFailure, Body, CreateNotes, Failing, FailingError, Mixed, Normalize, Plans, body,
-    planned, with_policy,
+    ApplicationFailure, Body, CreateNotes, Failing, FailingError, Mixed, Normalize, Plans,
+    with_policy,
 };
 
 pub(super) fn case_mixed_apply_records_history_and_never_replays<H: Harness>(h: &mut H) {
+    if !transactional::<H>() {
+        return;
+    }
+
     let entries = [Mixed::Rust(Normalize), Mixed::Schema(Planned(CreateNotes))];
     let catalog = catalog(&entries);
 
@@ -38,12 +43,16 @@ pub(super) fn case_mixed_apply_records_history_and_never_replays<H: Harness>(h: 
 }
 
 pub(super) fn case_failed_body_rolls_back_and_preserves_prior_commits<H: Harness>(h: &mut H) {
+    if !transactional::<H>() {
+        return;
+    }
+
     let entries = [
-        body(
+        script::<H>(
             "1",
             "CREATE TABLE kept (id INTEGER); INSERT INTO kept VALUES (1);",
         ),
-        body(
+        script::<H>(
             "2",
             "CREATE TABLE lost (id INTEGER); INSERT INTO absent VALUES (2);",
         ),
@@ -79,10 +88,10 @@ pub(super) fn case_failed_body_rolls_back_and_preserves_prior_commits<H: Harness
 }
 
 pub(super) fn case_changed_applied_body_is_rejected_before_pending_work<H: Harness>(h: &mut H) {
-    let original = [body("1", "CREATE TABLE kept (id INTEGER);")];
+    let original = [script::<H>("1", "CREATE TABLE kept (id INTEGER);")];
     let changed = [
-        body("1", "CREATE TABLE kept (id TEXT);"),
-        body("2", "CREATE TABLE forbidden (id INTEGER);"),
+        script::<H>("1", "CREATE TABLE kept (id TEXT);"),
+        script::<H>("2", "CREATE TABLE forbidden (id INTEGER);"),
     ];
 
     let mut session = h.connect();
@@ -101,13 +110,13 @@ pub(super) fn case_changed_applied_body_is_rejected_before_pending_work<H: Harne
 
 pub(super) fn case_missing_source_and_late_arrival_are_rejected<H: Harness>(h: &mut H) {
     let original = [
-        body("1", "CREATE TABLE kept (id INTEGER);"),
-        body("3", "INSERT INTO kept VALUES (3);"),
+        script::<H>("1", "CREATE TABLE kept (id INTEGER);"),
+        script::<H>("3", "INSERT INTO kept VALUES (3);"),
     ];
     let missing = [original[1]];
     let late = [
         original[0],
-        body("2", "INSERT INTO kept VALUES (2);"),
+        script::<H>("2", "INSERT INTO kept VALUES (2);"),
         original[1],
     ];
 
@@ -126,7 +135,10 @@ pub(super) fn case_missing_source_and_late_arrival_are_rejected<H: Harness>(h: &
 }
 
 pub(super) fn case_unmanaged_objects_are_never_a_fresh_target<H: Harness>(h: &mut H) {
-    let entries = [body("1", "CREATE TABLE migration_body (id INTEGER);")];
+    let entries = [script::<H>(
+        "1",
+        "CREATE TABLE migration_body (id INTEGER);",
+    )];
 
     h.execute("CREATE TABLE unmanaged_owned (id INTEGER)");
 
@@ -142,7 +154,7 @@ pub(super) fn case_unmanaged_objects_are_never_a_fresh_target<H: Harness>(h: &mu
 }
 
 pub(super) fn case_incompatible_reserved_metadata_is_preserved<H: Harness>(h: &mut H) {
-    let entries = [body("1", "SELECT 1;")];
+    let entries = [script::<H>("1", "SELECT 1;")];
 
     h.execute(
         "CREATE TABLE _rupa_migration_meta (valuable TEXT); INSERT INTO _rupa_migration_meta VALUES ('preserve');",
@@ -172,7 +184,7 @@ pub(super) fn case_inspection_does_not_initialize_history<H: Harness>(h: &mut H)
 }
 
 pub(super) fn case_version_scheme_cannot_change<H: Harness>(h: &mut H) {
-    let entries = [body("1", "CREATE TABLE kept (id INTEGER);")];
+    let entries = [script::<H>("1", "CREATE TABLE kept (id INTEGER);")];
     let empty: [Body; 0] = [];
     let numbered = catalog(&entries);
     let utc = Catalog::new("primary", VersionScheme::UtcTimestamp, &empty).expect("UTC catalog");
@@ -193,14 +205,13 @@ pub(super) fn case_unsupported_policy_is_rejected_before_bootstrap<H: Harness>(h
     let sql = "CREATE TABLE forbidden (id INTEGER);";
     let snapshot = Body(Box::leak(Box::new(Metadata {
         kind: MigrationKind::Snapshot,
-        ..*body("1", sql).0
+        ..*script::<H>("1", sql).0
     })));
-    let nontransactional = with_policy("1", sql, Policy::NonTransactional);
-    let mut unsupported = vec![snapshot];
-
-    if !super::nontransactional::supported::<H>() {
-        unsupported.push(nontransactional);
-    }
+    let unsupported = [Policy::TransactionalRequired, Policy::NonTransactional]
+        .into_iter()
+        .filter(|policy| !supports::<H>(*policy))
+        .map(|policy| with_policy("1", sql, policy))
+        .chain([snapshot]);
 
     for entry in unsupported {
         let entries = [entry];
@@ -222,7 +233,7 @@ pub(super) fn case_unsupported_policy_is_rejected_before_bootstrap<H: Harness>(h
 }
 
 pub(super) fn case_malformed_planned_sql_is_rejected_before_bootstrap<H: Harness>(h: &mut H) {
-    let entries = [Planned(Plans(planned("1"), || {
+    let entries = [Planned(Plans(planned::<H>("1"), || {
         Plan::new().sql("INSERT INTO t VALUES ('oops")
     }))];
 
@@ -237,6 +248,10 @@ pub(super) fn case_malformed_planned_sql_is_rejected_before_bootstrap<H: Harness
 }
 
 pub(super) fn case_application_errors_keep_their_types<H: Harness>(h: &mut H) {
+    if !transactional::<H>() {
+        return;
+    }
+
     let entries = [
         Failing::Sql(Planned(CreateNotes)),
         Failing::Custom(ApplicationFailure),

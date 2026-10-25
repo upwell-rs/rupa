@@ -37,8 +37,12 @@ pub struct Owner {
 pub enum Body {
     /// Inside the artifact transaction with this transaction id.
     Transaction(i64),
-    /// In autocommit, one statement per request, for nontransactional work.
-    Autocommit,
+    /// In autocommit, one statement per request, for nontransactional work;
+    /// `dispatched` once a statement was sent, so effects may persist.
+    Autocommit {
+        /// Whether any statement of the body was sent.
+        dispatched: bool,
+    },
 }
 
 /// Per-connection ownership, attempt and body state.
@@ -73,6 +77,14 @@ impl State {
     /// mid-body or poisoned. Pools must discard such connections.
     pub fn is_active(&self) -> bool {
         self.owner.is_some() || self.attempt.is_some() || self.body.is_some() || self.poisoned
+    }
+
+    /// Records that an autocommit body sends a statement, before sending it:
+    /// a send that fails has an unknown outcome.
+    pub fn dispatch(&mut self) {
+        if let Some(Body::Autocommit { dispatched }) = &mut self.body {
+            *dispatched = true;
+        }
     }
 
     /// Whether user statements may run: owned, unpoisoned, inside a begun attempt body.

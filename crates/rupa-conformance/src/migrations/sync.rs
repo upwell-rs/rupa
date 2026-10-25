@@ -1,5 +1,6 @@
 //! The cases against `rupa::migrate::sync`.
 
+use rupa::core::sync::Connection;
 use rupa::migrate::sync::{Apply, Session};
 
 pub use super::Target;
@@ -32,6 +33,8 @@ mod history;
 mod nontransactional;
 #[path = "cases/schema.rs"]
 mod schema;
+#[path = "cases/support.rs"]
+mod support;
 
 /// Runs every case through the sync contracts.
 pub fn run<H: Harness + Sync>(h: &mut H) {

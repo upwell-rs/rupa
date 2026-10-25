@@ -1,3 +1,4 @@
+mod mysql;
 mod postgres;
 mod sqlite;
 
@@ -30,18 +31,25 @@ pub enum ScriptError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ScriptRule {
-    /// `BEGIN`, `COMMIT`, `ROLLBACK`, savepoints and prepared transactions.
+    /// `BEGIN`, `COMMIT`, `ROLLBACK`, savepoints, prepared and XA transactions
+    /// and MySQL `LOCK`/`UNLOCK TABLES`.
     TransactionControl,
-    /// Session-level `SET`, `set_config`, `RESET`, `DISCARD`, `LISTEN` and `UNLISTEN`.
+    /// Session-level `SET`, `set_config`, `RESET`, `DISCARD`, `LISTEN` and
+    /// `UNLISTEN`; on MySQL every `SET` and `USE`.
     SessionState,
-    /// Client commands such as psql backslash commands and `COPY` from stdin.
+    /// Client commands such as psql backslash commands, `COPY` from stdin and
+    /// the MySQL client's `DELIMITER`, `SOURCE` and `LOAD DATA LOCAL`.
     ClientCommand,
-    /// Advisory lock functions, which could release the runner's exclusion.
+    /// Advisory or named lock functions, which could release the runner's exclusion.
     AdvisoryLock,
     /// Names reserved for migration metadata (`_rupa_` prefix).
     ReservedName,
     /// `BEGIN ATOMIC` bodies, whose statement boundaries the lexer cannot know.
     AtomicBody,
+    /// MySQL `BEGIN … END` compound statements, whose boundaries the lexer cannot know.
+    CompoundStatement,
+    /// MySQL executable comments (`/*! … */`), which run SQL the grammar cannot check.
+    ExecutableComment,
 }
 
 impl fmt::Display for ScriptRule {
@@ -53,6 +61,10 @@ impl fmt::Display for ScriptRule {
             Self::AdvisoryLock => "advisory locks are owned by the migration runner",
             Self::ReservedName => "names starting with _rupa_ are reserved",
             Self::AtomicBody => "BEGIN ATOMIC bodies are unsupported; use a dollar-quoted body",
+            Self::CompoundStatement => {
+                "BEGIN ... END compound statements are unsupported; use single-statement routines"
+            }
+            Self::ExecutableComment => "executable comments are not allowed in migrations",
         })
     }
 }
@@ -66,6 +78,7 @@ pub fn validate_script(sql: &str, dialect: DialectId) -> Result<(), ScriptError>
     match dialect {
         DialectId::Sqlite => sqlite::validate(sql),
         DialectId::Postgres => postgres::statements(sql).map(drop),
+        DialectId::MySql => mysql::statements(sql).map(drop),
         _ => Err(ScriptError::Dialect(dialect)),
     }
 }
@@ -80,6 +93,7 @@ pub fn validate_script(sql: &str, dialect: DialectId) -> Result<(), ScriptError>
 pub fn split_script(sql: &str, dialect: DialectId) -> Result<Vec<Range<usize>>, ScriptError> {
     match dialect {
         DialectId::Postgres => postgres::statements(sql),
+        DialectId::MySql => mysql::statements(sql),
         _ => Err(ScriptError::Dialect(dialect)),
     }
 }
@@ -104,6 +118,68 @@ fn quoted(bytes: &[u8], start: usize, end: u8, doubled: bool) -> Result<usize, S
     }
 
     Err(ScriptError::Unterminated(start))
+}
+
+fn forbidden(rule: ScriptRule, at: usize) -> ScriptError {
+    ScriptError::Forbidden { rule, at }
+}
+
+/// Whether `byte` starts an unquoted identifier or keyword.
+fn word_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_' || byte >= 0x80
+}
+
+/// The end of the identifier or keyword starting at `start`; `$` may follow
+/// the first byte in both PostgreSQL and MySQL.
+fn word_end(bytes: &[u8], start: usize) -> usize {
+    bytes[start..]
+        .iter()
+        .position(|byte| !(word_start(*byte) || byte.is_ascii_digit() || *byte == b'$'))
+        .map_or(bytes.len(), |offset| start + offset)
+}
+
+/// Statement byte ranges collected while a grammar scans a script.
+#[derive(Debug, Default)]
+struct Ranges {
+    ranges: Vec<Range<usize>>,
+    begin: usize,
+    significant: bool,
+}
+
+impl Ranges {
+    /// Records a token; whitespace, comments and terminators are inert.
+    fn token(&mut self, inert: bool) {
+        self.significant |= !inert;
+    }
+
+    /// Ends the statement at the terminator at `at`, keeping it if it held a token.
+    fn end(&mut self, at: usize) {
+        if self.significant {
+            self.ranges.push(self.begin..at);
+        }
+
+        self.begin = at + 1;
+        self.significant = false;
+    }
+
+    /// The ranges, including an unterminated final statement ending at `len`.
+    fn finish(mut self, len: usize) -> Vec<Range<usize>> {
+        if self.significant {
+            self.ranges.push(self.begin..len);
+        }
+
+        self.ranges
+    }
+}
+
+/// A non-nesting `/* … */` comment.
+fn block_comment(bytes: &[u8], start: usize) -> Result<usize, ScriptError> {
+    let close = bytes[start + 2..]
+        .windows(2)
+        .position(|pair| pair == b"*/")
+        .ok_or(ScriptError::Unterminated(start))?;
+
+    Ok(start + 2 + close + 2)
 }
 
 fn line_comment(bytes: &[u8], start: usize) -> usize {

@@ -259,7 +259,7 @@ macro_rules! __pg_migration_control {
 
                 match body {
                     Some(Body::Transaction(id)) if id == self.current_transaction() $($await)*? => {}
-                    Some(Body::Autocommit) => {
+                    Some(Body::Autocommit { .. }) => {
                         self.client.batch_execute("BEGIN") $($await)* .map_err(db)?
                     }
                     _ => {
@@ -312,6 +312,7 @@ macro_rules! __pg_migration_control {
                 .map_err(|e| Error::Validation(e.into()))?;
 
                 for statement in statements {
+                    self.migration.dispatch();
                     self.client.batch_execute(&sql[statement]) $($await)* .map_err(db)?;
                 }
 
@@ -335,6 +336,8 @@ macro_rules! __pg_migration_control {
                     $crate::migrations::rupa_core::DialectId::Postgres,
                 )
                 .map_err(|e| PgError::Migration(StateError::Script(e)))?;
+
+                self.migration.dispatch();
 
                 self.run(statement, expect) $($await)*
             }

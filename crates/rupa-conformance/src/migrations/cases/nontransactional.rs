@@ -1,12 +1,13 @@
 use rupa::migrate::{Error, Policy, RunError};
 
+use super::support::{script, transactional};
 use super::{Apply, Harness, Session, catalog, versions};
 use crate::migrations::fixture::{InterruptedAutocommit, body, with_policy};
 
 /// Whether the harness's sessions run nontransactional bodies; the cases
 /// below pass vacuously for engines that reject the policy before bootstrap.
-pub(super) fn supported<H: Harness>() -> bool {
-    <H::Session as Session>::POLICIES.contains(&Policy::NonTransactional)
+fn supported<H: Harness>() -> bool {
+    super::support::supports::<H>(Policy::NonTransactional)
 }
 
 fn uncertain<T, E: std::error::Error, M: std::error::Error>(
@@ -21,8 +22,9 @@ fn uncertain<T, E: std::error::Error, M: std::error::Error>(
     )
 }
 
+/// Contrasts both policies, so it needs an engine supporting both.
 pub(super) fn case_policies_apply_in_catalog_order_once<H: Harness>(h: &mut H) {
-    if !supported::<H>() {
+    if !supported::<H>() || !transactional::<H>() {
         return;
     }
 
@@ -60,7 +62,7 @@ pub(super) fn case_failed_body_keeps_effects_and_blocks_replay<H: Harness>(h: &m
     }
 
     let entries = [
-        body("1", "CREATE TABLE kept (id INTEGER);"),
+        script::<H>("1", "CREATE TABLE kept (id INTEGER);"),
         with_policy(
             "2",
             "CREATE TABLE partial (id INTEGER); INSERT INTO absent VALUES (2);",
@@ -147,8 +149,9 @@ pub(super) fn case_interrupted_body_is_uncertain<H: Harness>(h: &mut H) {
     );
 }
 
+/// Contrasts both policies, so it needs an engine supporting both.
 pub(super) fn case_statements_outside_transactions_need_the_policy<H: Harness>(h: &mut H) {
-    if !supported::<H>() {
+    if !supported::<H>() || !transactional::<H>() {
         return;
     }
 
@@ -167,4 +170,42 @@ pub(super) fn case_statements_outside_transactions_need_the_policy<H: Harness>(h
     );
     assert_eq!(versions(&report), ["2"]);
     assert_eq!(h.count("SELECT count(*) FROM _rupa_migration_history"), 2);
+}
+
+pub(super) fn case_body_refused_before_dispatch_fails_without_uncertainty<H: Harness>(h: &mut H) {
+    if !supported::<H>() {
+        return;
+    }
+
+    let refused = [with_policy(
+        "1",
+        "CREATE TABLE never (id INTEGER); COMMIT;",
+        Policy::NonTransactional,
+    )];
+    let corrected = [with_policy(
+        "1",
+        "CREATE TABLE corrected (id INTEGER);",
+        Policy::NonTransactional,
+    )];
+
+    let mut session = h.connect();
+    let failed = wait!(h, session.apply(&catalog(&refused))).expect_err("refused script");
+    let report = wait!(h, session.apply(&catalog(&corrected))).expect("corrected apply");
+
+    match &failed {
+        RunError::Migration { cleanup, .. } => {
+            assert!(
+                cleanup.is_empty(),
+                "nothing ran, nothing is uncertain: {cleanup:?}"
+            )
+        }
+        other => panic!("the refused body must be reported as such: {other}"),
+    }
+
+    assert_eq!(versions(&report), ["1"]);
+    assert!(!h.table_exists("never"));
+    assert_eq!(
+        h.count("SELECT count(*) FROM _rupa_migration_attempts WHERE status = 'failed'"),
+        1
+    );
 }

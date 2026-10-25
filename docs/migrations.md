@@ -210,6 +210,8 @@ let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
 
 let client = postgres::Client::connect(url, postgres::NoTls)?;
 let report = catalog.apply(PgExecutor::new(client))?;
+
+let report = catalog.apply(MySqlExecutor::connect(mysql::Opts::from_url(url)?)?)?;
 ```
 
 `Catalog::new` validates versions, duplicates, source inputs and checksums without
@@ -238,7 +240,8 @@ reconciled. Nothing an abandoned transactional body did is committed.
 The apply path is strict: incremental migrations only, with the policies the
 session supports (`Session::POLICIES`). An unsupported policy or kind is
 rejected before initialization and is never downgraded: SQLite runs
-`TransactionalRequired` only, PostgreSQL also `NonTransactional`. A nonempty unmanaged
+`TransactionalRequired` only, PostgreSQL also `NonTransactional`, and MySQL
+`NonTransactional` only, because it commits DDL implicitly. A nonempty unmanaged
 target is refused; absence of a history table is not proof of freshness.
 Changed or missing applied artifacts and late arrivals block pending work.
 There is no silent reordering, checksum replacement or automatic body retry.
@@ -252,8 +255,8 @@ it defaults to `TransactionalRequired`. Native SQLite parses scripts,
 so quoted/comment semicolons are not split manually. Planned SQL is normalized
 and checksummed independently of any dialect; `apply` lexically checks it with
 the session dialect's grammar before acquiring the target. SQLite and
-PostgreSQL have script grammars; other dialects reject scripts explicitly
-(`ScriptError::Dialect`).
+PostgreSQL and MySQL have script grammars; other dialects reject scripts
+explicitly (`ScriptError::Dialect`).
 
 The PostgreSQL grammar assumes `standard_conforming_strings` (the migration
 connection must have it on) and keeps standard and `E''` strings, quoted
@@ -267,6 +270,20 @@ advisory lock functions, `_rupa_`-prefixed names and `BEGIN ATOMIC` bodies (use 
 dollar-quoted body instead). Typed raw queries are checked by the same grammar.
 Dollar-quoted bodies are opaque to it; the session's lock and transaction checks
 below catch what they do to the runner.
+
+The MySQL grammar assumes `NO_BACKSLASH_ESCAPES` without `ANSI_QUOTES`: for
+the run, the migration session adds the first to its `sql_mode` and removes the
+second (and the composite `ANSI`), restoring the original at release. So a
+backslash in a string is literal and `"…"` is always a string, never an
+identifier that could name a reserved table. It keeps `'…'` and `"…"` strings, backtick identifiers, `#`
+and `-- ` line comments (`--` without following whitespace is two minus signs)
+and `/* */` comments whole. It refuses before dispatch: executable comments
+(`/*! … */`), transaction control including `XA` and `LOCK`/`UNLOCK TABLES`,
+every `SET` and `USE`, the client's `DELIMITER`, `SOURCE` and `LOAD DATA LOCAL`,
+named lock functions, `_rupa_`-prefixed names, and `BEGIN … END` compound
+statements, whose boundaries it cannot know (use single-statement routines).
+Statement text built at run time (`PREPARE … FROM '…'`) is opaque, like a
+PostgreSQL dollar-quoted body.
 
 Without `rupa-build`, a hand-written Rust module exports a type implementing
 `MigrationInfo` and either a mode's `Migration<S>` or `PlannedMigration`. A scripted
@@ -299,9 +316,10 @@ crate-dependency closure records remain later authoring work.
 
 ## History and failure
 
-Both engines reserve `_rupa_migration_meta`, `_rupa_migration_history`, and
+Every engine reserves `_rupa_migration_meta`, `_rupa_migration_history`, and
 `_rupa_migration_attempts`; on PostgreSQL they live in the connection's current
-schema, the owned namespace. A versioned schema signature, stream, scheme and
+schema, on MySQL as InnoDB tables in the selected database, the owned
+namespace. A versioned schema signature, stream, scheme and
 checksum format must match before managed execution. Incompatible same-named
 objects are never replaced.
 
@@ -329,6 +347,18 @@ lock, so a dropped or crashed runner leaves only its running attempt behind,
 which blocks the next apply with `Error::Uncertain`. A connection already inside
 an application transaction is rejected.
 
+On MySQL (`mysql` driver, feature `migrations`), `apply` takes a named session
+lock, `GET_LOCK('rupa:…')` with the first 56 hex digits of the canonical target
+digest (engine, `DATABASE()` as database and namespace), and keeps it across the
+per-artifact commits, checking `IS_USED_LOCK` before every write phase.
+`MySqlExecutor::with_migration_lock_timeout` bounds the wait in whole seconds,
+rounded up; zero tries once. A connection without a selected database, with
+`autocommit` off or inside an open transaction (even an untouched read-only
+snapshot) is rejected: MySQL's implicit DDL commits would otherwise commit the
+caller's work. Each `CREATE TABLE` of the bootstrap commits on its own, so an
+interrupted first run can leave partial metadata, which later runs refuse as
+incompatible rather than complete.
+
 Before dispatching a body, its attempt is durable. A transactional body's
 schema/data effects, installed history and attempt completion commit together.
 If a transactional body fails,
@@ -336,8 +366,8 @@ acknowledged rollback records a failed attempt and releases the claim. Earlier c
 migrations remain installed. Errors preserve the failed version, typed body or
 driver cause, the versions this invocation already committed (`applied()`), and
 additional cleanup failures. Misusing a migration connection outside a
-runner-owned transaction fails with a typed `StateError`
-(`SqliteError::Migration`, `PgError::Migration`).
+runner-owned transaction or body fails with a typed `StateError`
+(`SqliteError::Migration`, `PgError::Migration`, `MySqlError::Migration`).
 
 ### Nontransactional migrations
 
@@ -354,14 +384,16 @@ CREATE INDEX CONCURRENTLY notes_title ON notes (title);
 
 Its attempt is journaled before the body starts. Each statement of a script is
 then sent on its own, because several statements in one PostgreSQL request share
-an implicit transaction. The script is split by the same grammar that validated
+an implicit transaction (and MySQL commits each DDL statement anyway). The script is split by the same grammar that validated
 it as a whole before the first statement ran (`rupa_migrate::split_script`). After
 the body returns, history and attempt completion commit together in a
 framework transaction, still under the advisory lock. Transactional and
 nontransactional migrations can be mixed in one catalog and run in version order.
 Keep each nontransactional migration small: one artifact cannot mix policies.
 
-Effects are not atomic. If the body fails, statements that already ran stay
+Effects are not atomic. A body refused before it sent any statement, such as a
+script the grammar rejects, records an ordinary failed attempt that a corrected
+catalog may replace. Once a statement was sent, statements that already ran stay
 committed. The attempt is therefore **not** recorded as failed, which would
 permit a replay. It stays unresolved, and the run's `RunError::Migration` lists
 `Error::Uncertain(attempt)` among its cleanup errors. The lock is released
@@ -380,7 +412,8 @@ ownership; a supported recovery command is a later slice. Do not delete history
 or clear a claim merely because a client timeout elapsed. This first slice
 reports uncertainty and blocks further apply instead of guessing.
 
-sqlx sessions, MySQL, nontransactional work on SQLite, snapshots/adoption,
+sqlx sessions (including async MySQL), transactional work on MySQL,
+nontransactional work on SQLite, snapshots/adoption,
 authored down migrations, allowed late application and operator recovery
 (asserting that uncertain work completed or was restored) are not yet
 implemented. Their accepted
