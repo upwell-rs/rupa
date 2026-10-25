@@ -275,7 +275,9 @@ impl<M> Catalog<'_, M> {
 
             if !installed.insert(entry.version) {
                 blockers.push(Blocker::Duplicate(entry.version));
-            } else if entry.checksum != record.checksum {
+            }
+
+            if entry.checksum != record.checksum {
                 blockers.push(Blocker::Changed {
                     version: entry.version,
                     installed: record.checksum,

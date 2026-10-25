@@ -165,10 +165,14 @@ fn missing_changed_duplicate_and_late_artifacts_are_each_reported() {
         checksum: Checksum::from_bytes([1; 32]),
         ..installed(&catalog, "3", 3)
     };
+    let changed_duplicate = HistoryEntry {
+        checksum: Checksum::from_bytes([2; 32]),
+        ..installed(&catalog, "1", 4)
+    };
     let history = vec![
         installed(&catalog, "9", 1),
         installed(&catalog, "1", 2),
-        installed(&catalog, "1", 4),
+        changed_duplicate,
         changed,
     ];
     let catalog_checksum = |version: &str| {
@@ -190,6 +194,11 @@ fn missing_changed_duplicate_and_late_artifacts_are_each_reported() {
                 checksum: Checksum::from_bytes([0; 32]),
             },
             Blocker::Duplicate(version("1")),
+            Blocker::Changed {
+                version: version("1"),
+                installed: Checksum::from_bytes([2; 32]),
+                catalog: catalog_checksum("1"),
+            },
             Blocker::Changed {
                 version: version("3"),
                 installed: Checksum::from_bytes([1; 32]),

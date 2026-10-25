@@ -305,9 +305,12 @@ for the session's dialect. A Rust body is `Opaque` until it runs.
 The engines read inside a snapshot the server refuses to write through
 (`READ ONLY` on PostgreSQL and MySQL; a deferred read transaction on SQLite).
 They observe exclusion without taking it: the advisory lock in `pg_locks`,
-`IS_USED_LOCK` on MySQL, and the claim column on SQLite. A status is a
-snapshot, and a runner may start right after it was read. `apply` re-checks
-everything under exclusion.
+`IS_USED_LOCK` on MySQL, and the claim column on SQLite. They never wait for
+exclusion. On SQLite in rollback-journal mode, a read waits, up to the
+connection's `busy_timeout`, while a writer holds its exclusive lock to
+commit, and fails if the timeout runs out. WAL readers never wait. A status
+is a snapshot, and a runner may start right after it was read. `apply`
+re-checks everything under exclusion.
 
 ## Authoring
 
