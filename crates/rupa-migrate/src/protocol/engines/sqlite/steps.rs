@@ -233,7 +233,24 @@ macro_rules! steps {
                 io.authorizer(false) $($await)*
             }
 
-            /// Claims the target under the writer lock.
+            /// Sets the connection's `busy_timeout`; a timeout that cannot be
+            /// set back poisons the connection, which must then be closed.
+            $($async)* fn set_busy_timeout<T: SqliteIo<State = State>>(
+                io: &mut T,
+                millis: i64,
+            ) -> Result<(), Error<T::Error>> {
+                let set = io.batch(&format!("PRAGMA busy_timeout = {millis}")) $($await)*;
+
+                set.map_err(|error| {
+                    io.state().poisoned = true;
+
+                    Error::Database(error)
+                })
+            }
+
+            /// Claims the target under the writer lock, waiting at most the lock
+            /// timeout. The connection's own `busy_timeout` is restored at
+            /// release, or here when the claim fails.
             pub $($async)* fn acquire<T: SqliteIo<State = State>>(
                 io: &mut T,
                 stream: &str,
@@ -241,7 +258,7 @@ macro_rules! steps {
             ) -> Result<(), Error<T::Error>> {
                 let state = io.state();
                 let busy = state.owner.is_some() || state.poisoned;
-                let millis = state.lock_timeout.as_millis().min(i32::MAX as u128);
+                let millis = state.lock_timeout.as_millis().min(i32::MAX as u128) as i64;
 
                 if busy || !autocommit(io) $($await)*? {
                     return Err(Error::History(
@@ -250,12 +267,27 @@ macro_rules! steps {
                 }
 
                 validate_connection(io) $($await)*?;
-                batch(io, &format!("PRAGMA busy_timeout = {millis}")) $($await)*?;
-                batch(io, "BEGIN IMMEDIATE") $($await)*?;
 
-                match claim(io, stream, scheme) $($await)* {
+                let original = scalar(io, "PRAGMA busy_timeout", &[], SqlType::I64) $($await)*?;
+                let original = int(&original).unwrap_or(0);
+
+                batch(io, &format!("PRAGMA busy_timeout = {millis}")) $($await)*?;
+
+                let claimed = match io.batch("BEGIN IMMEDIATE") $($await)* {
+                    Ok(()) => claim(io, stream, scheme) $($await)*,
+                    Err(error) => {
+                        set_busy_timeout(io, original) $($await)*?;
+
+                        return Err(Error::Database(error));
+                    }
+                };
+
+                match claimed {
                     Ok(token) => {
-                        io.state().owner = Some(token);
+                        let state = io.state();
+
+                        state.owner = Some(token);
+                        state.busy_timeout = Some(original);
 
                         if let Err(error) = io.batch("COMMIT") $($await)* {
                             io.state().poisoned = true;
@@ -269,6 +301,8 @@ macro_rules! steps {
                         if io.batch("ROLLBACK") $($await)* .is_err() {
                             io.state().poisoned = true;
                         }
+
+                        set_busy_timeout(io, original) $($await)*?;
 
                         Err(error)
                     }
@@ -442,7 +476,9 @@ macro_rules! steps {
                 let released = io.execute(sql::UNCLAIM, &[bound(&owner)]) $($await)*;
 
                 if matches!(released, Ok(1)) {
-                    return Ok(());
+                    let original = io.state().busy_timeout.take().unwrap_or(0);
+
+                    return set_busy_timeout(io, original) $($await)*;
                 }
 
                 let state = io.state();

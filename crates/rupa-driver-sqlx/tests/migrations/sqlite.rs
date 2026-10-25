@@ -33,7 +33,7 @@ fn database() -> PathBuf {
 }
 
 fn url(path: &Path) -> String {
-    format!("sqlite://{}?mode=rwc", path.display())
+    format!("sqlite://{}?mode=rwc", path.display()).replace('\\', "/")
 }
 
 /// The database file `url` names.

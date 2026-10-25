@@ -97,3 +97,31 @@ fn a_panicking_run_poisons_a_retained_session() {
         "a retained session refuses use after a run unwound"
     );
 }
+
+#[test]
+fn release_restores_the_connection_busy_timeout() {
+    let target = DatabaseFile::new();
+    let busy_timeout = |session: &mut rupa_driver_rusqlite::SqliteExecutor| -> i64 {
+        session
+            .connection()
+            .query_row("PRAGMA busy_timeout", [], |row| row.get(0))
+            .expect("busy_timeout")
+    };
+
+    let mut session = target.session();
+
+    session
+        .connection()
+        .execute_batch("PRAGMA busy_timeout = 1234")
+        .expect("application busy_timeout");
+    session
+        .acquire("primary", VersionScheme::Numbered)
+        .expect("acquire");
+
+    let during = busy_timeout(&mut session);
+
+    session.release().expect("release");
+
+    assert_eq!(during, 5000, "the runner waits its own lock timeout");
+    assert_eq!(busy_timeout(&mut session), 1234);
+}
