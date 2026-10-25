@@ -70,7 +70,11 @@ repeats a body. An interrupted transactional attempt is reconciled as rolled
 back by the next apply, which then stops with `Error::Reconciled`; a later
 apply runs it again. Uncertain nontransactional attempts and stale
 SQLite claims need an operator's `Recover::recover` assertion (`Recovery`,
-`RecoveryAction`), which is audited and runs no body.
+`RecoveryAction`), which is audited and runs no body. `Inspect::status` and
+`Inspect::plan` read a target without exclusion, writes or bodies: its
+classification, history, running attempts, pending entries and every
+`Blocker`, plus the exact steps apply would run. `Catalog::validate(Engine)`
+runs apply's catalog checks offline.
 
 Every engine keeps its state in one reserved journal table, `_rupa_migrations`,
 defined per engine in [`sql/`](sql/) (`postgres.sql`, `mysql.sql`,
@@ -84,12 +88,12 @@ metadata is not a claim that this slice executes them.
 
 | feature | adds |
 |---|---|
-| `sync` | `sync::{Session, Migration, Context, Apply, Recover}` |
-| `async` | `asynchronous::{Session, Migration, Context, Apply, Recover}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
+| `sync` | `sync::{Session, Migration, Context, Apply, Inspect, Recover}` |
+| `async` | `asynchronous::{Session, Migration, Context, Apply, Inspect, Recover}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
 | `protocol` | the engine session protocols (`protocol::{postgres, mysql, sqlite}`) and their per-mode `Io` traits, for driver crates; not public API |
 
-Neither is default. With exactly one enabled, all five of its names are
+Neither is default. With exactly one enabled, all six of its names are
 re-exported at the crate root, and `prelude` brings its method traits (`Apply`,
-`Recover`, `Session`) into scope anonymously; with both, use the mode modules. The facade
+`Inspect`, `Recover`, `Session`) into scope anonymously; with both, use the mode modules. The facade
 gates the crate with `migrations` and forwards its own `sync`/`async`; driver
 adapters have their own optional `migrations` feature.

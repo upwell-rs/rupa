@@ -8,8 +8,8 @@ pub mod sqlite;
 use rupa_core::{SqlType, Value};
 
 use crate::{
-    CatalogEntry, Checksum, Error, HistoryEntry, Policy, Provenance, Recovery, RecoveryAction,
-    RecoveryError,
+    Attempt, CatalogEntry, Checksum, Error, HistoryEntry, Journal, Policy, Provenance, Records,
+    Recovery, RecoveryAction, RecoveryError,
 };
 
 /// Column types of a history row: rank, version, checksum, status.
@@ -18,6 +18,10 @@ pub const HISTORY_COLUMNS: [SqlType; 4] =
 
 /// Column types of an attempt row: version, checksum, status.
 pub const ATTEMPT_COLUMNS: [SqlType; 3] = [SqlType::Text, SqlType::Bytes, SqlType::Text];
+
+/// Column types of a running attempt row: id, version, checksum, policy.
+pub const RUNNING_COLUMNS: [SqlType; 4] =
+    [SqlType::I64, SqlType::Text, SqlType::Bytes, SqlType::Text];
 
 /// The statuses of an `up` journal row, as `sql/<engine>.sql` documents them.
 pub mod status {
@@ -176,6 +180,66 @@ pub fn decode_history<E: std::error::Error>(
                 version,
                 checksum: Checksum::from_bytes(bytes),
                 provenance,
+            })
+        })
+        .collect()
+}
+
+/// A target without a journal: fresh without user objects, unmanaged with
+/// `objects` of them.
+pub fn absent(objects: &Value) -> Journal {
+    if int(objects) == Some(0) {
+        Journal::Fresh
+    } else {
+        Journal::Unmanaged
+    }
+}
+
+/// Decodes a journal's records: its stored `stream` and `scheme`, history
+/// rows and running attempt rows.
+pub fn records<E: std::error::Error>(
+    stream: Value,
+    scheme: Value,
+    history: Vec<Vec<Value>>,
+    running: Vec<Vec<Value>>,
+) -> Result<Journal, Error<E>> {
+    let (Some(stream), Some(scheme)) = (text(stream), text(scheme)) else {
+        return Err(Error::History("invalid journal header".into()));
+    };
+
+    Ok(Journal::Managed(Records {
+        stream,
+        scheme,
+        history: decode_history(history)?,
+        attempts: decode_attempts(running)?,
+    }))
+}
+
+/// Decodes running attempt rows.
+fn decode_attempts<E: std::error::Error>(rows: Vec<Vec<Value>>) -> Result<Vec<Attempt>, Error<E>> {
+    rows.into_iter()
+        .map(|row| {
+            let invalid = || Error::History("invalid attempt row".into());
+            let [
+                id,
+                Value::Text(version),
+                Value::Bytes(checksum),
+                Value::Text(policy),
+            ] = <[Value; 4]>::try_from(row).map_err(|_| invalid())?
+            else {
+                return Err(invalid());
+            };
+            let policy = [Policy::TransactionalRequired, Policy::NonTransactional]
+                .into_iter()
+                .find(|known| known.as_str() == policy)
+                .ok_or_else(invalid)?;
+            let checksum = checksum.try_into().map_err(|_| invalid())?;
+
+            Ok(Attempt {
+                id: int(&id).ok_or_else(invalid)?,
+                version,
+                checksum: Checksum::from_bytes(checksum),
+                policy,
             })
         })
         .collect()

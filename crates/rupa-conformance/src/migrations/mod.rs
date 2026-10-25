@@ -37,6 +37,13 @@ macro_rules! all_cases {
                 case_malformed_planned_sql_is_rejected_before_bootstrap,
                 case_application_errors_keep_their_types,
             ],
+            inspection: [
+                case_inspection_never_initializes_a_target,
+                case_status_and_plan_report_without_writing,
+                case_status_sees_a_live_runner_without_waiting,
+                case_status_reports_attempts_and_leaves_them_running,
+                case_status_reports_every_history_mismatch,
+            ],
             schema: [
                 case_planned_schema_creates_entity_tables,
                 case_changed_plan_is_reported_as_changed_history,

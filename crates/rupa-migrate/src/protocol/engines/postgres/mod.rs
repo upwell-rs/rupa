@@ -2,6 +2,7 @@
 //! by [`Target::advisory_key`], the journal table in the current schema, and
 //! transactional or autocommit bodies.
 
+mod inspect;
 mod recovery;
 pub mod sql;
 mod steps;
@@ -13,7 +14,7 @@ use rupa_core::{DialectId, Value};
 use crate::{Engine, Error, Policy, StateError, Target};
 
 /// The policies PostgreSQL sessions honour.
-pub const POLICIES: &[Policy] = &[Policy::TransactionalRequired, Policy::NonTransactional];
+pub const POLICIES: &[Policy] = Engine::Postgres.policies();
 
 /// `lock_not_available`, raised when `lock_timeout` expires.
 const LOCK_NOT_AVAILABLE: &str = "55P03";

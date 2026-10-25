@@ -9,12 +9,12 @@ macro_rules! steps {
             use super::{Connection, Owner, State, bound, finish, lock_failed, sql};
             use crate::protocol::$mode::Io;
             use crate::protocol::{
-                ATTEMPT_COLUMNS, HISTORY_COLUMNS, SqlState as _, check_reason, decode_history,
-                int, policy, resolve, single, status, text,
+                ATTEMPT_COLUMNS, HISTORY_COLUMNS, RUNNING_COLUMNS, SqlState as _, absent,
+                check_reason, decode_history, int, policy, records, resolve, single, status, text,
             };
             use crate::{
-                CHECKSUM_FORMAT, CatalogEntry, Error, HistoryEntry, Policy, Recovery, RecoveryAction,
-                RecoveryError, VersionScheme,
+                CHECKSUM_FORMAT, CatalogEntry, Error, Exclusion, HistoryEntry, Inspection, Policy,
+                Recovery, RecoveryAction, RecoveryError, VersionScheme,
             };
 
             $($async)* fn query<T: Io<State = State>>(
@@ -515,6 +515,7 @@ macro_rules! steps {
                 Ok(())
             }
 
+            super::inspect::inspect!([$($async)*] [$($await)*]);
             super::recovery::recovery!([$($async)*] [$($await)*]);
         }
     };

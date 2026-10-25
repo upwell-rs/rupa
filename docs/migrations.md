@@ -18,7 +18,7 @@ history, in either mode.
 Execution comes in two modes with identical names, selected by import, as
 with Diesel's sync and async query traits: `rupa::migrate::sync` (feature
 `sync`) and `rupa::migrate::asynchronous` (feature `async`). Each holds
-`Session`, `Migration`, `Context`, `Apply` and `Recover`; catalogs, plans, metadata,
+`Session`, `Migration`, `Context`, `Apply`, `Inspect` and `Recover`; catalogs, plans, metadata,
 errors and reports are shared at `rupa::migrate`. Neither mode is a default:
 sync-only drivers (`sqlite`, `sqlite-unbundled`, `postgres-sync`, `mysql`)
 enable `sync`, async drivers enable `async`, and a crate that only owns
@@ -36,9 +36,9 @@ use rupa::migrate::asynchronous::Apply;
 let report = catalog.apply(connection).await?;
 ```
 
-With exactly one mode enabled, its five names are also re-exported at
-`rupa::migrate` and the facade prelude brings `Apply`, `Recover` and `Session`
-into scope.
+With exactly one mode enabled, its six names are also re-exported at
+`rupa::migrate` and the facade prelude brings `Apply`, `Inspect`, `Recover` and
+`Session` into scope.
 With both enabled, neither is re-exported, so the two `apply` methods can never
 be ambiguous; import from the mode module. Because Cargo unifies features
 across a build, a dependency that enables the other mode removes the root
@@ -255,6 +255,60 @@ target is refused; absence of a history table is not proof of freshness.
 Changed or missing applied artifacts and late arrivals block pending work.
 There is no silent reordering, checksum replacement or automatic body retry.
 
+## Inspecting a target
+
+Three read-only checks answer what `apply` would do before anyone runs it.
+None of them takes exclusion, creates a journal, writes or executes a body.
+
+```rust,ignore
+use rupa::migrate::{Engine, sync::Inspect};
+
+// Offline, in CI: the catalog against what an engine's sessions can execute.
+catalog.validate(Engine::Postgres)?;
+
+// The catalog against a target.
+let status = catalog.status(connect()?)?;
+
+// What apply would run there: the status and every pending step.
+let plan = catalog.plan(connect()?)?;
+```
+
+`validate` runs the checks `apply` runs before it touches a target: supported
+kinds and policies, planned scripts that pass the engine's grammar, and schema
+operations that render for it.
+
+`status` classifies the target as `Fresh`, `Managed`, `Unmanaged` or
+`Uncertain` (running attempts or an owner claim). It returns the installed
+history with each entry's provenance, the running attempts, the pending catalog
+entries, and every `Blocker`, each with the version, checksum or attempt it
+concerns:
+
+| blocker | apply would |
+|---|---|
+| `Unmanaged` | refuse the target until it is adopted |
+| `Stream` | refuse a journal of another stream or version scheme |
+| `Locked` | report `Error::Busy`: a live runner holds the PostgreSQL or MySQL lock |
+| `Claimed` | report `Error::Busy` until SQLite's owner claim is released |
+| `Interrupted(attempt)` | record it rolled back and stop with `Error::Reconciled` |
+| `Unresolved(attempt)` | stop with `Error::Uncertain` until it is [recovered](#recovery) |
+| `Missing`, `Changed`, `Duplicate`, `Late` | refuse history that no longer matches the catalog |
+
+`apply` runs the pending entries only when there are no blockers. While a
+runner is live, its running attempts are listed but not reported as
+blockers, since they may be in progress.
+
+`plan` returns the status and one `Step` per pending entry, in the order
+`apply` runs them: the entry's version, checksum and policy, and its
+`Execution`. A planned body is `Static`, with its exact scripts rendered
+for the session's dialect. A Rust body is `Opaque` until it runs.
+
+The engines read inside a snapshot the server refuses to write through
+(`READ ONLY` on PostgreSQL and MySQL; a deferred read transaction on SQLite).
+They observe exclusion without taking it: the advisory lock in `pg_locks`,
+`IS_USED_LOCK` on MySQL, and the claim column on SQLite. A status is a
+snapshot, and a runner may start right after it was read. `apply` re-checks
+everything under exclusion.
+
 ## Authoring
 
 Use `sql_migration!` for a zero-sized type backed by an explicitly named SQL file,
@@ -449,7 +503,8 @@ a reason, accepts optional evidence, takes the same exclusion as `apply`, and
 executes no migration body. The catalog checks the assertion:
 
 Each assertion is one invocation on its own dedicated connection, which
-`recover` closes, like `apply`. Pick the one that matches what you verified:
+`recover` closes, like `apply`. [`status`](#inspecting-a-target) lists the
+attempt ids. Pick the one that matches what you verified:
 
 ```rust,ignore
 use rupa::migrate::{Recovery, RecoveryAction, sync::Recover};

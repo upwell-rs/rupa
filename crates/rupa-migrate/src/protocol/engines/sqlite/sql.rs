@@ -147,3 +147,13 @@ pub const ATTACHED: &str = "
 
 /// Objects in the `temp` namespace.
 pub const TEMPORARY: &str = "SELECT count(*) FROM temp.sqlite_schema";
+
+/// Opens the read snapshot inspection reads in, without a writer lock.
+pub const READ: &str = "BEGIN DEFERRED";
+
+/// The running attempts, oldest first.
+pub const RUNNING: &str = "
+    SELECT id, version, checksum, policy
+    FROM main._rupa_migrations
+    WHERE kind = 'up' AND status = 'running'
+    ORDER BY id";

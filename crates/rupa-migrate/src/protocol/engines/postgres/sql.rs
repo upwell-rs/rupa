@@ -169,3 +169,38 @@ pub fn attempt(journal: &str) -> String {
         FOR UPDATE"
     )
 }
+
+/// Opens the read-only snapshot inspection reads in, which the server
+/// refuses to write through.
+pub const READ_ONLY: &str = "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY";
+
+/// Whether any session of the current database holds the advisory lock
+/// split into `$1`/`$2`.
+pub const LOCKED: &str = "
+    SELECT EXISTS (
+        SELECT 1 FROM pg_locks
+        WHERE locktype = 'advisory' AND granted
+          AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND objsubid = 1 AND classid::bigint = $1 AND objid::bigint = $2
+    )";
+
+/// The stored stream and scheme.
+pub fn stored(journal: &str) -> String {
+    format!(
+        "
+        SELECT stream, scheme
+        FROM {journal}
+        WHERE kind = 'init'"
+    )
+}
+
+/// The running attempts, oldest first.
+pub fn running(journal: &str) -> String {
+    format!(
+        "
+        SELECT id, version, checksum, policy
+        FROM {journal}
+        WHERE kind = 'up' AND status = 'running'
+        ORDER BY id"
+    )
+}

@@ -141,9 +141,13 @@ fn plans_are_validated_for_the_session_dialect() {
     let catalog =
         Catalog::new("primary", VersionScheme::Numbered, &migrations).expect("valid catalog");
 
-    assert!(catalog.validate_plans(DialectId::Postgres).is_ok());
+    assert!(
+        catalog
+            .check(DialectId::Postgres, &[Policy::TransactionalRequired])
+            .is_ok()
+    );
     assert!(matches!(
-        catalog.validate_plans(DialectId::Sqlite),
+        catalog.check(DialectId::Sqlite, &[Policy::TransactionalRequired]),
         Err(ValidationError::Schema(error)) if matches!(
             *error,
             RenderError::Schema(ref schema)
@@ -151,7 +155,7 @@ fn plans_are_validated_for_the_session_dialect() {
         )
     ));
     assert!(matches!(
-        catalog.validate_plans(DialectId::Memory),
+        catalog.check(DialectId::Memory, &[Policy::TransactionalRequired]),
         Err(ValidationError::Schema(error))
             if *error == RenderError::UnsupportedDialect(DialectId::Memory)
     ));

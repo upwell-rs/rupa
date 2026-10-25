@@ -1,7 +1,7 @@
 use rupa_core::exec::Blocking;
 
 use super::Session;
-use crate::{CatalogEntry, Error, HistoryEntry, Policy, Recovery, VersionScheme, sync};
+use crate::{CatalogEntry, Error, HistoryEntry, Inspection, Policy, Recovery, VersionScheme, sync};
 
 /// A sync session driven through the async contracts. Each call runs on the
 /// calling thread and completes when first polled, with no added locking; it
@@ -19,6 +19,10 @@ impl<S: sync::Session + Send> Session for Blocking<S> {
 
     async fn history(&mut self) -> Result<Vec<HistoryEntry>, Error<S::Error>> {
         self.0.history()
+    }
+
+    async fn inspect(&mut self) -> Result<Inspection, Error<S::Error>> {
+        self.0.inspect()
     }
 
     async fn start_attempt(&mut self, entry: &CatalogEntry) -> Result<i64, Error<S::Error>> {
