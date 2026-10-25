@@ -9,7 +9,8 @@ dispatch, a pool, or Upwell.
 ## Usage
 
 Enable `rupa/migrations` and a supported driver: native synchronous SQLite
-(`sqlite` or `sqlite-unbundled`) or PostgreSQL (`postgres-sync`):
+(`sqlite` or `sqlite-unbundled`), PostgreSQL (`postgres-sync`) or MySQL
+(`mysql`):
 
 ```rust,ignore
 let entries = application_migrations();

@@ -271,9 +271,11 @@ dollar-quoted body instead). Typed raw queries are checked by the same grammar.
 Dollar-quoted bodies are opaque to it; the session's lock and transaction checks
 below catch what they do to the runner.
 
-The MySQL grammar assumes `NO_BACKSLASH_ESCAPES`, which the migration session
-adds to its `sql_mode` for the run and restores at release, so a backslash in a
-string is literal. It keeps `'…'` and `"…"` strings, backtick identifiers, `#`
+The MySQL grammar assumes `NO_BACKSLASH_ESCAPES` without `ANSI_QUOTES`: for
+the run, the migration session adds the first to its `sql_mode` and removes the
+second (and the composite `ANSI`), restoring the original at release. So a
+backslash in a string is literal and `"…"` is always a string, never an
+identifier that could name a reserved table. It keeps `'…'` and `"…"` strings, backtick identifiers, `#`
 and `-- ` line comments (`--` without following whitespace is two minus signs)
 and `/* */` comments whole. It refuses before dispatch: executable comments
 (`/*! … */`), transaction control including `XA` and `LOCK`/`UNLOCK TABLES`,

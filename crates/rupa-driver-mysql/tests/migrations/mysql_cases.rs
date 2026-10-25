@@ -27,6 +27,7 @@ pub(super) fn run(my: &mut My) {
         named_lock_uses_the_canonical_target_identity,
         sql_mode_is_set_for_the_run_and_restored,
         backslashes_are_literal_in_migration_scripts,
+        double_quotes_are_strings_under_ansi_sessions,
         lost_named_lock_poisons_instead_of_completing,
         rust_bodies_run_typed_queries_without_a_transaction,
         ordinary_renames_and_indexes_work,
@@ -151,6 +152,42 @@ fn backslashes_are_literal_in_migration_scripts(my: &mut My) {
         my.count("SELECT COUNT(*) FROM paths WHERE p IN (CONCAT('C:', CHAR(92)), 'a;b')"),
         2
     );
+}
+
+fn double_quotes_are_strings_under_ansi_sessions(my: &mut My) {
+    let entries = [with_policy(
+        "1",
+        "CREATE TABLE quoted (q VARCHAR(32)); INSERT INTO quoted VALUES (\"_rupa_migration_history\");",
+        Policy::NonTransactional,
+    )];
+
+    let mut session = my.connect();
+    session
+        .connection()
+        .query_drop("SET SESSION sql_mode = 'ANSI'")
+        .expect("ANSI session");
+    let original: String = session
+        .connection()
+        .query_first("SELECT @@SESSION.sql_mode")
+        .expect("sql_mode")
+        .expect("one row");
+
+    session
+        .apply(&numbered(&entries))
+        .expect("a double-quoted name is a string, not a reserved table");
+    let restored: String = session
+        .connection()
+        .query_first("SELECT @@SESSION.sql_mode")
+        .expect("sql_mode")
+        .expect("one row");
+
+    assert!(original.contains("ANSI_QUOTES"), "{original}");
+    assert_eq!(restored, original);
+    assert_eq!(
+        my.count("SELECT COUNT(*) FROM quoted WHERE q = '_rupa_migration_history'"),
+        1
+    );
+    assert_eq!(my.count("SELECT COUNT(*) FROM _rupa_migration_history"), 1);
 }
 
 fn lost_named_lock_poisons_instead_of_completing(my: &mut My) {

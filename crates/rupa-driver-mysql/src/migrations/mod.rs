@@ -21,6 +21,11 @@ use crate::{MySqlError, MySqlExecutor};
 /// The `sql_mode` flag the migration script grammar assumes.
 const NO_BACKSLASH_ESCAPES: &str = "NO_BACKSLASH_ESCAPES";
 
+/// `sql_mode` flags that read `"…"` as an identifier, which the script
+/// grammar reads as a string. `@@SESSION.sql_mode` lists the composite `ANSI`
+/// beside the flags it expands to, so both are removed.
+const IDENTIFIER_QUOTES: [&str; 2] = ["ANSI_QUOTES", "ANSI"];
+
 /// The named lock a connection holds and the session state it replaced.
 #[derive(Debug)]
 struct Owner {
@@ -104,18 +109,25 @@ impl Connection {
         .lock_name()
     }
 
-    /// The session `sql_mode` with `NO_BACKSLASH_ESCAPES` added.
+    /// The session `sql_mode` with `NO_BACKSLASH_ESCAPES` added and the
+    /// [`IDENTIFIER_QUOTES`] flags removed, so the server reads scripts as
+    /// the grammar does.
     fn migration_sql_mode(&self) -> String {
-        let present = self
+        let mut modes: Vec<&str> = self
             .sql_mode
             .split(',')
-            .any(|mode| mode.eq_ignore_ascii_case(NO_BACKSLASH_ESCAPES));
+            .filter(|mode| {
+                !mode.is_empty()
+                    && !mode.eq_ignore_ascii_case(NO_BACKSLASH_ESCAPES)
+                    && !IDENTIFIER_QUOTES
+                        .iter()
+                        .any(|quotes| mode.eq_ignore_ascii_case(quotes))
+            })
+            .collect();
 
-        match (present, self.sql_mode.is_empty()) {
-            (true, _) => self.sql_mode.clone(),
-            (false, true) => NO_BACKSLASH_ESCAPES.to_owned(),
-            (false, false) => format!("{},{NO_BACKSLASH_ESCAPES}", self.sql_mode),
-        }
+        modes.push(NO_BACKSLASH_ESCAPES);
+
+        modes.join(",")
     }
 }
 
