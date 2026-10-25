@@ -60,10 +60,11 @@ target is touched. Each successful transactional body commits with history and
 attempt completion; a failed later body rolls back without undoing earlier
 commits. A nontransactional body (`Policy::NonTransactional`, on PostgreSQL and
 MySQL) runs in autocommit. Drivers dispatch its statements one by one using
-`split_script`. A failure leaves its attempt unresolved (`Error::Uncertain`) instead of
-recording a replayable failure. SQLite uses a
-durable cooperative claim across commits, PostgreSQL a session advisory lock;
-interruption can require explicit reconciliation. There is no automatic takeover or replay.
+`split_script`. A failure after a statement was dispatched leaves its attempt
+unresolved (`Error::Uncertain`) instead of recording a replayable failure; a body
+refused before dispatching anything records an ordinary failed attempt. SQLite
+uses a durable cooperative claim across commits, PostgreSQL a session advisory
+lock and MySQL a named session lock; interruption can require explicit reconciliation. There is no automatic takeover or replay.
 
 Dynamic and sqlx adapters, snapshots, adoption, authored reversal, out-of-order
 permission and operator recovery remain subsequent implementation slices. Declaring their
