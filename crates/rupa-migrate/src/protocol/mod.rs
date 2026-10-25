@@ -13,6 +13,7 @@
 
 pub mod mysql;
 pub mod postgres;
+pub mod sqlite;
 
 use rupa_core::{SqlType, Value};
 
