@@ -13,7 +13,7 @@ sync = []
 # Asynchronous sessions, bodies and `apply` (`rupa_migrate::asynchronous`).
 async = ["rupa-core/async"]
 # The engine session protocols driver crates implement sessions on, in each
-# enabled mode; not public API.
+# enabled mode (alone: only `protocol::SqlState`); not public API.
 protocol = []
 
 [dependencies]

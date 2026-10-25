@@ -18,6 +18,8 @@ pub const POLICIES: &[Policy] = &[Policy::TransactionalRequired];
 #[derive(Debug)]
 pub struct State {
     owner: Option<String>,
+    /// The connection's own `busy_timeout`, restored at release.
+    busy_timeout: Option<i64>,
     attempt: Option<i64>,
     poisoned: bool,
     /// How long to wait for SQLite's writer lock.
@@ -28,6 +30,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             owner: None,
+            busy_timeout: None,
             attempt: None,
             poisoned: false,
             lock_timeout: Duration::from_secs(5),

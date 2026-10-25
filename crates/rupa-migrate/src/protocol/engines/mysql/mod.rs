@@ -94,7 +94,10 @@ impl State {
 
     /// `GET_LOCK` waits whole seconds: a nonzero timeout rounds up, zero tries once.
     fn lock_seconds(&self) -> i64 {
-        let seconds = self.lock_timeout.as_secs() + u64::from(self.lock_timeout.subsec_nanos() > 0);
+        let seconds = self
+            .lock_timeout
+            .as_secs()
+            .saturating_add(u64::from(self.lock_timeout.subsec_nanos() > 0));
 
         i64::try_from(seconds).unwrap_or(i64::MAX)
     }
@@ -160,3 +163,6 @@ fn lock_failed<E: std::error::Error>(what: &str) -> Error<E> {
 steps::steps!(sync, [] []);
 #[cfg(feature = "async")]
 steps::steps!(asynchronous, [async] [.await]);
+
+#[cfg(test)]
+mod tests;
