@@ -16,7 +16,7 @@ mysql = ["sqlx/mysql"]
 sqlite = ["_sqlite", "sqlx/sqlite"]
 # SQLite linked from the system (sqlx's `sqlite-unbundled`).
 sqlite-unbundled = ["_sqlite", "sqlx/sqlite-unbundled"]
-_sqlite = []
+_sqlite = ["dep:libsqlite3-sys"]
 # Date, time and UUID columns.
 chrono = ["dep:chrono", "rupa-core/chrono", "sqlx/chrono"]
 uuid = ["dep:uuid", "rupa-core/uuid", "sqlx/uuid"]
@@ -24,6 +24,8 @@ uuid = ["dep:uuid", "rupa-core/uuid", "sqlx/uuid"]
 pool = ["dep:deadpool", "dep:tokio", "rupa-core/deadpool"]
 # The registry drivers, for run-time driver selection.
 dynamic = ["pool", "rupa-core/dynamic"]
+# `rupa_migrate::asynchronous::Session` on every enabled database's executor.
+migrations = ["dep:rupa-migrate", "rupa-migrate/async", "rupa-migrate/protocol"]
 # TLS for Postgres and MySQL on rustls (ring, webpki roots), configured in
 # the URL (`sslmode=require` / `ssl-mode=REQUIRED`).
 tls-rustls = ["sqlx/tls-rustls"]
@@ -31,6 +33,8 @@ tls-rustls = ["sqlx/tls-rustls"]
 [dependencies]
 rupa-core = { workspace = true, features = ["async"] }
 rupa-sql.workspace = true
+rupa-migrate = { workspace = true, optional = true }
+libsqlite3-sys = { workspace = true, optional = true }
 thiserror.workspace = true
 sqlx.workspace = true
 futures-util.workspace = true
@@ -41,12 +45,18 @@ deadpool = { workspace = true, optional = true, features = ["rt_tokio_1"] }
 tokio = { workspace = true, optional = true, features = ["time"] }
 
 [dev-dependencies]
-rupa-driver-sqlx = { path = ".", features = ["postgres", "mysql", "sqlite", "dynamic"] }
-rupa-conformance = { path = "../rupa-conformance" }
-rupa = { path = "../rupa", features = ["tokio", "dynamic"] }
+rupa-driver-sqlx = { path = ".", features = ["postgres", "mysql", "sqlite", "dynamic", "migrations"] }
+rupa-conformance = { path = "../rupa-conformance", features = ["migrations"] }
+rupa = { path = "../rupa", features = ["tokio", "dynamic", "migrations"] }
 serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 testcontainers-modules.workspace = true
+rupa-migrate = { workspace = true, features = ["sync", "async", "protocol"] }
+rupa-driver-postgres = { workspace = true, features = ["migrations"] }
+rupa-driver-mysql = { workspace = true, features = ["migrations"] }
+rupa-driver-rusqlite = { workspace = true, features = ["bundled", "migrations"] }
+mysql.workspace = true
+postgres.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true

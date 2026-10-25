@@ -20,7 +20,7 @@ filter = """
 binary_id(/^rupa-driver-mysql::(conformance|migrations)$/)
 | binary_id(/^rupa-driver-(tokio-)?postgres::(conformance|repository|rls)$/)
 | binary_id(/^rupa-driver-(tokio-)?postgres::migrations$/)
-| binary_id(/^rupa-driver-sqlx::(mysql|postgres)$/)
+| binary_id(/^rupa-driver-sqlx::(mysql|postgres|migrations)$/)
 """
 test-group = "docker"
 # Pulling an image the first time can take a while.
