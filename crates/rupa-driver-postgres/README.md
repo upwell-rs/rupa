@@ -19,5 +19,5 @@ Value conversion, the prepared-statement cache, the error type and the URL/TLS s
 | `chrono`, `uuid` (default) | date/time and UUID columns |
 | `pool` | `PgPool` on r2d2 |
 | `dynamic` | `PgDriver` (`postgres-sync`), the registry entry (implies `pool`) |
-| `migrations` | `rupa_migrate::sync::Session` on `PgExecutor`: advisory-lock exclusion and history tables in the current schema, `TransactionalRequired` and `NonTransactional` bodies, using the protocol shared with `rupa-driver-tokio-postgres` |
+| `migrations` | `rupa_migrate::sync::Session` on `PgExecutor`: advisory-lock exclusion and history tables in the current schema, `TransactionalRequired` and `NonTransactional` bodies, using the PostgreSQL protocol every PostgreSQL driver shares (`rupa_migrate::protocol::postgres`) |
 | `tls-rustls` | TLS on rustls (ring, webpki roots), as the URL's `sslmode` asks |

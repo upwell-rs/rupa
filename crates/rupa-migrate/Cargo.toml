@@ -12,8 +12,8 @@ description = "Explicit migration catalogs, history and execution for RUPA"
 sync = []
 # Asynchronous sessions, bodies and `apply` (`rupa_migrate::asynchronous`).
 async = ["rupa-core/async"]
-# The engine session protocols driver crates implement sessions on; not
-# public API.
+# The engine session protocols driver crates implement sessions on, in each
+# enabled mode; not public API.
 protocol = []
 
 [dependencies]
