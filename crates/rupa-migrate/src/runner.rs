@@ -114,13 +114,9 @@ pub(crate) fn finish<E: std::error::Error + 'static, M: std::error::Error + 'sta
     result: Result<(), RunError<E, M>>,
     released: Result<(), Error<E>>,
     applied: Vec<Version>,
-    reconciled: Vec<i64>,
 ) -> Result<ApplyReport, RunError<E, M>> {
     match (result, released) {
-        (Ok(()), Ok(())) => Ok(ApplyReport {
-            applied,
-            reconciled,
-        }),
+        (Ok(()), Ok(())) => Ok(ApplyReport { applied }),
         (Ok(()), Err(source)) => Err(RunError::infrastructure(source).with_applied(applied)),
         (Err(mut error), released) => {
             if let Err(cleanup) = released {
@@ -230,12 +226,16 @@ macro_rules! mode {
                 }
             };
 
-            let result = apply_locked(&mut *guard.session, catalog, &mut applied) $($await)*;
+            let result = if reconciled.is_empty() {
+                apply_locked(&mut *guard.session, catalog, &mut applied) $($await)*
+            } else {
+                Err(crate::RunError::infrastructure(crate::Error::Reconciled(reconciled)))
+            };
             let released = guard.session.release() $($await)*;
 
             guard.armed = false;
 
-            crate::runner::finish(result, released, applied, reconciled)
+            crate::runner::finish(result, released, applied)
         }
 
         /// Records `recovery` against `entries`, abandoning the session if the

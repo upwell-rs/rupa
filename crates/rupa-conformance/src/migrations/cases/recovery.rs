@@ -44,13 +44,23 @@ pub(super) fn case_interrupted_transactional_attempt_is_reconciled<H: Harness>(h
         report = wait!(h, corrected.apply(h.connect()));
     }
 
-    let report = report.expect("apply after reconciliation");
-
-    assert_eq!(
-        report.reconciled.len(),
-        1,
-        "the rolled-back attempt is reported"
+    assert!(
+        matches!(
+            &report,
+            Err(RunError::Infrastructure {
+                source: Error::Reconciled(attempts),
+                ..
+            }) if attempts.len() == 1
+        ),
+        "the reconciling apply reports the rolled-back attempt and stops: {report:?}"
     );
+    assert!(
+        !h.table_exists("kept"),
+        "nothing ran in the reconciling apply"
+    );
+
+    let report = wait!(h, corrected.apply(h.connect())).expect("the next apply runs");
+
     assert_eq!(versions(&report), ["1"], "a new attempt runs the artifact");
     assert!(!h.table_exists("lost"), "the interrupted body rolled back");
     assert!(h.table_exists("kept"));

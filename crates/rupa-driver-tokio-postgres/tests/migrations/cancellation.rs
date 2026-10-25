@@ -25,7 +25,7 @@ pub(super) fn run(pg: &mut Pg) {
     }
 
     cases!(
-        a_dropped_apply_closes_the_connection_and_leaves_an_unresolved_attempt,
+        a_dropped_apply_closes_the_connection_and_its_attempt_is_reconciled,
         a_dropped_apply_poisons_a_retained_session,
         an_abandoned_pooled_session_is_discarded,
     );
@@ -35,7 +35,7 @@ fn numbered<M: MigrationInfo>(entries: &[M]) -> Catalog<'_, M> {
     Catalog::new("primary", VersionScheme::Numbered, entries).expect("valid catalog")
 }
 
-fn a_dropped_apply_closes_the_connection_and_leaves_an_unresolved_attempt(pg: &mut Pg) {
+fn a_dropped_apply_closes_the_connection_and_its_attempt_is_reconciled(pg: &mut Pg) {
     let entries = [body("1", SLOW)];
     let catalog = numbered(&entries);
 
@@ -45,21 +45,34 @@ fn a_dropped_apply_closes_the_connection_and_leaves_an_unresolved_attempt(pg: &m
     let competitor = pg.block_on(catalog.apply(pg.connect()));
 
     assert!(abandoned.is_err(), "the caller gave up mid-body");
-    assert!(
-        matches!(
-            competitor,
-            Err(RunError::Infrastructure {
-                source: Error::Busy | Error::Uncertain(_),
-                ..
-            })
-        ),
-        "an abandoned run blocks blind replay"
-    );
     assert!(!pg.table_exists("lost"));
-    assert_eq!(
-        pg.count("SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'running'"),
-        1
-    );
+
+    match competitor {
+        Err(RunError::Infrastructure {
+            source: Error::Busy,
+            ..
+        }) => assert_eq!(
+            pg.count(
+                "SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'running'"
+            ),
+            1,
+            "the server still runs the abandoned body, which holds the lock"
+        ),
+        Err(RunError::Infrastructure {
+            source: Error::Reconciled(attempts),
+            ..
+        }) => {
+            assert_eq!(attempts.len(), 1);
+            assert_eq!(
+                pg.count(
+                    "SELECT count(*) FROM _rupa_migrations WHERE kind = 'up' AND status = 'rolled_back'"
+                ),
+                1,
+                "once the connection closed, the attempt provably rolled back"
+            );
+        }
+        other => panic!("an abandoned run is never replayed in the same apply: {other:?}"),
+    }
 }
 
 fn a_dropped_apply_poisons_a_retained_session(pg: &mut Pg) {

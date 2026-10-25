@@ -18,7 +18,7 @@ history, in either mode.
 Execution comes in two modes with identical names, selected by import, as
 with Diesel's sync and async query traits: `rupa::migrate::sync` (feature
 `sync`) and `rupa::migrate::asynchronous` (feature `async`). Each holds
-`Session`, `Migration`, `Context` and `Apply`; catalogs, plans, metadata,
+`Session`, `Migration`, `Context`, `Apply` and `Recover`; catalogs, plans, metadata,
 errors and reports are shared at `rupa::migrate`. Neither mode is a default:
 sync-only drivers (`sqlite`, `sqlite-unbundled`, `postgres-sync`, `mysql`)
 enable `sync`, async drivers enable `async`, and a crate that only owns
@@ -36,8 +36,9 @@ use rupa::migrate::asynchronous::Apply;
 let report = catalog.apply(connection).await?;
 ```
 
-With exactly one mode enabled, its four names are also re-exported at
-`rupa::migrate` and the facade prelude brings `Apply` and `Session` into scope.
+With exactly one mode enabled, its five names are also re-exported at
+`rupa::migrate` and the facade prelude brings `Apply`, `Recover` and `Session`
+into scope.
 With both enabled, neither is re-exported, so the two `apply` methods can never
 be ambiguous; import from the mode module. Because Cargo unifies features
 across a build, a dependency that enables the other mode removes the root
@@ -429,8 +430,9 @@ lost connection) leaves its attempt `running`. There is no timeout takeover.
 - **Transactional attempts reconcile themselves.** An attempt's completion
   commits with its body, so a `running` transactional attempt never committed
   once its session has ended. The next `apply` finds it under exclusion, records
-  it `rolled_back`, lists its id in `ApplyReport::reconciled`, and then runs the
-  artifact again under a new attempt, as it would after an ordinary failure.
+  it `rolled_back`, and stops without running anything, failing with
+  `Error::Reconciled(attempts)`. Apply again to run the artifact under a new
+  attempt.
 - **Nontransactional attempts need an operator.** Their statements may have
   run, so the next `apply` fails with `Error::Uncertain(attempt)` until the
   attempt is recovered.
@@ -446,6 +448,9 @@ Recovery records an operator's assertion about an interrupted run. It requires
 a reason, accepts optional evidence, takes the same exclusion as `apply`, and
 executes no migration body. The catalog checks the assertion:
 
+Each assertion is one invocation on its own dedicated connection, which
+`recover` closes, like `apply`. Pick the one that matches what you verified:
+
 ```rust,ignore
 use rupa::migrate::{Recovery, RecoveryAction, sync::Recover};
 
@@ -453,13 +458,19 @@ use rupa::migrate::{Recovery, RecoveryAction, sync::Recover};
 // installed with `Provenance::Recovered`.
 let completed = Recovery::new(RecoveryAction::Completed(7), "index exists and is valid")
     .with_evidence("INC-1234");
-catalog.recover(connection, &completed)?;
+catalog.recover(connect()?, &completed)?;
+```
 
-// Or: its effects were undone by hand; the next apply runs it again.
-catalog.recover(connection, &Recovery::new(RecoveryAction::Restored(7), "dropped partial index"))?;
+```rust,ignore
+// Its effects were undone by hand: the next apply runs it again.
+let restored = Recovery::new(RecoveryAction::Restored(7), "dropped the partial index");
+catalog.recover(connect()?, &restored)?;
+```
 
+```rust,ignore
 // SQLite: the runner holding the claim has stopped.
-catalog.recover(connection, &Recovery::new(RecoveryAction::ReleaseClaim, "pod terminated"))?;
+let release = Recovery::new(RecoveryAction::ReleaseClaim, "pod terminated");
+catalog.recover(connect()?, &release)?;
 ```
 
 The reason and evidence are stored on the attempt's journal row; a released

@@ -23,6 +23,11 @@ pub enum Error<E: std::error::Error + 'static> {
     /// An interrupted attempt prevents blind replay.
     #[error("migration attempt {0} is unresolved; explicit reconciliation is required")]
     Uncertain(i64),
+    /// The run found interrupted transactional attempts, which provably
+    /// never committed, recorded them as rolled back, and stopped without
+    /// running anything. A new apply runs their artifacts again.
+    #[error("rolled back interrupted migration attempts {0:?}; apply again to run them")]
+    Reconciled(Vec<i64>),
     /// An operator's recovery assertion was refused before anything was recorded.
     #[error(transparent)]
     Recovery(#[from] RecoveryError),
