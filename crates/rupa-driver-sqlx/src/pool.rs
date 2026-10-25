@@ -178,6 +178,12 @@ impl<DB: Backend> managed::Manager for SqlxManager<DB> {
             ));
         }
 
+        if conn.holds_migration_state() {
+            return Err(RecycleError::message(
+                "migration run left state on the connection",
+            ));
+        }
+
         self.expiry.check(metrics)?;
 
         conn.clean().await.map_err(RecycleError::Backend)

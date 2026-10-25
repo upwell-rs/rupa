@@ -55,6 +55,8 @@
 #[cfg(feature = "dynamic")]
 mod driver;
 mod error;
+#[cfg(feature = "migrations")]
+mod migrations;
 #[cfg(feature = "mysql")]
 pub mod mysql;
 #[cfg(feature = "pool")]
@@ -100,6 +102,11 @@ pub trait Backend: sqlx::Database + sqlx::database::HasStatementCache + sealed::
     /// The rupa dialect statements are rendered in.
     type Dialect: Dialect + Copy + Default + Send + Sync + 'static;
 
+    /// The engine's migration session state.
+    #[cfg(feature = "migrations")]
+    #[doc(hidden)]
+    type Migration: migrations::Engine<Self>;
+
     /// The registry name of this database's [`SqlxDriver`].
     const DRIVER: &'static str;
 
@@ -138,6 +145,14 @@ pub trait Backend: sqlx::Database + sqlx::database::HasStatementCache + sealed::
         conn: &'c mut Self::Connection,
         sql: &'c str,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send + 'c;
+
+    /// Sends `sql` as one simple query, unsplit.
+    #[cfg(feature = "migrations")]
+    #[doc(hidden)]
+    fn raw<'c>(
+        conn: &'c mut Self::Connection,
+        sql: &'c str,
+    ) -> impl Future<Output = Result<(), sqlx::Error>> + Send + 'c;
 }
 
 /// Implements [`Backend`]'s I/O methods for one database; they are the same
@@ -155,6 +170,19 @@ macro_rules! sqlx_io {
                     .execute(&mut *conn)
                     .await?;
                 Ok(result.rows_affected())
+            }
+        }
+
+        #[cfg(feature = "migrations")]
+        fn raw<'c>(
+            conn: &'c mut <$db as sqlx::Database>::Connection,
+            sql: &'c str,
+        ) -> impl Future<Output = Result<(), sqlx::Error>> + Send + 'c {
+            async move {
+                sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+                    .execute(&mut *conn)
+                    .await
+                    .map(drop)
             }
         }
 
@@ -189,6 +217,8 @@ pub struct SqlxExecutor<DB: Backend> {
     dialect: DB::Dialect,
     pending: PendingRollback,
     broken: bool,
+    #[cfg(feature = "migrations")]
+    migration: DB::Migration,
 }
 
 impl<DB: Backend> SqlxExecutor<DB> {
@@ -199,6 +229,8 @@ impl<DB: Backend> SqlxExecutor<DB> {
             dialect: DB::Dialect::default(),
             pending: PendingRollback::default(),
             broken: false,
+            #[cfg(feature = "migrations")]
+            migration: DB::Migration::default(),
         }
     }
 
@@ -244,12 +276,7 @@ impl<DB: Backend> SqlxExecutor<DB> {
     async fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqlxError> {
         self.clean().await?;
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
-        let mut args = DB::Arguments::default();
-        args.reserve(rendered.params.len(), 0);
-        for value in &rendered.params {
-            DB::bind(&mut args, value).map_err(sqlx::Error::Encode)?;
-        }
-
+        let args = arguments::<DB>(&rendered.params)?;
         let result = if expect == Expect::Affected {
             DB::execute(&mut self.conn, rendered.sql, args)
                 .await
@@ -262,11 +289,36 @@ impl<DB: Backend> SqlxExecutor<DB> {
         result.map_err(|e| self.failed(e))
     }
 
+    /// Whether a migration run left state on the connection, so pools must
+    /// discard it.
+    #[cfg(feature = "pool")]
+    fn holds_migration_state(&self) -> bool {
+        #[cfg(feature = "migrations")]
+        let active = migrations::Engine::is_active(&self.migration);
+        #[cfg(not(feature = "migrations"))]
+        let active = false;
+
+        active
+    }
+
     fn failed(&mut self, e: impl Into<SqlxError>) -> SqlxError {
         let e = e.into();
         self.broken |= e.is_fatal();
         e
     }
+}
+
+/// `values` bound in order.
+fn arguments<DB: Backend>(values: &[Value]) -> Result<DB::Arguments, SqlxError> {
+    let mut args = DB::Arguments::default();
+
+    args.reserve(values.len(), 0);
+
+    for value in values {
+        DB::bind(&mut args, value).map_err(sqlx::Error::Encode)?;
+    }
+
+    Ok(args)
 }
 
 impl<DB: Backend> fmt::Debug for SqlxExecutor<DB> {
@@ -293,6 +345,14 @@ impl<DB: Backend> AsyncExecutor for SqlxExecutor<DB> {
         statement: &Statement,
         expect: Expect,
     ) -> Result<Outcome, SqlxError> {
+        #[cfg(feature = "migrations")]
+        if migrations::Engine::is_running(&self.migration) {
+            return <DB::Migration as migrations::Engine<DB>>::user_statement(
+                self, statement, expect,
+            )
+            .await;
+        }
+
         self.run(statement, expect).await
     }
 }

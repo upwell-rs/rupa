@@ -53,6 +53,9 @@ rusqlite = "0.39"
 mysql = { version = "28", default-features = false, features = ["default-rust"] }
 # The runtime and databases are chosen by rupa-driver-sqlx's features.
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "json"] }
+# The SQLite sqlx links, for the migration authorizer sqlx does not expose;
+# its version must stay within sqlx-sqlite's range.
+libsqlite3-sys = { version = "0.37", default-features = false }
 r2d2 = "0.8"
 tokio-postgres-rustls = "0.14"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

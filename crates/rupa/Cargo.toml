@@ -14,6 +14,7 @@ migrations = [
     "rupa-driver-postgres?/migrations",
     "rupa-driver-tokio-postgres?/migrations",
     "rupa-driver-mysql?/migrations",
+    "rupa-driver-sqlx?/migrations",
 ]
 default = ["chrono", "uuid"]
 
