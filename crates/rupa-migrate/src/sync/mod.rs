@@ -23,7 +23,8 @@ pub trait Session: Connection {
 
     /// Acquires exclusion, validates/initializes metadata and checks
     /// outstanding attempts. Returns the interrupted transactional attempts it
-    /// recorded as rolled back; an unresolved nontransactional attempt fails
+    /// recorded as rolled back, after which `apply` stops with
+    /// [`Error::Reconciled`]; an unresolved nontransactional attempt fails
     /// with [`Error::Uncertain`].
     fn acquire(
         &mut self,

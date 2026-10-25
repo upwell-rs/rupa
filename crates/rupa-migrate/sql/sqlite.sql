@@ -39,15 +39,20 @@ CREATE TABLE _rupa_migrations (
 
     CHECK (kind IN ('init', 'up', 'claim_released')),
     CHECK (kind <> 'init' OR (
-        schema_version = 1
+        schema_version IS NOT NULL
+        AND schema_version = 1
         AND stream IS NOT NULL
         AND scheme IS NOT NULL
         AND checksum_format IS NOT NULL
     )),
     CHECK (kind <> 'up' OR (
         version IS NOT NULL
+        AND checksum IS NOT NULL
+        AND typeof(checksum) = 'blob'
         AND length(checksum) = 32
+        AND policy IS NOT NULL
         AND policy IN ('transactional', 'nontransactional')
+        AND status IS NOT NULL
         AND status IN ('running', 'applied', 'failed', 'rolled_back', 'recovered', 'abandoned')
     ))
 )

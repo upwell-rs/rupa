@@ -65,9 +65,10 @@ MySQL) runs in autocommit. Drivers dispatch its statements one by one using
 unresolved (`Error::Uncertain`) instead of recording a replayable failure; a body
 refused before dispatching anything records an ordinary failed attempt. SQLite
 uses a durable cooperative claim across commits, PostgreSQL a session advisory
-lock and MySQL a named session lock. There is no automatic takeover or replay.
-An interrupted transactional attempt is reconciled as rolled back by the next
-apply (`ApplyReport::reconciled`); uncertain nontransactional attempts and stale
+lock and MySQL a named session lock. There is no automatic takeover, and no run
+repeats a body. An interrupted transactional attempt is reconciled as rolled
+back by the next apply, which then stops with `Error::Reconciled`; a later
+apply runs it again. Uncertain nontransactional attempts and stale
 SQLite claims need an operator's `Recover::recover` assertion (`Recovery`,
 `RecoveryAction`), which is audited and runs no body.
 
@@ -87,8 +88,8 @@ metadata is not a claim that this slice executes them.
 | `async` | `asynchronous::{Session, Migration, Context, Apply, Recover}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
 | `protocol` | the engine session protocols (`protocol::{postgres, mysql, sqlite}`) and their per-mode `Io` traits, for driver crates; not public API |
 
-Neither is default. With exactly one enabled, all four of its names are
+Neither is default. With exactly one enabled, all five of its names are
 re-exported at the crate root, and `prelude` brings its method traits (`Apply`,
-`Session`) into scope anonymously; with both, use the mode modules. The facade
+`Recover`, `Session`) into scope anonymously; with both, use the mode modules. The facade
 gates the crate with `migrations` and forwards its own `sync`/`async`; driver
 adapters have their own optional `migrations` feature.

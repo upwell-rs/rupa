@@ -18,6 +18,9 @@
 --                          SQLite runners hold one, in the init row's owner
 --
 -- Installed history is every 'up' row that is applied or recovered.
+--
+-- MySQL enforces CHECK constraints from 8.0.16; older servers parse and
+-- ignore them.
 CREATE TABLE _rupa_migrations (
     id              BIGINT       AUTO_INCREMENT PRIMARY KEY,
     kind            VARCHAR(16)  NOT NULL,
@@ -37,7 +40,8 @@ CREATE TABLE _rupa_migrations (
 
     CHECK (kind IN ('init', 'up', 'claim_released')),
     CHECK (kind <> 'init' OR (
-        schema_version = 1
+        schema_version IS NOT NULL
+        AND schema_version = 1
         AND stream IS NOT NULL
         AND scheme IS NOT NULL
         AND checksum_format IS NOT NULL
@@ -45,7 +49,9 @@ CREATE TABLE _rupa_migrations (
     CHECK (kind <> 'up' OR (
         version IS NOT NULL
         AND checksum IS NOT NULL
+        AND policy IS NOT NULL
         AND policy IN ('transactional', 'nontransactional')
+        AND status IS NOT NULL
         AND status IN ('running', 'applied', 'failed', 'rolled_back', 'recovered', 'abandoned')
     ))
 ) ENGINE = InnoDB
