@@ -1,6 +1,6 @@
 use rupa::core::dialect::DialectId;
 use rupa::migrate::schema::Index;
-use rupa::migrate::{Error, Planned, RunError};
+use rupa::migrate::{Blocker, Error, Planned, RunError};
 
 use super::support::{dialect, planned, script};
 use super::{Harness, Session, catalog};
@@ -32,9 +32,9 @@ pub(super) fn case_changed_plan_is_reported_as_changed_history<H: Harness>(h: &m
     assert!(matches!(
         wait!(h, session.apply(&catalog(&changed))),
         Err(RunError::Infrastructure {
-            source: Error::History(message),
+            source: Error::Blocked(blockers),
             ..
-        }) if message.contains("changed checksum")
+        }) if matches!(blockers.as_slice(), [Blocker::Changed { .. }])
     ));
 }
 

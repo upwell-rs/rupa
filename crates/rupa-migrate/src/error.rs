@@ -1,4 +1,4 @@
-use crate::{Checksum, RecoveryError, ValidationError};
+use crate::{Blocker, Checksum, RecoveryError, ValidationError};
 
 /// Migration infrastructure failed without erasing the driver's error type.
 #[derive(Debug, thiserror::Error)]
@@ -12,6 +12,11 @@ pub enum Error<E: std::error::Error + 'static> {
     /// Ownership, schema or history no longer matches the runner's assumptions.
     #[error("invalid migration history: {0}")]
     History(String),
+    /// Installed history no longer matches the catalog, or pending artifacts
+    /// are late without permission. Each blocker carries its artifact
+    /// identity: `Missing`, `Changed`, `Duplicate` or `Late`.
+    #[error("migration history does not match the catalog: {0:?}")]
+    Blocked(Vec<Blocker>),
     /// A cooperative runner already owns the target, possibly after interruption.
     #[error(
         "migration target has an existing owner; stop the old runner and reconcile before recovery"

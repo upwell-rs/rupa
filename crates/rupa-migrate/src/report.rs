@@ -5,6 +5,9 @@ use crate::{Error, Version};
 pub struct ApplyReport {
     /// Versions executed in actual installation order.
     pub applied: Vec<Version>,
+    /// The applied versions that ran late, below an installed version, by
+    /// explicit [`Order::AllowLate`](crate::Order::AllowLate) permission.
+    pub late: Vec<Version>,
 }
 
 /// A run failed while retaining the typed body and infrastructure causes.

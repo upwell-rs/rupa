@@ -44,6 +44,12 @@ macro_rules! all_cases {
                 case_status_reports_attempts_and_leaves_them_running,
                 case_status_reports_every_history_mismatch,
             ],
+            ordering: [
+                case_pending_versions_run_in_version_order,
+                case_strict_apply_refuses_a_late_version_before_running_it,
+                case_permitted_late_version_runs_last_with_a_new_rank,
+                case_late_permission_never_lifts_other_blockers,
+            ],
             schema: [
                 case_planned_schema_creates_entity_tables,
                 case_changed_plan_is_reported_as_changed_history,

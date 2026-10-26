@@ -1,5 +1,5 @@
 use rupa::migrate::{
-    Catalog, Error, Metadata, MigrationKind, Plan, Planned, Policy, RunError, ScriptError,
+    Blocker, Catalog, Error, Metadata, MigrationKind, Plan, Planned, Policy, RunError, ScriptError,
     ValidationError, VersionScheme,
 };
 
@@ -103,9 +103,9 @@ pub(super) fn case_changed_applied_body_is_rejected_before_pending_work<H: Harne
     assert!(matches!(
         wait!(h, session.apply(&catalog(&changed))),
         Err(RunError::Infrastructure {
-            source: Error::History(_),
+            source: Error::Blocked(blockers),
             ..
-        })
+        }) if matches!(blockers.as_slice(), [Blocker::Changed { .. }])
     ));
     assert_eq!(wait!(h, session.history()).expect("history").len(), 1);
     assert!(!h.table_exists("forbidden"));

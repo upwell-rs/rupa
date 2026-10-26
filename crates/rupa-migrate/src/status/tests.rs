@@ -1,7 +1,9 @@
+use rupa_core::DialectId;
+
 use super::*;
 use crate::{
-    ArtifactInput, Engine, Metadata, MigrationInfo, MigrationKind, Plan, Planned, PlannedMigration,
-    Provenance, VersionScheme,
+    ApplyOptions, ArtifactInput, Engine, Metadata, MigrationInfo, MigrationKind, Order, Plan,
+    Planned, PlannedMigration, Provenance, ValidationError, VersionScheme,
 };
 
 /// An imperative entry.
@@ -289,7 +291,7 @@ fn a_plan_renders_planned_bodies_and_keeps_imperative_ones_opaque() {
     let status = catalog.classify(inspection(Exclusion::Free, Journal::Fresh));
 
     let plan = catalog
-        .plan_for(status, DialectId::Postgres)
+        .plan_for(status, DialectId::Postgres, &ApplyOptions::DEFAULT)
         .expect("renderable plan");
     let steps: Vec<_> = plan
         .steps
@@ -306,6 +308,55 @@ fn a_plan_renders_planned_bodies_and_keeps_imperative_ones_opaque() {
             ),
             ("2".to_owned(), &Execution::Opaque),
         ]
+    );
+}
+
+#[test]
+fn late_permission_plans_late_entries_and_keeps_every_other_blocker() {
+    let entries = [imperative("1"), imperative("2"), imperative("3")];
+    let catalog = catalog(&entries);
+    let changed = HistoryEntry {
+        checksum: Checksum::from_bytes([1; 32]),
+        ..installed(&catalog, "1", 1)
+    };
+    let history = vec![changed, installed(&catalog, "3", 2)];
+    let version = |text: &str| VersionScheme::Numbered.parse(text).expect("version");
+    let allow_late = ApplyOptions {
+        order: Order::AllowLate,
+    };
+    let plan = |options: &ApplyOptions| {
+        let journal = managed(history.clone(), Vec::new());
+        let status = catalog.classify(inspection(Exclusion::Free, journal));
+
+        catalog
+            .plan_for(status, DialectId::Postgres, options)
+            .expect("renderable plan")
+    };
+
+    let strict = plan(&ApplyOptions::DEFAULT);
+    let permitted = plan(&allow_late);
+
+    assert!(strict.late.is_empty());
+    assert!(matches!(
+        strict.status.blockers.as_slice(),
+        [Blocker::Changed { .. }, Blocker::Late { version: late, .. }] if *late == version("2")
+    ));
+    assert_eq!(permitted.late, [version("2")]);
+    assert!(
+        matches!(
+            permitted.status.blockers.as_slice(),
+            [Blocker::Changed { .. }]
+        ),
+        "permission lifts only late blockers: {:?}",
+        permitted.status.blockers
+    );
+    assert_eq!(
+        permitted
+            .steps
+            .iter()
+            .map(|step| step.entry.version)
+            .collect::<Vec<_>>(),
+        [version("2")]
     );
 }
 

@@ -10,8 +10,8 @@ use rupa_core::dialect::Dialect;
 
 use crate::runner::mode;
 use crate::{
-    ApplyPlan, ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, Inspection, MigrationInfo,
-    Plan, Policy, Recovery, RunError, Status, VersionScheme,
+    ApplyOptions, ApplyPlan, ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, Inspection,
+    MigrationInfo, Plan, Policy, Recovery, RunError, Status, VersionScheme,
 };
 
 /// Driver-owned dedicated physical migration connection, awaited.
@@ -106,7 +106,19 @@ pub trait Session: Connection {
     where
         Self: Sized,
     {
-        apply(self, catalog)
+        apply(self, catalog, &ApplyOptions::DEFAULT)
+    }
+
+    /// [`Session::apply`] with per-run `options`.
+    fn apply_with<M: Migration<Self> + Send + Sync>(
+        &mut self,
+        catalog: &Catalog<'_, M>,
+        options: &ApplyOptions,
+    ) -> impl Future<Output = Result<ApplyReport, RunError<Self::Error, M::Error>>> + Send
+    where
+        Self: Sized,
+    {
+        apply(self, catalog, options)
     }
 }
 
@@ -138,14 +150,26 @@ pub trait Apply {
     /// The catalog's entry type.
     type Entry;
 
-    /// Applies pending migrations; no runner/session wrapper is required, the
-    /// driver owns exclusion and cleanup.
+    /// Applies pending migrations under `options`; no runner/session
+    /// wrapper is required, the driver owns exclusion and cleanup.
+    fn apply_with<S: Session>(
+        &self,
+        connection: S,
+        options: &ApplyOptions,
+    ) -> impl Future<Output = ApplyResult<S, Self::Entry>> + Send
+    where
+        Self::Entry: Migration<S>;
+
+    /// Applies pending migrations strictly, refusing late artifacts.
     fn apply<S: Session>(
         &self,
         connection: S,
     ) -> impl Future<Output = ApplyResult<S, Self::Entry>> + Send
     where
-        Self::Entry: Migration<S>;
+        Self::Entry: Migration<S>,
+    {
+        self.apply_with(connection, &ApplyOptions::DEFAULT)
+    }
 }
 
 /// Records an operator's recovery assertion on a dedicated native
@@ -168,12 +192,22 @@ pub trait Inspect {
         connection: S,
     ) -> impl Future<Output = Result<Status<'_>, Error<S::Error>>> + Send;
 
-    /// What apply would run on the target: its status and the pending steps,
-    /// rendered for the session's dialect after the checks apply runs first.
+    /// What an apply with `options` would run on the target: its status and
+    /// the pending steps, rendered for the session's dialect after the checks
+    /// apply runs first.
+    fn plan_with<S: Session>(
+        &self,
+        connection: S,
+        options: &ApplyOptions,
+    ) -> impl Future<Output = Result<ApplyPlan<'_>, Error<S::Error>>> + Send;
+
+    /// What a strict apply would run on the target.
     fn plan<S: Session>(
         &self,
         connection: S,
-    ) -> impl Future<Output = Result<ApplyPlan<'_>, Error<S::Error>>> + Send;
+    ) -> impl Future<Output = Result<ApplyPlan<'_>, Error<S::Error>>> + Send {
+        self.plan_with(connection, &ApplyOptions::DEFAULT)
+    }
 }
 
 impl<M: MigrationInfo + Sync> Inspect for Catalog<'_, M> {
@@ -181,14 +215,18 @@ impl<M: MigrationInfo + Sync> Inspect for Catalog<'_, M> {
         Ok(self.classify(inspect(&mut connection).await?))
     }
 
-    async fn plan<S: Session>(&self, connection: S) -> Result<ApplyPlan<'_>, Error<S::Error>> {
+    async fn plan_with<S: Session>(
+        &self,
+        connection: S,
+        options: &ApplyOptions,
+    ) -> Result<ApplyPlan<'_>, Error<S::Error>> {
         let dialect = Dialect::id(connection.dialect());
 
         self.check(dialect, S::POLICIES)?;
 
         let status = self.status(connection).await?;
 
-        Ok(self.plan_for(status, dialect)?)
+        Ok(self.plan_for(status, dialect, options)?)
     }
 }
 
@@ -207,14 +245,15 @@ impl<M> Recover for Catalog<'_, M> {
 impl<M: MigrationInfo + Send + Sync> Apply for Catalog<'_, M> {
     type Entry = M;
 
-    async fn apply<S: Session>(
+    async fn apply_with<S: Session>(
         &self,
         mut connection: S,
+        options: &ApplyOptions,
     ) -> Result<ApplyReport, RunError<S::Error, M::Error>>
     where
         M: Migration<S>,
     {
-        apply(&mut connection, self).await
+        apply(&mut connection, self, options).await
     }
 }
 
