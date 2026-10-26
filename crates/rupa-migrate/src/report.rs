@@ -16,7 +16,9 @@ pub struct RevertReport {
     /// Versions undone, in the order they ran: newest installation first.
     pub reverted: Vec<Version>,
     /// The versions still installed, in installation order. On a failed
-    /// revert this is the active stack the failure left.
+    /// revert this is the active stack the failure left, including a revert
+    /// refused before any undo; it is empty only if the run failed before
+    /// reading history.
     pub remaining: Vec<Version>,
 }
 

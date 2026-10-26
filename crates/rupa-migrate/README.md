@@ -108,8 +108,8 @@ metadata is not a claim that this slice executes them.
 | `async` | `asynchronous::{Session, Migration, Context, Apply, Inspect, Recover, Revert}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
 | `protocol` | the engine session protocols (`protocol::{postgres, mysql, sqlite}`) and their per-mode `Io` traits, for driver crates; not public API |
 
-Neither is default. With exactly one enabled, all six of its names are
+Neither is default. With exactly one enabled, all seven of its names are
 re-exported at the crate root, and `prelude` brings its method traits (`Apply`,
-`Inspect`, `Recover`, `Session`) into scope anonymously; with both, use the mode modules. The facade
+`Inspect`, `Recover`, `Revert`, `Session`) into scope anonymously; with both, use the mode modules. The facade
 gates the crate with `migrations` and forwards its own `sync`/`async`; driver
 adapters have their own optional `migrations` feature.

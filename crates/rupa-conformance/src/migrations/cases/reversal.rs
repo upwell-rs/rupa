@@ -126,10 +126,17 @@ pub(super) fn case_an_irreversible_installation_refuses_the_whole_revert<H: Harn
 
     wait!(h, mixed.apply(h.connect())).expect("apply");
 
+    let refused = wait!(h, mixed.revert(h.connect(), RevertTarget::Last(3)));
+
     assert_eq!(
-        blocked(wait!(h, mixed.revert(h.connect(), RevertTarget::Last(3)))),
-        [Blocker::Irreversible(version("2"))]
+        refused
+            .as_ref()
+            .err()
+            .map(|error| error.report().remaining.as_slice()),
+        Some([version("1"), version("2"), version("3")].as_slice()),
+        "a refused revert reports the installed stack"
     );
+    assert_eq!(blocked(refused), [Blocker::Irreversible(version("2"))]);
     assert_eq!(history(h), ["1", "2", "3"]);
     assert!(h.table_exists("t3"), "no down ran before the refusal");
 }
