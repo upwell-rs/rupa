@@ -20,6 +20,21 @@ fn ordinary_indexes_can_be_created_and_dropped() {
 }
 
 #[test]
+fn columns_can_be_added_renamed_and_dropped() {
+    let entries = [body(
+        "1",
+        "CREATE TABLE notes(title TEXT); ALTER TABLE notes ADD COLUMN slug TEXT; ALTER TABLE notes RENAME COLUMN slug TO path; ALTER TABLE notes DROP COLUMN path;",
+    )];
+    let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries).expect("catalog");
+
+    let mut connection = memory_runner();
+
+    connection
+        .apply(&catalog)
+        .expect("SQLite authorizes DROP COLUMN with the column where the database usually is");
+}
+
+#[test]
 fn user_sql_cannot_corrupt_framework_autoincrement_sequences() {
     let corrupt = [body(
         "1",

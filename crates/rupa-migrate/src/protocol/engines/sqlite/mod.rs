@@ -115,6 +115,10 @@ pub mod action {
 /// `first`/`second` arguments on `database`: only `main`, never a reserved
 /// `_rupa_` object, no transaction control, attachment, pragma or extension
 /// loading. Shared by every SQLite driver so they refuse the same statements.
+///
+/// `ALTER TABLE` is the exception to the argument layout: SQLite passes its
+/// database as `first` and the dropped column, if any, in the `database`
+/// slot, so its namespace is checked from `first`.
 pub fn authorize(
     code: i32,
     first: Option<&str>,
@@ -122,6 +126,10 @@ pub fn authorize(
     database: Option<&str>,
 ) -> bool {
     let open = |name: Option<&str>| name.is_some_and(|name| !reserved(name));
+
+    if code == action::ALTER_TABLE {
+        return first == Some("main") && open(second);
+    }
 
     if database == Some("temp") {
         return matches!(code, action::READ | action::UPDATE)
@@ -143,7 +151,6 @@ pub fn authorize(
         | action::CREATE_VIEW
         | action::DROP_VIEW
         | action::REINDEX => open(first),
-        action::ALTER_TABLE => open(second),
         action::CREATE_INDEX
         | action::DROP_INDEX
         | action::CREATE_TRIGGER
