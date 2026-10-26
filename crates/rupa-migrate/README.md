@@ -83,8 +83,8 @@ Every engine keeps its state in one reserved journal table, `_rupa_migrations`,
 defined per engine in [`sql/`](sql/) (`postgres.sql`, `mysql.sql`,
 `sqlite.sql`), the files the runner executes on a fresh target.
 
-Dynamic adapters, snapshots, adoption, authored reversal and out-of-order
-permission remain subsequent implementation slices. Declaring their
+Dynamic adapters, snapshots, adoption and authored reversal remain
+subsequent implementation slices. Declaring their
 metadata is not a claim that this slice executes them.
 
 ## Feature flags

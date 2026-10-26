@@ -8,7 +8,7 @@ impl<E: std::error::Error + 'static, M: std::error::Error + 'static> RunError<E,
     pub(crate) fn infrastructure(source: Error<E>) -> Self {
         Self::Infrastructure {
             source,
-            applied: Box::default(),
+            report: Box::default(),
             cleanup: Vec::new(),
         }
     }
@@ -17,7 +17,7 @@ impl<E: std::error::Error + 'static, M: std::error::Error + 'static> RunError<E,
         Self::Migration {
             version,
             source,
-            applied: Box::default(),
+            report: Box::default(),
             cleanup: Vec::new(),
         }
     }
@@ -30,10 +30,10 @@ impl<E: std::error::Error + 'static, M: std::error::Error + 'static> RunError<E,
         }
     }
 
-    fn with_applied(mut self, versions: Vec<Version>) -> Self {
+    fn with_report(mut self, committed: ApplyReport) -> Self {
         match &mut self {
-            Self::Infrastructure { applied, .. } | Self::Migration { applied, .. } => {
-                *applied = versions.into_boxed_slice()
+            Self::Infrastructure { report, .. } | Self::Migration { report, .. } => {
+                **report = committed
             }
         }
 
@@ -84,13 +84,13 @@ pub(crate) fn finish<E: std::error::Error + 'static, M: std::error::Error + 'sta
 ) -> Result<ApplyReport, RunError<E, M>> {
     match (result, released) {
         (Ok(()), Ok(())) => Ok(report),
-        (Ok(()), Err(source)) => Err(RunError::infrastructure(source).with_applied(report.applied)),
+        (Ok(()), Err(source)) => Err(RunError::infrastructure(source).with_report(report)),
         (Err(mut error), released) => {
             if let Err(cleanup) = released {
                 error.cleanup(cleanup);
             }
 
-            Err(error.with_applied(report.applied))
+            Err(error.with_report(report))
         }
     }
 }

@@ -48,6 +48,7 @@ macro_rules! all_cases {
                 case_pending_versions_run_in_version_order,
                 case_strict_apply_refuses_a_late_version_before_running_it,
                 case_permitted_late_version_runs_last_with_a_new_rank,
+                case_a_failed_permitted_run_still_reports_its_late_commits,
                 case_late_permission_never_lifts_other_blockers,
             ],
             schema: [

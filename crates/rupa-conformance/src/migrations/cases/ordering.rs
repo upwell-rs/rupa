@@ -137,6 +137,28 @@ pub(super) fn case_permitted_late_version_runs_last_with_a_new_rank<H: Harness>(
     );
 }
 
+pub(super) fn case_a_failed_permitted_run_still_reports_its_late_commits<H: Harness>(h: &mut H) {
+    let [first, late, last] = with_late::<H>();
+    let failing = [
+        first,
+        late,
+        last,
+        script::<H>("103", "INSERT INTO absent VALUES (103);"),
+    ];
+
+    wait!(h, catalog(&[first, last]).apply(h.connect())).expect("apply 100 and 102");
+
+    let error =
+        wait!(h, catalog(&failing).apply_with(h.connect(), &ALLOW_LATE)).expect_err("103 fails");
+
+    assert_eq!(error.applied(), [version("101")]);
+    assert_eq!(
+        error.late(),
+        [version("101")],
+        "the error keeps the late label of what committed"
+    );
+}
+
 pub(super) fn case_late_permission_never_lifts_other_blockers<H: Harness>(h: &mut H) {
     let [first, late, last] = with_late::<H>();
     let edited = [
