@@ -285,8 +285,9 @@ macro_rules! mode {
         }
 
         /// Undoes the installations `target` selects, newest first, each in
-        /// its own attempt. `report.remaining` starts as the installed stack
-        /// and loses its newest version with each completed undo.
+        /// its own attempt. `report.remaining` starts as the installed stack,
+        /// even when the selection is refused, and loses its newest version
+        /// with each completed undo.
         $($async)* fn revert_locked<S: Session, M: Migration<S> $($bound)*>(
             session: &mut S,
             catalog: &crate::Catalog<'_, M>,
@@ -294,15 +295,14 @@ macro_rules! mode {
             report: &mut crate::RevertReport,
         ) -> Result<(), crate::RunError<S::Error, M::Error, crate::RevertReport>> {
             let history = session.history() $($await)* .map_err(crate::RunError::infrastructure)?;
-            let selection = crate::runner::undo(catalog, &history, target)
-                .map_err(crate::RunError::infrastructure)?;
+            let selection = crate::runner::undo(catalog, &history, target);
 
-            report.remaining = selection.remaining;
-            report
-                .remaining
-                .extend(selection.undo.iter().rev().map(|(_, entry)| entry.version));
+            report.remaining = history
+                .iter()
+                .filter_map(|record| catalog.scheme.parse(&record.version).ok())
+                .collect();
 
-            for (undoes, entry) in selection.undo {
+            for (undoes, entry) in selection.map_err(crate::RunError::infrastructure)?.undo {
                 attempt(session, catalog, entry, crate::Direction::Down { undoes }) $($await)*?;
                 report.remaining.pop();
                 report.reverted.push(entry.version);
