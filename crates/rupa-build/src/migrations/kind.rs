@@ -1,20 +1,30 @@
-use syn::{Item, Type};
+use syn::{ImplItem, Item, Type};
 
 use super::Error;
 
 const PLANNED: &str = "PlannedMigration";
 const SCRIPTED: &str = "Migration";
+const DOWN: &str = "down";
 
-/// Whether the migration root's type `name` is planned: it implements
-/// `PlannedMigration` at the root's top level. Planned migrations are
-/// identified by their plan, so they need neither a hashed source closure
-/// nor isolation from shared application code.
-pub(super) fn planned(logical: &str, source: &str, name: &str) -> Result<bool, Error> {
+/// How a Rust migration root's type executes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Kind {
+    /// It implements `PlannedMigration` at the root's top level. Planned
+    /// migrations are identified by their plan, so they need neither a
+    /// hashed source closure nor isolation from shared application code;
+    /// their down plan comes from that impl.
+    pub(super) planned: bool,
+    /// Its `Migration` impl defines `down`: the migration is reversible.
+    pub(super) down: bool,
+}
+
+/// How the migration root's type `name` executes, from its top-level impls.
+pub(super) fn kind(logical: &str, source: &str, name: &str) -> Result<Kind, Error> {
     let file = syn::parse_file(source).map_err(|e| Error::Parse {
         path: logical.to_owned(),
         message: e.to_string(),
     })?;
-    let mut planned = false;
+    let mut kind = Kind::default();
     let mut scripted = false;
 
     for item in &file.items {
@@ -38,15 +48,20 @@ pub(super) fn planned(logical: &str, source: &str, name: &str) -> Result<bool, E
         }
 
         match path.segments.last().map(|s| s.ident.to_string()).as_deref() {
-            Some(PLANNED) => planned = true,
-            Some(SCRIPTED) => scripted = true,
+            Some(PLANNED) => kind.planned = true,
+            Some(SCRIPTED) => {
+                scripted = true;
+                kind.down |= item.items.iter().any(
+                    |item| matches!(item, ImplItem::Fn(function) if function.sig.ident == DOWN),
+                );
+            }
             _ => {}
         }
     }
 
-    if planned && scripted {
+    if kind.planned && scripted {
         return Err(Error::MixedKinds(logical.to_owned()));
     }
 
-    Ok(planned)
+    Ok(kind)
 }

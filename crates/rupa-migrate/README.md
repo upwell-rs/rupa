@@ -79,20 +79,33 @@ classification, history, running attempts, pending entries and every
 `Blocker`, plus the exact steps apply would run. `Catalog::validate(Engine)`
 runs apply's catalog checks offline.
 
+`Revert::revert` undoes installations with authored down bodies, newest
+installation first: `RevertTarget::To(version)` undoes the installations above
+a version and `RevertTarget::Last(n)` the `n` newest. A planned down body comes
+from `PlannedMigration::down` (`sql_migration!`'s `down` file), a scripted one
+from `Migration::down`, declared by `MigrationInfo::reversal`; a reversible
+artifact's checksum covers its down body. Before the first undo, the runner
+refuses a selection that is not the newest installations
+(`Blocker::Interleaved`), contains an irreversible one
+(`Blocker::Irreversible`) or exceeds the installations (`Blocker::Exceeds`).
+Each undo is its own journaled `down` attempt that commits on its own; a later
+failure keeps earlier undos, and the `RevertReport` lists the remaining stack.
+`Inspect::revert_plan` shows the steps without running them.
+
 Every engine keeps its state in one reserved journal table, `_rupa_migrations`,
 defined per engine in [`sql/`](sql/) (`postgres.sql`, `mysql.sql`,
 `sqlite.sql`), the files the runner executes on a fresh target.
 
-Dynamic adapters, snapshots, adoption and authored reversal remain
-subsequent implementation slices. Declaring their
+Dynamic adapters, snapshots and adoption remain subsequent implementation
+slices. Declaring their
 metadata is not a claim that this slice executes them.
 
 ## Feature flags
 
 | feature | adds |
 |---|---|
-| `sync` | `sync::{Session, Migration, Context, Apply, Inspect, Recover}` |
-| `async` | `asynchronous::{Session, Migration, Context, Apply, Inspect, Recover}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
+| `sync` | `sync::{Session, Migration, Context, Apply, Inspect, Recover, Revert}` |
+| `async` | `asynchronous::{Session, Migration, Context, Apply, Inspect, Recover, Revert}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
 | `protocol` | the engine session protocols (`protocol::{postgres, mysql, sqlite}`) and their per-mode `Io` traits, for driver crates; not public API |
 
 Neither is default. With exactly one enabled, all six of its names are

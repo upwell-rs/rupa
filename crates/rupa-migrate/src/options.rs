@@ -48,3 +48,14 @@ impl ApplyOptions {
         order: Order::Strict,
     };
 }
+
+/// Which installations a revert undoes. Undo always runs newest
+/// installation first, and only ever undoes the newest installations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevertTarget {
+    /// Every installation of a version above this one. They must be the
+    /// newest installations: a retained one among them refuses the revert.
+    To(Version),
+    /// The newest `0` installations, whatever their versions.
+    Last(usize),
+}

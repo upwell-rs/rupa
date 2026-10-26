@@ -29,7 +29,7 @@ pub enum Error {
     Symlink(PathBuf),
     /// The entry does not follow the migration naming grammar.
     #[error(
-        "{0}: expected `<version>_<snake_name>.sql`, `<version>_<snake_name>.rs` or a `<version>_<snake_name>/` directory containing `mod.rs`"
+        "{0}: expected `<version>_<snake_name>.sql`, `<version>_<snake_name>.down.sql`, `<version>_<snake_name>.rs` or a `<version>_<snake_name>/` directory containing `mod.rs`"
     )]
     Name(PathBuf),
     /// The migration type implements both `Migration` and `PlannedMigration`.
@@ -49,6 +49,16 @@ pub enum Error {
     /// only the migration root (`mod.rs`) may do.
     #[error("{0}: only a migration root may declare `rupa:` frontmatter")]
     HelperFrontmatter(PathBuf),
+    /// A `.down.sql` file without a SQL migration of the same version and name.
+    #[error("{0}: a down file needs a SQL migration with the same version and name")]
+    UnpairedDown(PathBuf),
+    /// A `.down.sql` file beside a Rust migration, which declares its down
+    /// body in code.
+    #[error("{0}: a Rust migration declares its down body in code, not in a `.down.sql` file")]
+    RustDown(PathBuf),
+    /// A `.down.sql` file declares frontmatter; its migration's settings apply.
+    #[error("{0}: a down file cannot declare `rupa:` frontmatter; its migration's settings apply")]
+    DownFrontmatter(PathBuf),
     /// The name would generate the reserved type name `Self`.
     #[error("{0}: this name cannot be used because its migration type would be `Self`")]
     ReservedName(PathBuf),

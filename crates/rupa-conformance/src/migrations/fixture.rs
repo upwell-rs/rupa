@@ -4,7 +4,7 @@ use rupa::migrate::schema::SchemaOp;
 use rupa::migrate::schema::{ColumnDef, ColumnDefault, ColumnType, Index, Table};
 use rupa::migrate::{
     ArtifactInput, Error, Metadata, MigrationInfo, MigrationKind, Plan, Planned, PlannedMigration,
-    Policy,
+    Policy, Reversal,
 };
 use rupa::{raw, select};
 
@@ -28,13 +28,23 @@ macro_rules! fixture_info {
     };
 }
 
-/// A declared script fixture using the same immutable closure as its body.
+/// A declared script fixture using the same immutable closure as its body:
+/// its first input is the up script, and a second one, if declared, the
+/// down script.
 #[derive(Debug, Clone, Copy)]
 pub struct Body(pub &'static Metadata);
 
 impl MigrationInfo for Body {
     fn info(&self) -> &'static Metadata {
         self.0
+    }
+
+    fn reversal(&self) -> Reversal {
+        if self.0.inputs.len() > 1 {
+            Reversal::Imperative
+        } else {
+            Reversal::Irreversible
+        }
     }
 }
 
@@ -45,13 +55,51 @@ pub fn body(version: &'static str, sql: &'static str) -> Body {
 
 /// A script fixture with an explicit execution policy.
 pub fn with_policy(version: &'static str, sql: &'static str, policy: Policy) -> Body {
+    script_fixture(version, &[("body.sql", sql)], policy)
+}
+
+/// A reversible script fixture: `up`, undone by `down`.
+pub fn reversible(
+    version: &'static str,
+    up: &'static str,
+    down: &'static str,
+    policy: Policy,
+) -> Body {
+    script_fixture(version, &[("body.sql", up), ("down.sql", down)], policy)
+}
+
+fn script_fixture(
+    version: &'static str,
+    scripts: &[(&'static str, &'static str)],
+    policy: Policy,
+) -> Body {
+    let inputs = scripts
+        .iter()
+        .map(|(path, sql)| ArtifactInput::new(path, sql))
+        .collect::<Vec<_>>();
+
     Body(Box::leak(Box::new(Metadata {
         version,
         description: "script fixture",
         policy,
         kind: MigrationKind::Incremental,
-        inputs: Box::leak(vec![ArtifactInput::new("body.sql", sql)].into_boxed_slice()),
+        inputs: Box::leak(inputs.into_boxed_slice()),
     })))
+}
+
+/// A script fixture declaring an imperative down body its `Migration` impl
+/// does not provide.
+#[derive(Debug, Clone, Copy)]
+pub struct Undeclared(pub Body);
+
+impl MigrationInfo for Undeclared {
+    fn info(&self) -> &'static Metadata {
+        self.0.info()
+    }
+
+    fn reversal(&self) -> Reversal {
+        Reversal::Imperative
+    }
 }
 
 /// A planned fixture whose plan comes from a function; wrap it in `Planned`.
@@ -66,6 +114,25 @@ impl MigrationInfo for Plans {
 impl PlannedMigration for Plans {
     fn plan(&self) -> Plan {
         (self.1)()
+    }
+}
+
+/// A planned fixture with a down plan; wrap it in `Planned`.
+pub struct UndonePlans(pub &'static Metadata, pub fn() -> Plan, pub fn() -> Plan);
+
+impl MigrationInfo for UndonePlans {
+    fn info(&self) -> &'static Metadata {
+        self.0
+    }
+}
+
+impl PlannedMigration for UndonePlans {
+    fn plan(&self) -> Plan {
+        (self.1)()
+    }
+
+    fn down(&self) -> Option<Plan> {
+        Some((self.2)())
     }
 }
 
@@ -91,6 +158,7 @@ rupa::migrate::sql_migration! {
         version: "1",
         description: "create notes",
         up: "create_notes.sql",
+        down: "create_notes.down.sql",
     }
 }
 
@@ -214,6 +282,18 @@ macro_rules! bodies {
 
             $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
                 context.script(self.0.inputs[0].contents) $($await)*
+            }
+
+            $($async)* fn down(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                context.script(self.0.inputs[1].contents) $($await)*
+            }
+        }
+
+        impl<S: Session> Migration<S> for Undeclared {
+            type Error = Error<S::Error>;
+
+            $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+                self.0.up(context) $($await)*
             }
         }
 

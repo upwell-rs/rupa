@@ -8,7 +8,7 @@ pub const JOURNAL: &str = "_rupa_migrations";
 pub const CREATE: &str = include_str!("../../../../sql/mysql.sql");
 
 /// The journal's columns, as [`SIGNATURE`] reports them.
-pub const COLUMNS: &str = "id bigint not null, kind varchar(16) not null, version varchar(255), checksum binary(32), policy varchar(16), status varchar(16), reason text, evidence text, started_at datetime(6) not null, finished_at datetime(6), schema_version int, stream varchar(255), scheme varchar(64), checksum_format varchar(64), owner varchar(64)";
+pub const COLUMNS: &str = "id bigint not null, kind varchar(16) not null, version varchar(255), checksum binary(32), policy varchar(16), status varchar(16), reason text, evidence text, started_at datetime(6) not null, finished_at datetime(6), schema_version int, stream varchar(255), scheme varchar(64), checksum_format varchar(64), owner varchar(64), undoes bigint";
 
 /// One row describing the connection: autocommit, the selected database and
 /// the session `sql_mode`.
@@ -70,34 +70,39 @@ pub const INSERT_HEADER: &str = "
 /// journals only nontransactional attempts, so every running one is unresolved.
 pub const HEADER: &str = "
     SELECT stream, scheme,
-           (SELECT MIN(id) FROM _rupa_migrations WHERE kind = 'up' AND status = 'running')
+           (SELECT MIN(id) FROM _rupa_migrations WHERE kind IN ('up', 'down') AND status = 'running')
     FROM _rupa_migrations
     WHERE kind = 'init'";
 
-/// Installed history, in installation order.
+/// Installed history, in installation order: completed installations no
+/// completed reversal undoes.
 pub const HISTORY: &str = "
     SELECT id, version, checksum, status
-    FROM _rupa_migrations
+    FROM _rupa_migrations AS installed
     WHERE kind = 'up' AND status IN ('applied', 'recovered')
+      AND NOT EXISTS (
+          SELECT 1 FROM _rupa_migrations AS reversal
+          WHERE reversal.kind = 'down' AND reversal.undoes = installed.id
+            AND reversal.status IN ('applied', 'recovered'))
     ORDER BY id";
 
-/// Journals a running attempt: version, checksum, policy.
+/// Journals a running attempt: kind, version, checksum, policy, undone installation.
 pub const INSERT_ATTEMPT: &str = "
-    INSERT INTO _rupa_migrations (kind, version, checksum, policy, status)
-    VALUES ('up', ?, ?, ?, 'running')";
+    INSERT INTO _rupa_migrations (kind, version, checksum, policy, status, undoes)
+    VALUES (?, ?, ?, ?, 'running', ?)";
 
 /// Finishes a running attempt with a status, reason and evidence; the
 /// attempt id is bound last.
 pub const FINISH: &str = "
     UPDATE _rupa_migrations
     SET status = ?, reason = ?, evidence = ?, finished_at = CURRENT_TIMESTAMP(6)
-    WHERE id = ? AND kind = 'up' AND status = 'running'";
+    WHERE id = ? AND kind IN ('up', 'down') AND status = 'running'";
 
 /// Attempt `?`, locked for its resolution.
 pub const ATTEMPT: &str = "
     SELECT version, checksum, status
     FROM _rupa_migrations
-    WHERE id = ? AND kind = 'up'
+    WHERE id = ? AND kind IN ('up', 'down')
     FOR UPDATE";
 
 /// Whether this session holds the named lock `?`.
@@ -118,7 +123,7 @@ pub const STORED: &str = "
 
 /// The running attempts, oldest first.
 pub const RUNNING: &str = "
-    SELECT id, version, checksum, policy
+    SELECT id, version, checksum, policy, kind, undoes
     FROM _rupa_migrations
-    WHERE kind = 'up' AND status = 'running'
+    WHERE kind IN ('up', 'down') AND status = 'running'
     ORDER BY id";

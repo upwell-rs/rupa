@@ -76,6 +76,25 @@ pub trait MigrationInfo {
     fn planned(&self) -> Option<Plan> {
         None
     }
+
+    /// Whether the artifact has an authored down body, and what it runs.
+    fn reversal(&self) -> Reversal {
+        Reversal::Irreversible
+    }
+}
+
+/// Whether an artifact has an authored down body. Part of its identity: a
+/// reversible artifact's checksum covers its down body.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum Reversal {
+    /// No down body: a revert that would undo the artifact is refused before
+    /// any down body runs.
+    #[default]
+    Irreversible,
+    /// A planned down body, executed exactly as checksummed.
+    Planned(Plan),
+    /// An imperative `Migration::down` body, opaque until it runs.
+    Imperative,
 }
 
 /// A plan operation whose result is intentionally discarded.
@@ -97,6 +116,13 @@ pub enum Operation {
 pub trait PlannedMigration: MigrationInfo {
     /// Ordered forward operations.
     fn plan(&self) -> Plan;
+
+    /// Ordered operations that undo [`plan`](Self::plan), if the migration
+    /// is reversible. Evaluated once, when the catalog is built, under the
+    /// same purity rules.
+    fn down(&self) -> Option<Plan> {
+        None
+    }
 }
 
 /// Explicit interpretation of a plan, preserving custom execution on `T`.
@@ -110,5 +136,11 @@ impl<T: PlannedMigration> MigrationInfo for Planned<T> {
 
     fn planned(&self) -> Option<Plan> {
         Some(self.0.plan())
+    }
+
+    fn reversal(&self) -> Reversal {
+        self.0
+            .down()
+            .map_or(Reversal::Irreversible, Reversal::Planned)
     }
 }

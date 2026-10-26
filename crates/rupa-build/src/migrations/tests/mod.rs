@@ -4,9 +4,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::*;
 
 mod discovery;
+mod down;
 mod frontmatter;
 mod header;
 mod isolation;
+
+/// Fixture files paired with the error they must produce.
+type RejectedCase = (&'static [(&'static str, &'static str)], fn(&Error) -> bool);
 
 /// A disposable migration directory populated from `(relative path, contents)` pairs.
 struct Fixture(PathBuf);

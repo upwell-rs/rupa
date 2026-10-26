@@ -8,8 +8,8 @@ pub mod sqlite;
 use rupa_core::{SqlType, Value};
 
 use crate::{
-    Attempt, CatalogEntry, Checksum, Error, HistoryEntry, Journal, Policy, Provenance, Records,
-    Recovery, RecoveryAction, RecoveryError,
+    Attempt, CatalogEntry, Checksum, Direction, Error, HistoryEntry, Journal, Policy, Provenance,
+    Records, Recovery, RecoveryAction, RecoveryError,
 };
 
 /// Column types of a history row: rank, version, checksum, status.
@@ -19,11 +19,19 @@ pub const HISTORY_COLUMNS: [SqlType; 4] =
 /// Column types of an attempt row: version, checksum, status.
 pub const ATTEMPT_COLUMNS: [SqlType; 3] = [SqlType::Text, SqlType::Bytes, SqlType::Text];
 
-/// Column types of a running attempt row: id, version, checksum, policy.
-pub const RUNNING_COLUMNS: [SqlType; 4] =
-    [SqlType::I64, SqlType::Text, SqlType::Bytes, SqlType::Text];
+/// Column types of a running attempt row: id, version, checksum, policy,
+/// kind, undone installation.
+pub const RUNNING_COLUMNS: [SqlType; 6] = [
+    SqlType::I64,
+    SqlType::Text,
+    SqlType::Bytes,
+    SqlType::Text,
+    SqlType::Text,
+    SqlType::I64,
+];
 
-/// The statuses of an `up` journal row, as `sql/<engine>.sql` documents them.
+/// The statuses of an `up` or `down` journal row, as `sql/<engine>.sql`
+/// documents them.
 pub mod status {
     /// Journaled before the body ran, still unresolved.
     pub const RUNNING: &str = "running";
@@ -43,6 +51,23 @@ pub mod status {
 /// provably not committed once its session ended.
 pub fn policy(policy: Policy) -> Value {
     Value::Text(policy.as_str().to_owned())
+}
+
+/// The parameters that journal a running attempt of `entry` in `direction`:
+/// kind, version, checksum, policy and the installation it undoes.
+pub fn attempt_row(entry: &CatalogEntry, direction: Direction) -> [Value; 5] {
+    let (kind, undoes) = match direction {
+        Direction::Up => ("up", Value::Null(SqlType::I64)),
+        Direction::Down { undoes } => ("down", Value::I64(undoes.cast_signed())),
+    };
+
+    [
+        Value::Text(kind.to_owned()),
+        Value::Text(entry.version.to_string()),
+        Value::Bytes(entry.checksum.as_bytes().to_vec()),
+        policy(entry.metadata.policy),
+        undoes,
+    ]
 }
 
 /// Refuses a recovery assertion without a reason, before the target is touched.
@@ -225,7 +250,9 @@ fn decode_attempts<E: std::error::Error>(rows: Vec<Vec<Value>>) -> Result<Vec<At
                 Value::Text(version),
                 Value::Bytes(checksum),
                 Value::Text(policy),
-            ] = <[Value; 4]>::try_from(row).map_err(|_| invalid())?
+                Value::Text(kind),
+                undoes,
+            ] = <[Value; 6]>::try_from(row).map_err(|_| invalid())?
             else {
                 return Err(invalid());
             };
@@ -234,12 +261,19 @@ fn decode_attempts<E: std::error::Error>(rows: Vec<Vec<Value>>) -> Result<Vec<At
                 .find(|known| known.as_str() == policy)
                 .ok_or_else(invalid)?;
             let checksum = checksum.try_into().map_err(|_| invalid())?;
+            let undoes = int(&undoes).and_then(|rank| u64::try_from(rank).ok());
+            let direction = match (kind.as_str(), undoes) {
+                ("up", None) => Direction::Up,
+                ("down", Some(undoes)) => Direction::Down { undoes },
+                _ => return Err(invalid()),
+            };
 
             Ok(Attempt {
                 id: int(&id).ok_or_else(invalid)?,
                 version,
                 checksum: Checksum::from_bytes(checksum),
                 policy,
+                direction,
             })
         })
         .collect()

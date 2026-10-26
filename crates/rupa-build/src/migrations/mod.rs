@@ -44,8 +44,10 @@ const GENERATED_DIR: &str = "rupa-migrations";
 /// whose other files are its private helpers. Leading `--` (SQL) or `//!` (Rust)
 /// lines are the description and are excluded from the checksum; from the first
 /// line starting with `rupa:`, they are YAML frontmatter instead, such as
-/// `rupa: { policy: nontransactional }`. Unrecognized entries and invalid
-/// frontmatter fail the build; dotfiles are ignored.
+/// `rupa: { policy: nontransactional }`. A `<version>_<snake_name>.down.sql`
+/// file is the down script of the SQL migration with the same version and
+/// name. Unrecognized entries and invalid frontmatter fail the build;
+/// dotfiles are ignored.
 #[derive(Debug, Clone)]
 pub struct Migrations {
     stream: String,

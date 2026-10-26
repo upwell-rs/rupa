@@ -51,6 +51,16 @@ macro_rules! all_cases {
                 case_a_failed_permitted_run_still_reports_its_late_commits,
                 case_late_permission_never_lifts_other_blockers,
             ],
+            reversal: [
+                case_revert_to_a_version_undoes_the_newest_installations_first,
+                case_a_revert_that_is_not_a_suffix_is_refused_before_any_down,
+                case_undoing_the_last_installation_makes_it_late_again,
+                case_an_irreversible_installation_refuses_the_whole_revert,
+                case_a_failed_down_keeps_earlier_undos_and_reports_the_rest,
+                case_planned_and_sql_down_bodies_run_as_checksummed,
+                case_a_declared_down_without_a_body_rolls_back,
+                case_an_uncertain_down_is_recovered_like_an_up,
+            ],
             schema: [
                 case_planned_schema_creates_entity_tables,
                 case_changed_plan_is_reported_as_changed_history,

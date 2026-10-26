@@ -9,11 +9,11 @@ macro_rules! steps {
             use super::{State, sql};
             use crate::protocol::$mode::SqliteIo;
             use crate::protocol::{
-                HISTORY_COLUMNS, RUNNING_COLUMNS, absent, decode_history, finish, int, policy,
+                HISTORY_COLUMNS, RUNNING_COLUMNS, absent, decode_history, finish, int, attempt_row,
                 records, single, status, text,
             };
             use crate::{
-                CHECKSUM_FORMAT, CatalogEntry, Error, Exclusion, HistoryEntry, Inspection, Policy,
+                CHECKSUM_FORMAT, CatalogEntry, Direction, Error, Exclusion, HistoryEntry, Inspection, Policy,
                 StateError, VersionScheme,
             };
 
@@ -340,10 +340,11 @@ macro_rules! steps {
                 decode_history(rows)
             }
 
-            /// Journals a running attempt.
+            /// Journals a running attempt of `entry` in `direction`.
             pub $($async)* fn start_attempt<T: SqliteIo<State = State>>(
                 io: &mut T,
                 entry: &CatalogEntry,
+                direction: Direction,
             ) -> Result<i64, Error<T::Error>> {
                 verify_owner(io) $($await)*?;
 
@@ -356,11 +357,7 @@ macro_rules! steps {
                 let inserted = io
                     .execute(
                         sql::INSERT_ATTEMPT,
-                        &[
-                            Value::Text(entry.version.to_string()),
-                            Value::Bytes(entry.checksum.as_bytes().to_vec()),
-                            policy(entry.metadata.policy),
-                        ],
+                        &attempt_row(entry, direction),
                     )
                     $($await)*;
 

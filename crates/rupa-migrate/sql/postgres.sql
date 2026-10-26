@@ -14,10 +14,15 @@
 --                          under exclusion: it provably never committed
 --     recovered            an operator asserted its effects are complete
 --     abandoned            an operator asserted its effects were undone
+-- kind = 'down'            one reversal attempt per row, with the statuses of
+--                          'up'; undoes is the id of the installation it
+--                          reverses
 -- kind = 'claim_released'  an operator cleared a stale owner claim; only
 --                          SQLite runners hold one, in the init row's owner
 --
--- Installed history is every 'up' row that is applied or recovered.
+-- Installed history is every 'up' row that is applied or recovered and that no
+-- applied or recovered 'down' row undoes. Reapplying an undone artifact adds a
+-- new 'up' row, with a new installation rank.
 CREATE TABLE _rupa_migrations (
     id              bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     kind            text        NOT NULL,
@@ -34,8 +39,9 @@ CREATE TABLE _rupa_migrations (
     scheme          text,
     checksum_format text,
     owner           text,
+    undoes          bigint,
 
-    CHECK (kind IN ('init', 'up', 'claim_released')),
+    CHECK (kind IN ('init', 'up', 'down', 'claim_released')),
     CHECK (kind <> 'init' OR (
         schema_version IS NOT NULL
         AND schema_version = 1
@@ -43,7 +49,7 @@ CREATE TABLE _rupa_migrations (
         AND scheme IS NOT NULL
         AND checksum_format IS NOT NULL
     )),
-    CHECK (kind <> 'up' OR (
+    CHECK (kind NOT IN ('up', 'down') OR (
         version IS NOT NULL
         AND checksum IS NOT NULL
         AND length(checksum) = 32
@@ -51,5 +57,6 @@ CREATE TABLE _rupa_migrations (
         AND policy IN ('transactional', 'nontransactional')
         AND status IS NOT NULL
         AND status IN ('running', 'applied', 'failed', 'rolled_back', 'recovered', 'abandoned')
-    ))
+    )),
+    CHECK ((kind = 'down') = (undoes IS NOT NULL))
 )

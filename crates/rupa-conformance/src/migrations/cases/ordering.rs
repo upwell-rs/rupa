@@ -1,18 +1,8 @@
-use rupa::migrate::{
-    ApplyOptions, Blocker, Error, Order, Recovery, RecoveryAction, RunError, Version, VersionScheme,
-};
+use rupa::migrate::{Blocker, Error, Recovery, RecoveryAction, RunError};
 
-use super::support::{busy, script, transactional};
-use super::{Apply, Harness, Inspect, Recover, Session, catalog, versions};
+use super::support::{ALLOW_LATE, blocked, busy, history, script, transactional, version};
+use super::{Apply, Harness, Inspect, Recover, catalog, versions};
 use crate::migrations::fixture::{Body, Interrupted};
-
-const ALLOW_LATE: ApplyOptions = ApplyOptions {
-    order: Order::AllowLate,
-};
-
-fn version(text: &str) -> Version {
-    VersionScheme::Numbered.parse(text).expect("version")
-}
 
 /// `100` and `102`, which a target installs before `101` appears.
 fn installed<H: Harness>() -> [Body; 2] {
@@ -31,35 +21,6 @@ fn with_late<H: Harness>() -> [Body; 3] {
         script::<H>("101", "INSERT INTO ordered VALUES (101);"),
         last,
     ]
-}
-
-/// The versions history records, in installation order, after checking
-/// that their ranks strictly increase.
-fn history<H: Harness>(h: &H) -> Vec<String> {
-    let history = wait!(h, h.connect().history()).expect("history");
-
-    assert!(
-        history
-            .windows(2)
-            .all(|pair| pair[0].installation_rank < pair[1].installation_rank),
-        "ranks follow installation order: {history:?}"
-    );
-
-    history.into_iter().map(|entry| entry.version).collect()
-}
-
-/// The blockers a refused apply reports for history.
-fn blocked<E: std::error::Error, M: std::error::Error>(
-    result: Result<impl Sized, RunError<E, M>>,
-) -> Vec<Blocker> {
-    match result {
-        Err(RunError::Infrastructure {
-            source: Error::Blocked(blockers),
-            ..
-        }) => blockers,
-        Err(other) => panic!("expected history blockers, got {other}"),
-        Ok(_) => panic!("expected history blockers, but the apply ran"),
-    }
 }
 
 pub(super) fn case_pending_versions_run_in_version_order<H: Harness>(h: &mut H) {
