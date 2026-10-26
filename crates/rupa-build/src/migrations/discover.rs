@@ -7,10 +7,11 @@ use rupa_migrate::{Policy, Version, VersionScheme};
 use super::Error;
 use super::header::{self, Header};
 use super::isolation::{self, Layout};
-use super::kind;
+use super::kind::{self, Kind};
 use super::render::pascal;
 
 const SQL_MARKER: &str = "--";
+const DOWN_SUFFIX: &str = ".down.sql";
 const RUST_MARKER: &str = "//!";
 const RUST_ROOT: &str = "mod.rs";
 const RESERVED_TYPE: &str = "Self";
@@ -29,14 +30,16 @@ pub(super) struct Artifact {
 /// How a discovered migration executes.
 #[derive(Debug)]
 pub(super) enum Body {
-    /// A planned script; its single input is the executed SQL.
-    Sql(Input),
+    /// A planned script; its inputs are the executed SQL and, when a
+    /// `.down.sql` file pairs with it, the down script.
+    Sql { up: Input, down: Option<Input> },
     /// A compiled module rooted at `module`. A scripted migration carries its
     /// whole file closure; a planned one is identified by its plan instead.
+    /// `kind.down` marks a scripted migration whose impl defines `down`.
     Rust {
         module: PathBuf,
         inputs: Vec<Input>,
-        planned: bool,
+        kind: Kind,
     },
 }
 
@@ -69,19 +72,28 @@ impl Input {
 /// The shape of a directory entry, decided by its name and file type.
 enum Entry {
     Sql,
+    SqlDown,
     RustFile,
     RustDir,
 }
 
-/// Reads every migration in `dir`, ordered by version.
+/// Reads every migration in `dir`, ordered by version, each `.down.sql`
+/// file paired with the SQL migration of its version and name.
 pub(super) fn discover(dir: &Path, scheme: VersionScheme) -> Result<Vec<Artifact>, Error> {
     let mut seen: BTreeMap<Version, PathBuf> = BTreeMap::new();
+    let mut downs: BTreeMap<Version, (String, PathBuf)> = BTreeMap::new();
     let mut artifacts = Vec::new();
 
     for path in entries(dir)? {
         let (version, name, entry) = parse(&path, scheme)?;
+        let earlier = match entry {
+            Entry::SqlDown => downs
+                .insert(version, (name.clone(), path.clone()))
+                .map(|(_, first)| first),
+            _ => seen.insert(version, path.clone()),
+        };
 
-        if let Some(first) = seen.insert(version, path.clone()) {
+        if let Some(first) = earlier {
             return Err(Error::Duplicate {
                 version: version.to_string(),
                 first,
@@ -89,11 +101,25 @@ pub(super) fn discover(dir: &Path, scheme: VersionScheme) -> Result<Vec<Artifact
             });
         }
 
-        artifacts.push(load(&path, version, name, entry)?);
+        if !matches!(entry, Entry::SqlDown) {
+            artifacts.push(load(&path, version, name, entry)?);
+        }
     }
 
     if artifacts.is_empty() {
         return Err(Error::Empty(dir.to_path_buf()));
+    }
+
+    for (version, (name, path)) in downs {
+        let artifact = artifacts
+            .iter_mut()
+            .find(|artifact| artifact.version == version && artifact.name == name);
+
+        match artifact.map(|artifact| &mut artifact.body) {
+            Some(Body::Sql { down, .. }) => *down = Some(down_input(&path)?),
+            Some(Body::Rust { .. }) => return Err(Error::RustDown(path)),
+            None => return Err(Error::UnpairedDown(path)),
+        }
     }
 
     artifacts.sort_by_key(|a| a.version);
@@ -144,6 +170,8 @@ fn parse(path: &Path, scheme: VersionScheme) -> Result<(Version, String, Entry),
     let invalid = || Error::Name(path.to_path_buf());
     let (stem, entry) = if path.is_dir() {
         (file_name, Entry::RustDir)
+    } else if let Some(stem) = file_name.strip_suffix(DOWN_SUFFIX) {
+        (stem, Entry::SqlDown)
     } else if let Some(stem) = file_name.strip_suffix(".sql") {
         (stem, Entry::Sql)
     } else if let Some(stem) = file_name.strip_suffix(".rs") {
@@ -182,18 +210,23 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| Error::Utf8(path.to_path_buf()))?;
+    let root = match entry {
+        Entry::RustDir => path.join(RUST_ROOT),
+        _ => path.to_path_buf(),
+    };
+    let kind = match entry {
+        Entry::RustFile | Entry::RustDir => rust_kind(&root, file_name, &name)?,
+        Entry::Sql | Entry::SqlDown => Kind::default(),
+    };
     let (header, body) = match entry {
-        Entry::Sql => {
+        Entry::Sql | Entry::SqlDown => {
             let source = read(path)?;
             let split = header::split(&source, SQL_MARKER);
-            let input = Input::new(file_name.to_owned(), split.body, path)?;
+            let up = Input::new(file_name.to_owned(), split.body, path)?;
 
-            (split.header(path)?, Body::Sql(input))
+            (split.header(path)?, Body::Sql { up, down: None })
         }
-        Entry::RustFile if planned(path, file_name, &name)? => planned_body(path, path)?,
-        Entry::RustDir if planned(&path.join(RUST_ROOT), file_name, &name)? => {
-            planned_body(&path.join(RUST_ROOT), path)?
-        }
+        Entry::RustFile | Entry::RustDir if kind.planned => planned_body(&root, path)?,
         Entry::RustFile => {
             let (header, input) = rust_input(path, file_name.to_owned(), Layout::File)?;
             let module = path.to_path_buf();
@@ -203,11 +236,11 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
                 Body::Rust {
                     module,
                     inputs: vec![input],
-                    planned: false,
+                    kind,
                 },
             )
         }
-        Entry::RustDir => rust_dir(path, file_name)?,
+        Entry::RustDir => rust_dir(path, file_name, kind)?,
     };
     let documented = header.description.is_some();
     let description = header.description.unwrap_or_else(|| name.replace('_', " "));
@@ -222,7 +255,24 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
     })
 }
 
-fn rust_dir(dir: &Path, prefix: &str) -> Result<(Header, Body), Error> {
+/// The input of a `.down.sql` file: its body after any comment header,
+/// which may not declare frontmatter.
+fn down_input(path: &Path) -> Result<Input, Error> {
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| Error::Utf8(path.to_path_buf()))?;
+    let source = read(path)?;
+    let split = header::split(&source, SQL_MARKER);
+
+    if split.frontmatter.is_some() {
+        return Err(Error::DownFrontmatter(path.to_path_buf()));
+    }
+
+    Input::new(file_name.to_owned(), split.body, path)
+}
+
+fn rust_dir(dir: &Path, prefix: &str, kind: Kind) -> Result<(Header, Body), Error> {
     let module = dir.join(RUST_ROOT);
     let mut root = None;
     let mut inputs = Vec::new();
@@ -267,19 +317,19 @@ fn rust_dir(dir: &Path, prefix: &str) -> Result<(Header, Body), Error> {
         Body::Rust {
             module,
             inputs,
-            planned: false,
+            kind,
         },
     ))
 }
 
-/// Whether the Rust migration rooted at `root` is planned. A directory
-/// without `mod.rs` is left to [`rust_dir`] to reject.
-fn planned(root: &Path, logical: &str, name: &str) -> Result<bool, Error> {
+/// How the Rust migration rooted at `root` executes. A directory without
+/// `mod.rs` is left to [`rust_dir`] to reject.
+fn rust_kind(root: &Path, logical: &str, name: &str) -> Result<Kind, Error> {
     if !root.is_file() {
-        return Ok(false);
+        return Ok(Kind::default());
     }
 
-    kind::planned(logical, &read(root)?, &pascal(name))
+    kind::kind(logical, &read(root)?, &pascal(name))
 }
 
 /// A planned Rust migration: its root's header, and no hashed inputs.
@@ -297,7 +347,10 @@ fn planned_body(root: &Path, module: &Path) -> Result<(Header, Body), Error> {
         Body::Rust {
             module,
             inputs: Vec::new(),
-            planned: true,
+            kind: Kind {
+                planned: true,
+                down: false,
+            },
         },
     ))
 }

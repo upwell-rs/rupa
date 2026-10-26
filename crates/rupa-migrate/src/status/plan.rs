@@ -1,7 +1,7 @@
 use rupa_core::DialectId;
 
 use super::Status;
-use crate::{ApplyOptions, Catalog, CatalogEntry, ValidationError, Version};
+use crate::{ApplyOptions, Catalog, CatalogEntry, Plan, ValidationError, Version};
 
 /// What apply would do on a target: its status and the exact steps it
 /// would run, if nothing blocks it.
@@ -36,6 +36,23 @@ pub enum Execution {
     Opaque,
 }
 
+impl Execution {
+    /// What a body sends: `plan`'s operations rendered for `dialect`, or
+    /// opaque without a plan.
+    pub(crate) fn of(plan: Option<&Plan>, dialect: DialectId) -> Result<Self, ValidationError> {
+        let Some(plan) = plan else {
+            return Ok(Self::Opaque);
+        };
+        let scripts = plan
+            .operations()
+            .iter()
+            .map(|operation| crate::catalog::render(operation, dialect))
+            .collect::<Result<_, _>>()?;
+
+        Ok(Self::Static(scripts))
+    }
+}
+
 impl<M> Catalog<'_, M> {
     /// The steps an apply with `options` would run for `status`, rendered
     /// for `dialect`.
@@ -50,15 +67,7 @@ impl<M> Catalog<'_, M> {
             .pending
             .iter()
             .map(|entry| {
-                let execution = match &entry.plan {
-                    Some(plan) => Execution::Static(
-                        plan.operations()
-                            .iter()
-                            .map(|operation| crate::catalog::render(operation, dialect))
-                            .collect::<Result<_, _>>()?,
-                    ),
-                    None => Execution::Opaque,
-                };
+                let execution = Execution::of(entry.plan.as_ref(), dialect)?;
 
                 Ok(Step { entry, execution })
             })

@@ -4,7 +4,7 @@ use std::future::Future;
 
 use rupa::core::asynchronous::Connection;
 use rupa::core::exec::Blocking;
-use rupa::migrate::asynchronous::{Apply, Inspect, Recover, Session};
+use rupa::migrate::asynchronous::{Apply, Inspect, Recover, Revert, Session};
 
 pub use super::Target;
 use super::{catalog, versions};
@@ -94,6 +94,9 @@ mod ordering {
 }
 mod recovery {
     include!("cases/recovery.rs");
+}
+mod reversal {
+    include!("cases/reversal.rs");
 }
 mod schema {
     include!("cases/schema.rs");

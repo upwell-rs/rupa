@@ -3,12 +3,16 @@
 //! writes or runs a body.
 
 mod plan;
+mod revert;
 
 use std::collections::BTreeSet;
 
 use crate::{Catalog, CatalogEntry, Checksum, HistoryEntry, Policy, Version};
 
 pub use plan::{ApplyPlan, Execution, Step};
+#[cfg(any(feature = "sync", feature = "async"))]
+pub(crate) use revert::Selection;
+pub use revert::{RevertPlan, Undo};
 
 /// What a session read from a target, without exclusion or writes.
 #[derive(Debug, Clone)]
@@ -69,6 +73,21 @@ pub struct Attempt {
     pub checksum: Checksum,
     /// The policy it runs under.
     pub policy: Policy,
+    /// Whether it installs its artifact or undoes an installation.
+    pub direction: Direction,
+}
+
+/// Whether an attempt installs its artifact or undoes an installation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    /// Runs the artifact's up body; completion installs it with a new rank.
+    Up,
+    /// Runs the artifact's down body; completion makes installation
+    /// `undoes` inactive, keeping its journal row.
+    Down {
+        /// The installation rank it undoes.
+        undoes: u64,
+    },
 }
 
 /// What a target is, against a catalog.
@@ -132,12 +151,27 @@ pub enum Blocker {
     },
     /// A version history records more than once.
     Duplicate(Version),
-    /// A pending version below the newest installed one, which strict apply refuses.
+    /// A pending version below the newest installed one, which strict apply
+    /// refuses. Never blocks a revert.
     Late {
         /// The version.
         version: Version,
         /// The catalog's checksum.
         checksum: Checksum,
+    },
+    /// An installation a revert would undo has no down body. Blocks only a revert.
+    Irreversible(Version),
+    /// A retained installation sits among those a revert to a version would
+    /// undo, so they are not the newest installations. Undoing them would
+    /// leave it running on top of reverted state. Blocks only a revert.
+    Interleaved(Version),
+    /// A revert of the last installations asks for more than are installed.
+    /// Blocks only a revert.
+    Exceeds {
+        /// The installations requested.
+        requested: usize,
+        /// The installations present.
+        installed: usize,
     },
 }
 

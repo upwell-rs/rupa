@@ -40,4 +40,8 @@ impl<S: Session> Migration<S> for AddSlugs {
 
         Ok(())
     }
+
+    fn down(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
+        context.script("ALTER TABLE notes DROP COLUMN slug;")
+    }
 }

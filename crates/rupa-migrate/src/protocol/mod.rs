@@ -178,8 +178,9 @@ macro_rules! __session {
             $($async)* fn start_attempt(
                 &mut self,
                 entry: &$crate::CatalogEntry,
+                direction: $crate::Direction,
             ) -> Result<i64, $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
-                $crate::protocol::$engine::$mode::start_attempt(self, entry) $($await)*
+                $crate::protocol::$engine::$mode::start_attempt(self, entry, direction) $($await)*
             }
 
             $($async)* fn begin_migration(

@@ -2,14 +2,16 @@
 /// the invoking source file, as with `include_str!`; explicit catalogs track
 /// changes to each referenced file through normal Rust dependency tracking.
 /// `policy` names a [`Policy`](crate::Policy) variant and defaults to
-/// `TransactionalRequired`.
+/// `TransactionalRequired`. An optional `down` file is the authored down
+/// body; both files are artifact inputs, so either one changes the checksum.
 #[macro_export]
 macro_rules! sql_migration {
     ($(#[$meta:meta])* $vis:vis struct $name:ident {
         version: $version:literal,
         description: $description:literal,
         $(policy: $policy:ident,)?
-        up: $path:literal $(,)?
+        up: $path:literal
+        $(, down: $down:literal)? $(,)?
     }) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy)]
@@ -22,7 +24,10 @@ macro_rules! sql_migration {
                     description: $description,
                     policy: $crate::__policy!($($policy)?),
                     kind: $crate::MigrationKind::Incremental,
-                    inputs: &[$crate::ArtifactInput::new($path, ::std::include_str!($path))],
+                    inputs: &[
+                        $crate::ArtifactInput::new($path, ::std::include_str!($path)),
+                        $($crate::ArtifactInput::new($down, ::std::include_str!($down)),)?
+                    ],
                 };
 
                 &INFO
@@ -33,6 +38,12 @@ macro_rules! sql_migration {
             fn plan(&self) -> $crate::Plan {
                 $crate::Plan::new().sql(::std::include_str!($path))
             }
+
+            $(
+                fn down(&self) -> ::std::option::Option<$crate::Plan> {
+                    ::std::option::Option::Some($crate::Plan::new().sql(::std::include_str!($down)))
+                }
+            )?
         }
     };
 }
@@ -83,6 +94,10 @@ macro_rules! migration_catalog {
             fn planned(&self) -> Option<$crate::Plan> {
                 match self { $( Self::$variant(value) => $crate::MigrationInfo::planned(value), )+ }
             }
+
+            fn reversal(&self) -> $crate::Reversal {
+                match self { $( Self::$variant(value) => $crate::MigrationInfo::reversal(value), )+ }
+            }
         }
 
         $crate::__sync_catalog!($name, $error, $($variant($ty)),+);
@@ -104,6 +119,10 @@ macro_rules! __sync_catalog {
 
             fn up(&self, context: &mut $crate::sync::Context<'_, __Session>) -> Result<(), Self::Error> {
                 match self { $( Self::$variant(value) => $crate::sync::Migration::up(value, context).map_err($error::$variant), )+ }
+            }
+
+            fn down(&self, context: &mut $crate::sync::Context<'_, __Session>) -> Result<(), Self::Error> {
+                match self { $( Self::$variant(value) => $crate::sync::Migration::down(value, context).map_err($error::$variant), )+ }
             }
         }
     };
@@ -130,6 +149,10 @@ macro_rules! __async_catalog {
 
             async fn up(&self, context: &mut $crate::asynchronous::Context<'_, __Session>) -> Result<(), Self::Error> {
                 match self { $( Self::$variant(value) => $crate::asynchronous::Migration::up(value, context).await.map_err($error::$variant), )+ }
+            }
+
+            async fn down(&self, context: &mut $crate::asynchronous::Context<'_, __Session>) -> Result<(), Self::Error> {
+                match self { $( Self::$variant(value) => $crate::asynchronous::Migration::down(value, context).await.map_err($error::$variant), )+ }
             }
         }
     };

@@ -1,9 +1,11 @@
+mod revert;
+
 use rupa_core::DialectId;
 
 use super::*;
 use crate::{
     ApplyOptions, ArtifactInput, Engine, Metadata, MigrationInfo, MigrationKind, Order, Plan,
-    Planned, PlannedMigration, Provenance, ValidationError, VersionScheme,
+    Planned, PlannedMigration, Provenance, Reversal, ValidationError, VersionScheme,
 };
 
 /// An imperative entry.
@@ -30,24 +32,56 @@ impl PlannedMigration for Scripted {
     }
 }
 
-/// An entry of either kind.
+/// A planned entry with one script and a down script.
+struct Undone(&'static Metadata);
+
+impl MigrationInfo for Undone {
+    fn info(&self) -> &'static Metadata {
+        self.0
+    }
+}
+
+impl PlannedMigration for Undone {
+    fn plan(&self) -> Plan {
+        Plan::new().sql("CREATE TABLE planned (id INTEGER)")
+    }
+
+    fn down(&self) -> Option<Plan> {
+        Some(Plan::new().sql("DROP TABLE planned"))
+    }
+}
+
+/// An entry of any kind, reversible or not.
 enum Entry {
     Imperative(Imperative),
     Planned(Planned<Scripted>),
+    /// An imperative entry declaring a down body.
+    Reversible(Imperative),
+    Undone(Planned<Undone>),
 }
 
 impl MigrationInfo for Entry {
     fn info(&self) -> &'static Metadata {
         match self {
-            Self::Imperative(entry) => entry.info(),
+            Self::Imperative(entry) | Self::Reversible(entry) => entry.info(),
             Self::Planned(entry) => entry.info(),
+            Self::Undone(entry) => entry.info(),
         }
     }
 
     fn planned(&self) -> Option<Plan> {
         match self {
-            Self::Imperative(entry) => entry.planned(),
+            Self::Imperative(entry) | Self::Reversible(entry) => entry.planned(),
             Self::Planned(entry) => entry.planned(),
+            Self::Undone(entry) => entry.planned(),
+        }
+    }
+
+    fn reversal(&self) -> Reversal {
+        match self {
+            Self::Imperative(_) | Self::Planned(_) => Reversal::Irreversible,
+            Self::Reversible(_) => Reversal::Imperative,
+            Self::Undone(entry) => entry.reversal(),
         }
     }
 }
@@ -70,6 +104,20 @@ fn imperative(version: &'static str) -> Entry {
 
 fn planned(version: &'static str) -> Entry {
     Entry::Planned(Planned(Scripted(metadata(version, &[]))))
+}
+
+fn reversible(version: &'static str) -> Entry {
+    const INPUTS: &[ArtifactInput] = &[ArtifactInput::new("body.rs", "fn down() {}")];
+
+    Entry::Reversible(Imperative(metadata(version, INPUTS)))
+}
+
+fn undone(version: &'static str) -> Entry {
+    Entry::Undone(Planned(Undone(metadata(version, &[]))))
+}
+
+fn version(text: &str) -> Version {
+    VersionScheme::Numbered.parse(text).expect("version")
 }
 
 fn catalog(entries: &[Entry]) -> Catalog<'_, Entry> {
@@ -110,6 +158,7 @@ fn attempt(id: i64, policy: Policy) -> Attempt {
         version: "2".into(),
         checksum: Checksum::from_bytes([7; 32]),
         policy,
+        direction: Direction::Up,
     }
 }
 
@@ -184,7 +233,6 @@ fn missing_changed_duplicate_and_late_artifacts_are_each_reported() {
             .expect("catalog entry")
             .checksum
     };
-    let version = |text: &str| VersionScheme::Numbered.parse(text).expect("version");
 
     let status = catalog.classify(inspection(Exclusion::Free, managed(history, Vec::new())));
 
@@ -320,7 +368,6 @@ fn late_permission_plans_late_entries_and_keeps_every_other_blocker() {
         ..installed(&catalog, "1", 1)
     };
     let history = vec![changed, installed(&catalog, "3", 2)];
-    let version = |text: &str| VersionScheme::Numbered.parse(text).expect("version");
     let allow_late = ApplyOptions {
         order: Order::AllowLate,
     };

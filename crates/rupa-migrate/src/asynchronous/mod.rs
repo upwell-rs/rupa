@@ -10,8 +10,9 @@ use rupa_core::dialect::Dialect;
 
 use crate::runner::mode;
 use crate::{
-    ApplyOptions, ApplyPlan, ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, Inspection,
-    MigrationInfo, Plan, Policy, Recovery, RunError, Status, VersionScheme,
+    ApplyOptions, ApplyPlan, ApplyReport, Catalog, CatalogEntry, Direction, Error, HistoryEntry,
+    Inspection, MigrationInfo, Plan, Policy, Recovery, RevertPlan, RevertReport, RevertTarget,
+    RunError, Status, VersionScheme,
 };
 
 /// Driver-owned dedicated physical migration connection, awaited.
@@ -46,10 +47,12 @@ pub trait Session: Connection {
     /// possible on a session that owns no run.
     fn inspect(&mut self) -> impl Future<Output = Result<Inspection, Error<Self::Error>>> + Send;
 
-    /// Durably journals an attempt before starting its user transaction.
+    /// Durably journals an attempt of `entry` in `direction` before starting
+    /// its user transaction.
     fn start_attempt(
         &mut self,
         entry: &CatalogEntry,
+        direction: Direction,
     ) -> impl Future<Output = Result<i64, Error<Self::Error>>> + Send;
 
     /// Prepares the body of a journaled attempt under `policy` after verifying
@@ -59,7 +62,8 @@ pub trait Session: Connection {
         policy: Policy,
     ) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
 
-    /// Records history/completion and commits them with the artifact's effects.
+    /// Records history/completion and commits them with the artifact's
+    /// effects. A completed down attempt makes the installation it undoes inactive.
     fn complete(
         &mut self,
         attempt: i64,
@@ -120,13 +124,29 @@ pub trait Session: Connection {
     {
         apply(self, catalog, options)
     }
+
+    /// Reverts installations while retaining this session for driver-level
+    /// inspection. Applications normally use [`Revert::revert`].
+    fn revert<M: Migration<Self> + Send + Sync>(
+        &mut self,
+        catalog: &Catalog<'_, M>,
+        target: RevertTarget,
+    ) -> impl Future<Output = RevertResult<Self, M>> + Send
+    where
+        Self: Sized,
+    {
+        revert(self, catalog, target)
+    }
 }
 
 /// Exclusive awaited query/script access without transaction, connection or lock escape hatches.
 pub struct Context<'a, S: Session> {
     pub(crate) session: &'a mut S,
-    /// The checksummed plan of the running entry, if it is planned.
+    /// The checksummed plan of the running direction, if the entry is planned.
     pub(crate) plan: Option<&'a Plan>,
+    /// Set by the default [`Migration::down`]: the entry declared a down
+    /// body its impl does not provide.
+    pub(crate) missing_down: bool,
 }
 
 /// A compiled async migration body. Its error remains statically typed.
@@ -139,11 +159,31 @@ pub trait Migration<S: Session>: MigrationInfo {
         &self,
         context: &mut Context<'_, S>,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Undoes [`up`](Self::up), without automatic retries. A revert calls it
+    /// only for an entry whose [`MigrationInfo::reversal`] is
+    /// [`Reversal::Imperative`](crate::Reversal::Imperative), which rupa-build
+    /// declares when the impl defines `down`. Without an override, such a
+    /// revert fails with [`Error::MissingDown`] and rolls back.
+    fn down(
+        &self,
+        context: &mut Context<'_, S>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        context.missing_down = true;
+
+        async { Ok(()) }
+    }
 }
 
 /// What applying a catalog of `M` on session `S` returns.
 pub type ApplyResult<S, M> =
     Result<ApplyReport, RunError<<S as Connection>::Error, <M as Migration<S>>::Error>>;
+
+/// What reverting a catalog of `M` on session `S` returns.
+pub type RevertResult<S, M> = Result<
+    RevertReport,
+    RunError<<S as Connection>::Error, <M as Migration<S>>::Error, RevertReport>,
+>;
 
 /// Applies a catalog on a dedicated native connection, then closes it.
 pub trait Apply {
@@ -170,6 +210,23 @@ pub trait Apply {
     {
         self.apply_with(connection, &ApplyOptions::DEFAULT)
     }
+}
+
+/// Undoes installations on a dedicated native connection, then closes it.
+pub trait Revert {
+    /// The catalog's entry type.
+    type Entry;
+
+    /// Undoes the newest installations `target` selects, newest first, each
+    /// committed on its own. Every selected installation must be reversible
+    /// and history must match the catalog, or nothing runs.
+    fn revert<S: Session>(
+        &self,
+        connection: S,
+        target: RevertTarget,
+    ) -> impl Future<Output = RevertResult<S, Self::Entry>> + Send
+    where
+        Self::Entry: Migration<S>;
 }
 
 /// Records an operator's recovery assertion on a dedicated native
@@ -201,6 +258,15 @@ pub trait Inspect {
         options: &ApplyOptions,
     ) -> impl Future<Output = Result<ApplyPlan<'_>, Error<S::Error>>> + Send;
 
+    /// What a revert to `target` would undo on the target: its status and
+    /// the steps, rendered for the session's dialect after the checks a
+    /// revert runs first.
+    fn revert_plan<S: Session>(
+        &self,
+        connection: S,
+        target: RevertTarget,
+    ) -> impl Future<Output = Result<RevertPlan<'_>, Error<S::Error>>> + Send;
+
     /// What a strict apply would run on the target.
     fn plan<S: Session>(
         &self,
@@ -228,6 +294,20 @@ impl<M: MigrationInfo + Sync> Inspect for Catalog<'_, M> {
 
         Ok(self.plan_for(status, dialect, options)?)
     }
+
+    async fn revert_plan<S: Session>(
+        &self,
+        connection: S,
+        target: RevertTarget,
+    ) -> Result<RevertPlan<'_>, Error<S::Error>> {
+        let dialect = Dialect::id(connection.dialect());
+
+        self.check(dialect, S::POLICIES)?;
+
+        let status = self.status(connection).await?;
+
+        Ok(self.revert_for(status, dialect, target)?)
+    }
 }
 
 impl<M> Recover for Catalog<'_, M> {
@@ -254,6 +334,21 @@ impl<M: MigrationInfo + Send + Sync> Apply for Catalog<'_, M> {
         M: Migration<S>,
     {
         apply(&mut connection, self, options).await
+    }
+}
+
+impl<M: MigrationInfo + Send + Sync> Revert for Catalog<'_, M> {
+    type Entry = M;
+
+    async fn revert<S: Session>(
+        &self,
+        mut connection: S,
+        target: RevertTarget,
+    ) -> RevertResult<S, M>
+    where
+        M: Migration<S>,
+    {
+        revert(&mut connection, self, target).await
     }
 }
 

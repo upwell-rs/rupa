@@ -7,8 +7,8 @@ use rupa_sql::RenderError;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    Engine, Metadata, MigrationInfo, MigrationKind, Operation, Plan, Policy, ScriptError, Version,
-    VersionError, VersionScheme,
+    Engine, Metadata, MigrationInfo, MigrationKind, Operation, Plan, Policy, Reversal, ScriptError,
+    Version, VersionError, VersionScheme,
 };
 
 /// Canonical artifact encoding and digest algorithm identity.
@@ -61,9 +61,9 @@ pub enum ValidationError {
     /// Imperative Rust sources/helpers must be explicitly included.
     #[error("migration {0} has no declared artifact inputs")]
     NoInputs(String),
-    /// A planned migration whose plan has no operations, such as a truncated
-    /// builder chain; recording it would make the completed plan a changed
-    /// checksum wherever the empty one already ran.
+    /// A planned migration whose plan or down plan has no operations, such
+    /// as a truncated builder chain; recording it would make the completed
+    /// plan a changed checksum wherever the empty one already ran.
     #[error("planned migration {0} has no operations")]
     EmptyPlan(String),
     /// A schema operation the session's dialect cannot express. Boxed to keep
@@ -97,6 +97,8 @@ pub struct CatalogEntry {
     /// The exact plan of a planned entry, as checksummed and executed;
     /// `None` denotes an opaque Rust body.
     pub plan: Option<Plan>,
+    /// The authored down body, as checksummed and executed by a revert.
+    pub reversal: Reversal,
     #[cfg_attr(not(any(feature = "sync", feature = "async")), allow(dead_code))]
     pub(crate) index: usize,
 }
@@ -126,13 +128,15 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
             let metadata = migration.info();
             let version = scheme.parse(metadata.version)?;
             let plan = migration.planned();
-            let checksum = checksum(stream, scheme, metadata, plan.as_ref())?;
+            let reversal = migration.reversal();
+            let checksum = checksum(stream, scheme, metadata, plan.as_ref(), &reversal)?;
 
             entries.push(CatalogEntry {
                 version,
                 checksum,
                 metadata,
                 plan,
+                reversal,
                 index,
             });
         }
@@ -153,8 +157,9 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
     }
 
     /// Checks the catalog offline against what `engine`'s sessions can
-    /// execute: every kind and policy is supported, every planned script
-    /// passes the engine's grammar and every planned schema operation renders.
+    /// execute: every kind and policy is supported, every planned script, down
+    /// scripts included, passes the engine's grammar and every planned schema
+    /// operation renders.
     /// Apply runs the same checks before it touches a target.
     pub fn validate(&self, engine: Engine) -> Result<(), ValidationError> {
         self.check(engine.dialect(), engine.policies())
@@ -179,7 +184,7 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         for operation in self
             .entries
             .iter()
-            .filter_map(|e| e.plan.as_ref())
+            .flat_map(|e| e.plan.iter().chain(e.down()))
             .flat_map(Plan::operations)
         {
             render(operation, dialect)?;
@@ -191,6 +196,16 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
     /// Static ordered entries; inspection does not run user code.
     pub fn entries(&self) -> impl ExactSizeIterator<Item = &CatalogEntry> {
         self.entries.iter()
+    }
+}
+
+impl CatalogEntry {
+    /// The planned down body, if the entry has one.
+    pub fn down(&self) -> Option<&Plan> {
+        match &self.reversal {
+            Reversal::Planned(plan) => Some(plan),
+            Reversal::Irreversible | Reversal::Imperative => None,
+        }
     }
 }
 
@@ -225,15 +240,17 @@ pub(crate) fn normalize(source: &str, path: &str) -> Result<String, ValidationEr
 /// The artifact checksum. A planned entry's identity is its plan plus any
 /// declared inputs (an SQL file's source); a planned Rust migration declares
 /// none, so source refactors that keep its plan keep its checksum. An
-/// imperative body is opaque, so its declared source closure is required.
+/// imperative body is opaque, so its declared source closure is required. A
+/// down body is appended last and only when present, so an irreversible
+/// artifact keeps the checksum it had before down bodies existed.
 fn checksum(
     stream: &str,
     scheme: VersionScheme,
     metadata: &Metadata,
     plan: Option<&Plan>,
+    reversal: &Reversal,
 ) -> Result<Checksum, ValidationError> {
     let mut hash = Sha256::new();
-    let mut inputs: Vec<_> = metadata.inputs.iter().collect();
     let kind = match metadata.kind {
         MigrationKind::Incremental => "incremental",
         MigrationKind::Snapshot => "snapshot",
@@ -242,12 +259,13 @@ fn checksum(
         Policy::TransactionalRequired => "transactional-required",
         Policy::NonTransactional => "nontransactional",
     };
+    let empty = |plan: &Plan| plan.operations().is_empty();
 
-    if inputs.is_empty() && plan.is_none() {
+    if metadata.inputs.is_empty() && plan.is_none() {
         return Err(ValidationError::NoInputs(metadata.version.into()));
     }
 
-    if plan.is_some_and(|plan| plan.operations().is_empty()) {
+    if plan.is_some_and(empty) || matches!(reversal, Reversal::Planned(down) if empty(down)) {
         return Err(ValidationError::EmptyPlan(metadata.version.into()));
     }
 
@@ -263,32 +281,60 @@ fn checksum(
         hash_field(&mut hash, field.as_bytes());
     }
 
-    match plan.map(Plan::operations) {
-        Some(operations) => {
+    match plan {
+        Some(plan) => {
             hash_field(&mut hash, b"planned");
-            hash_field(&mut hash, &(operations.len() as u64).to_be_bytes());
-
-            for operation in operations {
-                match operation {
-                    Operation::Sql(sql) => {
-                        let sql = normalize(sql, "planned SQL")?;
-
-                        hash_field(&mut hash, b"sql");
-                        hash_field(&mut hash, sql.as_bytes());
-                    }
-                    Operation::Schema(op) => {
-                        hash_field(&mut hash, b"schema");
-                        encode::Encoder(&mut hash).schema(op);
-                    }
-                }
-            }
+            hash_plan(&mut hash, plan)?;
         }
         None => hash_field(&mut hash, b"imperative"),
     }
 
-    hash_field(&mut hash, b"inputs");
-    hash_field(&mut hash, &(inputs.len() as u64).to_be_bytes());
+    hash_inputs(&mut hash, metadata.inputs)?;
+
+    match reversal {
+        Reversal::Irreversible => {}
+        Reversal::Planned(down) => {
+            hash_field(&mut hash, b"down-planned");
+            hash_plan(&mut hash, down)?;
+        }
+        Reversal::Imperative => hash_field(&mut hash, b"down-imperative"),
+    }
+
+    Ok(Checksum(hash.finalize().into()))
+}
+
+/// Hashes a plan's operation count and each operation.
+fn hash_plan(hash: &mut Sha256, plan: &Plan) -> Result<(), ValidationError> {
+    let operations = plan.operations();
+
+    hash_field(hash, &(operations.len() as u64).to_be_bytes());
+
+    for operation in operations {
+        match operation {
+            Operation::Sql(sql) => {
+                let sql = normalize(sql, "planned SQL")?;
+
+                hash_field(hash, b"sql");
+                hash_field(hash, sql.as_bytes());
+            }
+            Operation::Schema(op) => {
+                hash_field(hash, b"schema");
+                encode::Encoder(hash).schema(op);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Hashes the declared inputs in path order, rejecting invalid or duplicate paths.
+fn hash_inputs(hash: &mut Sha256, inputs: &[crate::ArtifactInput]) -> Result<(), ValidationError> {
+    let mut inputs: Vec<_> = inputs.iter().collect();
+
+    hash_field(hash, b"inputs");
+    hash_field(hash, &(inputs.len() as u64).to_be_bytes());
     inputs.sort_by_key(|input| input.path);
+
     for (index, input) in inputs.iter().enumerate() {
         if input.path.is_empty()
             || input.path.contains('\\')
@@ -302,11 +348,12 @@ fn checksum(
         }
 
         let contents = normalize(input.contents, input.path)?;
-        hash_field(&mut hash, input.path.as_bytes());
-        hash_field(&mut hash, contents.as_bytes());
+
+        hash_field(hash, input.path.as_bytes());
+        hash_field(hash, contents.as_bytes());
     }
 
-    Ok(Checksum(hash.finalize().into()))
+    Ok(())
 }
 
 fn hash_field(hash: &mut Sha256, bytes: &[u8]) {

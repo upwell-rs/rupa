@@ -2,6 +2,7 @@ use rupa_migrate::{Policy, VersionScheme};
 
 use super::Error;
 use super::discover::{Artifact, Body};
+use super::kind::Kind;
 
 /// Appends one formatted line of generated source.
 macro_rules! emit {
@@ -63,8 +64,12 @@ pub(super) fn catalog(
     emit!(out, "pub const ENTRIES: &[Migrations] = &[");
 
     for artifact in artifacts {
-        let value = match artifact.body {
-            Body::Sql(_) | Body::Rust { planned: true, .. } => {
+        let value = match &artifact.body {
+            Body::Sql { .. }
+            | Body::Rust {
+                kind: Kind { planned: true, .. },
+                ..
+            } => {
                 format!("{RUNTIME}::Planned({})", type_path(artifact))
             }
             Body::Rust { .. } => type_path(artifact),
@@ -94,20 +99,28 @@ fn artifact_module(out: &mut String, artifact: &Artifact) -> Result<(), Error> {
     let description = &artifact.description;
 
     match &artifact.body {
-        Body::Sql(input) => {
+        Body::Sql { up, down } => {
             let runtime = format!("super::{RUNTIME}");
-            let inputs = format!("{runtime}::ArtifactInput::new({:?}, SQL)", input.path);
+            let mut inputs = format!("{runtime}::ArtifactInput::new({:?}, SQL)", up.path);
 
             emit!(out, "#[doc = {description:?}]");
             emit!(out, "pub mod {module} {{");
             emit!(out, "    #[doc = {description:?}]");
             emit!(out, "    #[derive(Debug, Clone, Copy)]");
             emit!(out, "    pub struct {name};\n");
-            emit!(out, "    const SQL: &str = {:?};\n", input.contents);
+            emit!(out, "    const SQL: &str = {:?};\n", up.contents);
+
+            if let Some(down) = down {
+                inputs.push_str(&format!(
+                    ", {runtime}::ArtifactInput::new({:?}, DOWN)",
+                    down.path
+                ));
+                emit!(out, "    const DOWN: &str = {:?};\n", down.contents);
+            }
 
             let mut block = String::new();
 
-            info(&mut block, &runtime, &name, artifact, &inputs);
+            info(&mut block, &runtime, &name, artifact, &inputs, false);
 
             for line in block.lines() {
                 match line {
@@ -120,12 +133,26 @@ fn artifact_module(out: &mut String, artifact: &Artifact) -> Result<(), Error> {
             emit!(out, "        fn plan(&self) -> {runtime}::Plan {{");
             emit!(out, "            {runtime}::Plan::new().sql(SQL)");
             emit!(out, "        }}");
+
+            if down.is_some() {
+                emit!(out, "");
+                emit!(
+                    out,
+                    "        fn down(&self) -> ::std::option::Option<{runtime}::Plan> {{"
+                );
+                emit!(
+                    out,
+                    "            ::std::option::Option::Some({runtime}::Plan::new().sql(DOWN))"
+                );
+                emit!(out, "        }}");
+            }
+
             emit!(out, "    }}\n}}\n");
         }
         Body::Rust {
             module: path,
             inputs,
-            ..
+            kind,
         } => {
             let path = path.to_str().ok_or_else(|| Error::Utf8(path.clone()))?;
             let inputs = inputs
@@ -145,14 +172,30 @@ fn artifact_module(out: &mut String, artifact: &Artifact) -> Result<(), Error> {
 
             emit!(out, "#[path = {path:?}]");
             emit!(out, "pub mod {module};\n");
-            info(out, RUNTIME, &type_path(artifact), artifact, &inputs);
+            info(
+                out,
+                RUNTIME,
+                &type_path(artifact),
+                artifact,
+                &inputs,
+                kind.down,
+            );
         }
     }
 
     Ok(())
 }
 
-fn info(out: &mut String, runtime: &str, name: &str, artifact: &Artifact, inputs: &str) {
+/// The `MigrationInfo` impl; `imperative_down` declares a scripted
+/// migration's `down` body.
+fn info(
+    out: &mut String,
+    runtime: &str,
+    name: &str,
+    artifact: &Artifact,
+    inputs: &str,
+    imperative_down: bool,
+) {
     emit!(out, "impl {runtime}::MigrationInfo for {name} {{");
     emit!(out, "    fn info(&self) -> &'static {runtime}::Metadata {{");
     emit!(
@@ -178,6 +221,14 @@ fn info(out: &mut String, runtime: &str, name: &str, artifact: &Artifact, inputs
     emit!(out, "        }};\n");
     emit!(out, "        &INFO");
     emit!(out, "    }}");
+
+    if imperative_down {
+        emit!(out, "");
+        emit!(out, "    fn reversal(&self) -> {runtime}::Reversal {{");
+        emit!(out, "        {runtime}::Reversal::Imperative");
+        emit!(out, "    }}");
+    }
+
     emit!(out, "}}\n");
 }
 
@@ -201,8 +252,12 @@ fn type_path(artifact: &Artifact) -> String {
 }
 
 fn entry_type(artifact: &Artifact) -> String {
-    match artifact.body {
-        Body::Sql(_) | Body::Rust { planned: true, .. } => {
+    match &artifact.body {
+        Body::Sql { .. }
+        | Body::Rust {
+            kind: Kind { planned: true, .. },
+            ..
+        } => {
             format!("{RUNTIME}::Planned<{}>", type_path(artifact))
         }
         Body::Rust { .. } => type_path(artifact),

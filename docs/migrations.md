@@ -88,9 +88,18 @@ db::migrations::catalog()?.apply(SqliteExecutor::open("app.db")?)?;
 | Entry | Meaning |
 |---|---|
 | `0001_create_notes.sql` | Planned SQL migration, version `1` |
+| `0001_create_notes.down.sql` | Its down script, which makes it [reversible](#reverting) |
 | `0002_normalize_titles.rs` | Scripted Rust migration; exports a unit struct `NormalizeTitles` implementing `Migration<S>` |
 | `0003_add_slugs/mod.rs` (+ helpers) | Scripted Rust migration whose private helper files are part of its checksum |
 | `0004_create_tags.rs` | Planned Rust migration; `CreateTags` implements `PlannedMigration` |
+
+A `.down.sql` file pairs with the SQL migration of the same version and name,
+and both files are inputs of one artifact, so editing either changes its
+checksum. It may start with a description header, but not with frontmatter:
+the migration's settings apply to both directions. A down file without its SQL
+migration, or beside a Rust migration (which declares `down` in code), fails
+the build. A scripted Rust migration is reversible when its `Migration` impl
+defines `down`, and a planned one when its `PlannedMigration` impl does.
 
 Leading zeros are dropped for numbered versions, so `1_a.sql` and `001_b.sql`
 collide at build time. Leading `--` (SQL) or `//!` (Rust) lines are the
@@ -284,6 +293,53 @@ orders. It lifts only `Blocker::Late`. Missing, changed and duplicate history,
 interrupted or unresolved attempts, and another stream or scheme still refuse
 the run.
 
+## Reverting
+
+A revert undoes installations with their authored down bodies, newest
+installation first. It is always an explicit operation; nothing reverts
+automatically.
+
+```rust,ignore
+use rupa::migrate::{RevertTarget, sync::{Inspect, Revert}};
+
+// Every installation of a version above 100.
+let plan = catalog.revert_plan(connect()?, RevertTarget::To(v100))?;
+let report = catalog.revert(connect()?, RevertTarget::To(v100))?;
+
+// The newest installation, whatever its version.
+catalog.revert(connect()?, RevertTarget::Last(1))?;
+```
+
+Undo follows installation order, not version order. With history installed as
+`100, 102, 101`, reverting to `100` undoes `101` and then `102`. A version
+target may only undo the newest installations: reverting the same history to
+`101` would undo `102` alone and leave `101` installed on top of it, so it is
+refused with `Blocker::Interleaved(101)`. `RevertTarget::Last(n)` undoes the
+`n` newest installations; asking for more than are installed is refused with
+`Blocker::Exceeds`.
+
+Everything is checked before the first down body runs, under the same
+exclusion as `apply`. History must match the catalog (missing, changed and
+duplicate artifacts refuse a revert as they refuse an apply), and every
+selected installation needs a down body: one without refuses the whole revert
+with `Blocker::Irreversible`. Late artifacts never block a revert. Interrupted
+and unresolved attempts do.
+
+Each down body runs as its own journaled attempt under the artifact's policy,
+and commits on its own. A later failure keeps the earlier undos: the
+`RunError` carries a `RevertReport` whose `reverted` lists them and whose
+`remaining` is the installed stack the failure left. A completed undo appends a
+`down` event and keeps the installation's journal row. Applying the artifact
+again gives it a new installation rank. An undone version below an installed
+one is late, so applying it again needs [late permission](#late-artifacts).
+
+A scripted migration declares its down body by defining `Migration::down`, and
+`rupa-build` marks it reversible when the impl does. A hand-written catalog
+declares it with `MigrationInfo::reversal` returning `Reversal::Imperative`. If
+it declares a down body that its impl does not provide, the revert fails with
+`Error::MissingDown` and rolls the attempt back. A down body is not a promise
+to restore deleted data, only to undo what its migration did to the schema.
+
 ## Inspecting a target
 
 Three read-only checks answer what `apply` would do before anyone runs it.
@@ -323,6 +379,9 @@ concerns:
 | `Missing`, `Changed`, `Duplicate` | refuse history that no longer matches the catalog (`Error::Blocked`) |
 | `Late` | refuse a version below an installed one, unless the run [allows late work](#late-artifacts) |
 
+A [revert plan](#reverting) adds its own: `Irreversible`, `Interleaved` and
+`Exceeds`.
+
 `apply` runs the pending entries only when there are no blockers. While a
 runner is live, its running attempts are listed but not reported as
 blockers, since they may be in progress.
@@ -347,7 +406,8 @@ re-checks everything under exclusion.
 Use `sql_migration!` for a zero-sized type backed by an explicitly named SQL file,
 then put `Planned<ThatType>` in `migration_catalog!`. An optional
 `policy: NonTransactional,` field (before `up`) declares nontransactional work;
-it defaults to `TransactionalRequired`. Native SQLite parses scripts,
+it defaults to `TransactionalRequired`. An optional `down: "file.down.sql",`
+field (after `up`) makes it reversible. Native SQLite parses scripts,
 so quoted/comment semicolons are not split manually. Planned SQL is normalized
 and checksummed independently of any dialect; `apply` lexically checks it with
 the session dialect's grammar before acquiring the target. SQLite and
@@ -385,7 +445,9 @@ Without `rupa-build`, a hand-written Rust module exports a type implementing
 `MigrationInfo` and either a mode's `Migration<S>` or `PlannedMigration`. A scripted
 migration's static `Metadata.inputs` must embed the module and every local
 executable helper/input with stable logical paths; a planned one declares no
-inputs, wrapped as `Planned<T>` in the catalog. Source and helper declarations
+inputs, wrapped as `Planned<T>` in the catalog. A reversible scripted one also
+overrides `MigrationInfo::reversal`; a planned one overrides
+`PlannedMigration::down`. Source and helper declarations
 are then an author responsibility, not transitive Rust dependency analysis. The
 shared migration conformance fixtures (`rupa-conformance`) keep such an explicit
 catalog.
@@ -401,7 +463,10 @@ not a sandbox against trusted Rust independently doing IO or opening connections
 
 Checksums use `rupa-artifact-v1/sha256`: length-prefixed UTF-8 fields include the
 stream, scheme, kind, version, sync mode, policy, execution style, the ordered
-plan (SQL and canonical schema operation records) and sorted named input files. One leading UTF-8 BOM is removed and CRLF is
+plan (SQL and canonical schema operation records), sorted named input files
+and, last and only for a reversible artifact, its down body: the ordered down
+plan, or a marker for an imperative one. An irreversible artifact keeps the
+checksum it had before down bodies existed. One leading UTF-8 BOM is removed and CRLF is
 normalized to LF; all other bytes, including comments, remain significant. Lone
 CR and noncanonical logical paths are rejected. Descriptions are diagnostic;
 changing them alone does not change a checksum. Input names remain significant.
@@ -423,10 +488,12 @@ Its definition per engine, with every row kind and status explained, is in
 fresh target, so they always describe the real table.
 
 One `init` row records the stream, version scheme and checksum format. Each
-attempt is an `up` row, journaled `running` before its body starts and finished
-as `applied`, `failed`, `rolled_back`, `recovered` or `abandoned`. Installed
-history is the applied and recovered rows; an installation rank is the row's
-id, so ranks increase in installation order but are not consecutive. The
+attempt is an `up` row, or a `down` row naming the installation it `undoes`,
+journaled `running` before its body starts and finished as `applied`, `failed`,
+`rolled_back`, `recovered` or `abandoned`. Installed history is the applied and
+recovered `up` rows that no applied or recovered `down` row undoes; an
+installation rank is the row's id, so ranks increase in installation order but
+are not consecutive. The
 journal's columns, the header and the stream, scheme and checksum format must
 match before managed execution. Incompatible same-named objects are never
 replaced.
@@ -551,6 +618,8 @@ catalog.recover(connect()?, &completed)?;
 
 ```rust,ignore
 // Its effects were undone by hand: the next apply runs it again.
+// For an uncertain undo (`Direction::Down`), `Completed` makes the
+// installation inactive and `Restored` keeps it installed.
 let restored = Recovery::new(RecoveryAction::Restored(7), "dropped the partial index");
 catalog.recover(connect()?, &restored)?;
 ```
@@ -573,7 +642,6 @@ effects, and that the old runner is stopped, before asserting anything. Never
 edit the journal by hand.
 
 Dynamic (registry) sessions, transactional work on MySQL,
-nontransactional work on SQLite, snapshots/adoption and
-authored down migrations are not yet
+nontransactional work on SQLite and snapshots/adoption are not yet
 implemented. Their accepted
 design is in [the migration contract](design/migrations-contract.md).

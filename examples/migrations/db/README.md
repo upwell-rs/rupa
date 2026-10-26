@@ -16,6 +16,9 @@ discovered migration directory.
 Shows all three migration shapes: a SQL file, a single-file Rust migration and
 a directory migration with a private helper. Each Rust migration declares the
 `notes` shape it needs locally instead of using the crate's current `Note`.
+Migrations 1, 3 and 4 are reversible, through a `.down.sql` file, a scripted
+`down` and a down plan; migration 2 is irreversible, so a revert reaching it is
+refused before anything runs.
 
 ## Feature flags
 

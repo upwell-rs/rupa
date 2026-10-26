@@ -22,7 +22,7 @@ pub fn create(journal: &str) -> String {
 pub const RELATIONS: [&str; 3] = [JOURNAL, "_rupa_migrations_pkey", "_rupa_migrations_id_seq"];
 
 /// The journal's columns, as [`SIGNATURE`] reports them.
-pub const COLUMNS: &str = "id bigint not null, kind text not null, version text, checksum bytea, policy text, status text, reason text, evidence text, started_at timestamp with time zone not null, finished_at timestamp with time zone, schema_version integer, stream text, scheme text, checksum_format text, owner text";
+pub const COLUMNS: &str = "id bigint not null, kind text not null, version text, checksum bytea, policy text, status text, reason text, evidence text, started_at timestamp with time zone not null, finished_at timestamp with time zone, schema_version integer, stream text, scheme text, checksum_format text, owner text, undoes bigint";
 
 /// The column signature of table `$2` in namespace `$1`.
 pub const SIGNATURE: &str = "
@@ -110,30 +110,35 @@ pub fn header(journal: &str) -> String {
         "
         SELECT stream, scheme,
                (SELECT min(id) FROM {journal}
-                WHERE kind = 'up' AND status = 'running' AND policy = 'nontransactional')
+                WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'nontransactional')
         FROM {journal}
         WHERE kind = 'init'"
     )
 }
 
-/// Installed history, in installation order.
+/// Installed history, in installation order: completed installations no
+/// completed reversal undoes.
 pub fn history(journal: &str) -> String {
     format!(
         "
         SELECT id, version, checksum, status
-        FROM {journal}
+        FROM {journal} AS installed
         WHERE kind = 'up' AND status IN ('applied', 'recovered')
+          AND NOT EXISTS (
+              SELECT 1 FROM {journal} AS reversal
+              WHERE reversal.kind = 'down' AND reversal.undoes = installed.id
+                AND reversal.status IN ('applied', 'recovered'))
         ORDER BY id"
     )
 }
 
-/// Journals a running attempt of version `$1`, checksum `$2` and policy
-/// `$3`, returning its id.
+/// Journals a running attempt of kind `$1`, version `$2`, checksum `$3` and
+/// policy `$4`, undoing installation `$5`, returning its id.
 pub fn insert_attempt(journal: &str) -> String {
     format!(
         "
-        INSERT INTO {journal} (kind, version, checksum, policy, status)
-        VALUES ('up', $1, $2, $3, 'running')
+        INSERT INTO {journal} (kind, version, checksum, policy, status, undoes)
+        VALUES ($1, $2, $3, $4, 'running', $5)
         RETURNING id"
     )
 }
@@ -144,7 +149,7 @@ pub fn finish(journal: &str) -> String {
         "
         UPDATE {journal}
         SET status = $2, reason = $3, evidence = $4, finished_at = clock_timestamp()
-        WHERE id = $1 AND kind = 'up' AND status = 'running'"
+        WHERE id = $1 AND kind IN ('up', 'down') AND status = 'running'"
     )
 }
 
@@ -154,7 +159,7 @@ pub fn reconcile(journal: &str) -> String {
         "
         UPDATE {journal}
         SET status = 'rolled_back', finished_at = clock_timestamp()
-        WHERE kind = 'up' AND status = 'running' AND policy = 'transactional'
+        WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'transactional'
         RETURNING id"
     )
 }
@@ -165,7 +170,7 @@ pub fn attempt(journal: &str) -> String {
         "
         SELECT version, checksum, status
         FROM {journal}
-        WHERE id = $1 AND kind = 'up'
+        WHERE id = $1 AND kind IN ('up', 'down')
         FOR UPDATE"
     )
 }
@@ -198,9 +203,9 @@ pub fn stored(journal: &str) -> String {
 pub fn running(journal: &str) -> String {
     format!(
         "
-        SELECT id, version, checksum, policy
+        SELECT id, version, checksum, policy, kind, undoes
         FROM {journal}
-        WHERE kind = 'up' AND status = 'running'
+        WHERE kind IN ('up', 'down') AND status = 'running'
         ORDER BY id"
     )
 }

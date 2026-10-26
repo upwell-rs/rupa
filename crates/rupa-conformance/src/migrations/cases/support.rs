@@ -1,8 +1,49 @@
 use rupa::core::dialect::{Dialect, DialectId};
-use rupa::migrate::{Error, Policy, RunError};
+use rupa::migrate::{
+    ApplyOptions, Blocker, Error, Order, Policy, RunError, Version, VersionScheme,
+};
 
 use super::{Connection, Harness, Session};
-use crate::migrations::fixture::{Body, planned_with, with_policy};
+use crate::migrations::fixture::{Body, planned_with, reversible, with_policy};
+
+/// Permission to run late artifacts.
+pub(super) const ALLOW_LATE: ApplyOptions = ApplyOptions {
+    order: Order::AllowLate,
+};
+
+/// A numbered version.
+pub(super) fn version(text: &str) -> Version {
+    VersionScheme::Numbered.parse(text).expect("version")
+}
+
+/// The versions history records, in installation order, after checking
+/// that their ranks strictly increase.
+pub(super) fn history<H: Harness>(h: &H) -> Vec<String> {
+    let history = wait!(h, h.connect().history()).expect("history");
+
+    assert!(
+        history
+            .windows(2)
+            .all(|pair| pair[0].installation_rank < pair[1].installation_rank),
+        "ranks follow installation order: {history:?}"
+    );
+
+    history.into_iter().map(|entry| entry.version).collect()
+}
+
+/// The blockers a refused apply or revert reports.
+pub(super) fn blocked<E: std::error::Error, M: std::error::Error, R: std::fmt::Debug>(
+    result: Result<impl Sized, RunError<E, M, R>>,
+) -> Vec<Blocker> {
+    match result {
+        Err(RunError::Infrastructure {
+            source: Error::Blocked(blockers),
+            ..
+        }) => blockers,
+        Err(other) => panic!("expected blockers, got {other}"),
+        Ok(_) => panic!("expected blockers, but the run went ahead"),
+    }
+}
 
 /// Whether the harness's sessions support `policy`.
 pub(super) fn supports<H: Harness>(policy: Policy) -> bool {
@@ -23,6 +64,15 @@ pub(super) fn policy<H: Harness>() -> Policy {
 /// A script fixture under the session's default policy.
 pub(super) fn script<H: Harness>(version: &'static str, sql: &'static str) -> Body {
     with_policy(version, sql, policy::<H>())
+}
+
+/// A reversible script fixture under the session's default policy.
+pub(super) fn undoable<H: Harness>(
+    version: &'static str,
+    up: &'static str,
+    down: &'static str,
+) -> Body {
+    reversible(version, up, down, policy::<H>())
 }
 
 /// Planned fixture metadata under the session's default policy.

@@ -71,7 +71,7 @@ pub const HEADER: &str = "
 pub const UNRESOLVED: &str = "
     SELECT id
     FROM main._rupa_migrations
-    WHERE kind = 'up' AND status = 'running' AND policy = 'nontransactional'
+    WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'nontransactional'
     ORDER BY id
     LIMIT 1";
 
@@ -79,38 +79,43 @@ pub const UNRESOLVED: &str = "
 pub const RECONCILABLE: &str = "
     SELECT id
     FROM main._rupa_migrations
-    WHERE kind = 'up' AND status = 'running' AND policy = 'transactional'
+    WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'transactional'
     ORDER BY id";
 
 /// Records every running transactional attempt as rolled back.
 pub const RECONCILE: &str = "
     UPDATE main._rupa_migrations
     SET status = 'rolled_back', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    WHERE kind = 'up' AND status = 'running' AND policy = 'transactional'";
+    WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'transactional'";
 
 /// Attempt `?1`.
 pub const ATTEMPT: &str = "
     SELECT version, checksum, status
     FROM main._rupa_migrations
-    WHERE id = ?1 AND kind = 'up'";
+    WHERE id = ?1 AND kind IN ('up', 'down')";
 
-/// Journals a running attempt: version, checksum, policy.
+/// Journals a running attempt: kind, version, checksum, policy, undone installation.
 pub const INSERT_ATTEMPT: &str = "
-    INSERT INTO main._rupa_migrations (kind, version, checksum, policy, status)
-    VALUES ('up', ?1, ?2, ?3, 'running')";
+    INSERT INTO main._rupa_migrations (kind, version, checksum, policy, status, undoes)
+    VALUES (?1, ?2, ?3, ?4, 'running', ?5)";
 
 /// Finishes running attempt `?1` with status `?2`, reason `?3` and evidence `?4`.
 pub const FINISH: &str = "
     UPDATE main._rupa_migrations
     SET status = ?2, reason = ?3, evidence = ?4,
         finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    WHERE id = ?1 AND kind = 'up' AND status = 'running'";
+    WHERE id = ?1 AND kind IN ('up', 'down') AND status = 'running'";
 
-/// Installed history, in installation order.
+/// Installed history, in installation order: completed installations no
+/// completed reversal undoes.
 pub const HISTORY: &str = "
     SELECT id, version, checksum, status
-    FROM main._rupa_migrations
+    FROM main._rupa_migrations AS installed
     WHERE kind = 'up' AND status IN ('applied', 'recovered')
+      AND NOT EXISTS (
+          SELECT 1 FROM main._rupa_migrations AS reversal
+          WHERE reversal.kind = 'down' AND reversal.undoes = installed.id
+            AND reversal.status IN ('applied', 'recovered'))
     ORDER BY id";
 
 /// A fresh owner token.
@@ -153,7 +158,7 @@ pub const READ: &str = "BEGIN DEFERRED";
 
 /// The running attempts, oldest first.
 pub const RUNNING: &str = "
-    SELECT id, version, checksum, policy
+    SELECT id, version, checksum, policy, kind, undoes
     FROM main._rupa_migrations
-    WHERE kind = 'up' AND status = 'running'
+    WHERE kind IN ('up', 'down') AND status = 'running'
     ORDER BY id";

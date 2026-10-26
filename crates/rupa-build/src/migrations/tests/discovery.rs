@@ -3,9 +3,6 @@ use rupa_migrate::Policy;
 use super::discover::Body;
 use super::*;
 
-/// Fixture files paired with the error they must produce.
-type RejectedCase = (&'static [(&'static str, &'static str)], fn(&Error) -> bool);
-
 fn versions(artifacts: &[discover::Artifact]) -> Vec<String> {
     artifacts.iter().map(|a| a.version.to_string()).collect()
 }
@@ -262,7 +259,7 @@ fn planned_rust_migrations_are_identified_by_their_plan() {
 
     for artifact in &artifacts {
         assert!(
-            matches!(&artifact.body, Body::Rust { planned: true, inputs, .. } if inputs.is_empty()),
+            matches!(&artifact.body, Body::Rust { kind, inputs, .. } if kind.planned && inputs.is_empty()),
             "{artifact:?}"
         );
     }
