@@ -22,7 +22,7 @@ pub fn create(journal: &str) -> String {
 pub const RELATIONS: [&str; 3] = [JOURNAL, "_rupa_migrations_pkey", "_rupa_migrations_id_seq"];
 
 /// The journal's columns, as [`SIGNATURE`] reports them.
-pub const COLUMNS: &str = "id bigint not null, kind text not null, version text, checksum bytea, policy text, status text, reason text, evidence text, started_at timestamp with time zone not null, finished_at timestamp with time zone, schema_version integer, stream text, scheme text, checksum_format text, owner text, undoes bigint";
+pub const COLUMNS: &str = "id bigint not null, kind text not null, version text, checksum bytea, policy text, status text, reason text, evidence text, started_at timestamp with time zone not null, finished_at timestamp with time zone, schema_version integer, stream text, scheme text, checksum_format text, owner text, undoes bigint, covered_by bigint";
 
 /// The column signature of table `$2` in namespace `$1`.
 pub const SIGNATURE: &str = "
@@ -110,7 +110,7 @@ pub fn header(journal: &str) -> String {
         "
         SELECT stream, scheme,
                (SELECT min(id) FROM {journal}
-                WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'nontransactional')
+                WHERE kind IN ('up', 'down', 'snapshot') AND status = 'running' AND policy = 'nontransactional')
         FROM {journal}
         WHERE kind = 'init'"
     )
@@ -132,6 +132,41 @@ pub fn history(journal: &str) -> String {
     )
 }
 
+/// Coverage rows, in member order: each covered incremental with the
+/// snapshot attempt or adoption event that covers it.
+pub fn coverage(journal: &str) -> String {
+    format!(
+        "
+        SELECT claim.kind, claim.id, claim.version, claim.checksum, claim.status,
+               member.version, member.checksum
+        FROM {journal} AS member
+        JOIN {journal} AS claim ON claim.id = member.covered_by
+        WHERE member.kind = 'covered'
+        ORDER BY member.id"
+    )
+}
+
+/// Records a covered incremental: version `$1`, checksum `$2`, covered by
+/// snapshot attempt or adoption event `$3`.
+pub fn insert_covered(journal: &str) -> String {
+    format!(
+        "
+        INSERT INTO {journal} (kind, version, checksum, covered_by)
+        VALUES ('covered', $1, $2, $3)"
+    )
+}
+
+/// Records an adoption event through version `$1`, with reason `$2` and
+/// evidence `$3`, returning its id.
+pub fn insert_adoption(journal: &str) -> String {
+    format!(
+        "
+        INSERT INTO {journal} (kind, version, reason, evidence)
+        VALUES ('adopt', $1, $2, $3)
+        RETURNING id"
+    )
+}
+
 /// Journals a running attempt of kind `$1`, version `$2`, checksum `$3` and
 /// policy `$4`, undoing installation `$5`, returning its id.
 pub fn insert_attempt(journal: &str) -> String {
@@ -149,7 +184,7 @@ pub fn finish(journal: &str) -> String {
         "
         UPDATE {journal}
         SET status = $2, reason = $3, evidence = $4, finished_at = clock_timestamp()
-        WHERE id = $1 AND kind IN ('up', 'down') AND status = 'running'"
+        WHERE id = $1 AND kind IN ('up', 'down', 'snapshot') AND status = 'running'"
     )
 }
 
@@ -159,7 +194,7 @@ pub fn reconcile(journal: &str) -> String {
         "
         UPDATE {journal}
         SET status = 'rolled_back', finished_at = clock_timestamp()
-        WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'transactional'
+        WHERE kind IN ('up', 'down', 'snapshot') AND status = 'running' AND policy = 'transactional'
         RETURNING id"
     )
 }
@@ -168,9 +203,9 @@ pub fn reconcile(journal: &str) -> String {
 pub fn attempt(journal: &str) -> String {
     format!(
         "
-        SELECT version, checksum, status
+        SELECT version, checksum, status, kind
         FROM {journal}
-        WHERE id = $1 AND kind IN ('up', 'down')
+        WHERE id = $1 AND kind IN ('up', 'down', 'snapshot')
         FOR UPDATE"
     )
 }
@@ -205,7 +240,7 @@ pub fn running(journal: &str) -> String {
         "
         SELECT id, version, checksum, policy, kind, undoes
         FROM {journal}
-        WHERE kind IN ('up', 'down') AND status = 'running'
+        WHERE kind IN ('up', 'down', 'snapshot') AND status = 'running'
         ORDER BY id"
     )
 }

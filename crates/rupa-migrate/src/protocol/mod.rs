@@ -169,6 +169,12 @@ macro_rules! __session {
                 $crate::protocol::$engine::$mode::history(self) $($await)*
             }
 
+            $($async)* fn coverage(
+                &mut self,
+            ) -> Result<Option<$crate::Coverage>, $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
+                $crate::protocol::$engine::$mode::coverage(self) $($await)*
+            }
+
             $($async)* fn inspect(
                 &mut self,
             ) -> Result<$crate::Inspection, $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
@@ -218,6 +224,16 @@ macro_rules! __session {
                 recovery: &$crate::Recovery<'_>,
             ) -> Result<(), $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
                 $crate::protocol::$engine::$mode::recover(self, stream, scheme, entries, recovery) $($await)*
+            }
+
+            $($async)* fn adopt(
+                &mut self,
+                stream: &str,
+                scheme: $crate::VersionScheme,
+                adoption: &$crate::Adoption<'_>,
+                members: &[$crate::Covered],
+            ) -> Result<(), $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
+                $crate::protocol::$engine::$mode::adopt(self, stream, scheme, adoption, members) $($await)*
             }
 
             fn abandon(&mut self) {

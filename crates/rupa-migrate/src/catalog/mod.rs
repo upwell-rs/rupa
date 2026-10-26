@@ -1,10 +1,12 @@
+mod checksum;
 mod encode;
 
 use std::fmt;
 
 use rupa_core::dialect::{DialectId, DynDialect};
 use rupa_sql::RenderError;
-use sha2::{Digest, Sha256};
+
+use checksum::checksum;
 
 use crate::{
     Engine, Metadata, MigrationInfo, MigrationKind, Operation, Plan, Policy, Reversal, ScriptError,
@@ -49,9 +51,17 @@ pub enum ValidationError {
     /// The version does not follow the configured grammar.
     #[error(transparent)]
     Version(#[from] VersionError),
-    /// Two artifacts claim the same incremental identity.
+    /// Two artifacts of one kind claim the same version.
     #[error("duplicate migration version {0}")]
     Duplicate(Version),
+    /// A snapshot with no incremental at or below its version, so nothing
+    /// for it to stand for.
+    #[error("snapshot {0} covers no incremental at or below its version")]
+    EmptySnapshot(Version),
+    /// A snapshot that declares a down body. A snapshot is never undone:
+    /// the incrementals it covers never ran individually.
+    #[error("snapshot {0} declares a down body; snapshots are never undone")]
+    ReversibleSnapshot(Version),
     /// An invalid or duplicate logical input path.
     #[error("invalid or duplicate artifact input path {0:?}")]
     InputPath(String),
@@ -73,9 +83,8 @@ pub enum ValidationError {
     /// A script refused by the session dialect's grammar before dispatch.
     #[error(transparent)]
     Script(#[from] ScriptError),
-    /// The selected session cannot execute the artifact's kind or policy;
-    /// snapshots are not executed yet.
-    #[error("migration {0}: the session cannot execute this artifact's kind or policy")]
+    /// The selected session cannot execute the artifact's policy.
+    #[error("migration {0}: the session cannot execute this artifact's policy")]
     Unsupported(String),
 }
 
@@ -99,8 +108,21 @@ pub struct CatalogEntry {
     pub plan: Option<Plan>,
     /// The authored down body, as checksummed and executed by a revert.
     pub reversal: Reversal,
+    /// A snapshot's coverage manifest: every incremental at or below its
+    /// version, in version order, with the checksum it stands for. Part of
+    /// the snapshot's checksum. Empty for an incremental.
+    pub covers: Vec<Covered>,
     #[cfg_attr(not(any(feature = "sync", feature = "async")), allow(dead_code))]
     pub(crate) index: usize,
+}
+
+/// An incremental a snapshot stands for, as the catalog defines it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Covered {
+    /// The incremental's version.
+    pub version: Version,
+    /// The incremental's checksum.
+    pub checksum: Checksum,
 }
 
 /// A statically typed mixed SQL/Rust catalog in one explicit stream.
@@ -113,7 +135,9 @@ pub struct Catalog<'a, M> {
 }
 
 impl<'a, M: MigrationInfo> Catalog<'a, M> {
-    /// Validates the complete catalog without database IO or migration execution.
+    /// Validates the complete catalog without database IO or migration
+    /// execution. Each snapshot's coverage manifest is derived here, from
+    /// the incrementals at or below its version.
     pub fn new(
         stream: &'a str,
         scheme: VersionScheme,
@@ -124,28 +148,54 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         }
 
         let mut entries = Vec::with_capacity(migrations.len());
+        let mut covers = Vec::new();
+
         for (index, migration) in migrations.iter().enumerate() {
             let metadata = migration.info();
-            let version = scheme.parse(metadata.version)?;
-            let plan = migration.planned();
-            let reversal = migration.reversal();
-            let checksum = checksum(stream, scheme, metadata, plan.as_ref(), &reversal)?;
 
             entries.push(CatalogEntry {
-                version,
-                checksum,
+                version: scheme.parse(metadata.version)?,
+                checksum: Checksum([0; 32]),
                 metadata,
-                plan,
-                reversal,
+                plan: migration.planned(),
+                reversal: migration.reversal(),
+                covers: Vec::new(),
                 index,
             });
         }
 
-        entries.sort_by_key(|e| e.version);
+        entries.sort_by_key(|e| (e.version, snapshot(e)));
+
         for pair in entries.windows(2) {
-            if pair[0].version == pair[1].version {
+            if pair[0].version == pair[1].version && snapshot(&pair[0]) == snapshot(&pair[1]) {
                 return Err(ValidationError::Duplicate(pair[0].version));
             }
+        }
+
+        for entry in entries.iter_mut().filter(|e| !snapshot(e)) {
+            entry.checksum = checksum(stream, scheme, entry)?;
+            covers.push(Covered {
+                version: entry.version,
+                checksum: entry.checksum,
+            });
+        }
+
+        for entry in entries.iter_mut().filter(|e| snapshot(e)) {
+            entry.covers = covers
+                .iter()
+                .copied()
+                .filter(|covered| covered.version <= entry.version)
+                .collect();
+
+            if entry.reversal != Reversal::Irreversible {
+                return Err(ValidationError::ReversibleSnapshot(entry.version));
+            }
+
+            if entry.covers.is_empty() {
+                return Err(ValidationError::EmptySnapshot(entry.version));
+            }
+
+            entry.checksum = checksum(stream, scheme, entry)?;
         }
 
         Ok(Self {
@@ -166,17 +216,15 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
     }
 
     /// Rejects what a session of `dialect` honouring `policies` cannot
-    /// execute: only incremental artifacts run, under a supported policy, and
-    /// every planned script and schema operation must pass the dialect.
+    /// execute: every artifact runs under a supported policy, and every
+    /// planned script and schema operation must pass the dialect.
     pub(crate) fn check(
         &self,
         dialect: DialectId,
         policies: &[Policy],
     ) -> Result<(), ValidationError> {
         for entry in &self.entries {
-            if entry.metadata.kind != MigrationKind::Incremental
-                || !policies.contains(&entry.metadata.policy)
-            {
+            if !policies.contains(&entry.metadata.policy) {
                 return Err(ValidationError::Unsupported(entry.metadata.version.into()));
             }
         }
@@ -193,10 +241,28 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
         Ok(())
     }
 
-    /// Static ordered entries; inspection does not run user code.
+    /// Static entries in version order, a snapshot after the incremental of
+    /// its version; inspection does not run user code.
     pub fn entries(&self) -> impl ExactSizeIterator<Item = &CatalogEntry> {
         self.entries.iter()
     }
+}
+
+impl<M> Catalog<'_, M> {
+    /// The incremental entries, in version order.
+    pub(crate) fn incrementals(&self) -> impl DoubleEndedIterator<Item = &CatalogEntry> {
+        self.entries.iter().filter(|e| !snapshot(e))
+    }
+
+    /// The snapshot entries, in version order.
+    pub(crate) fn snapshots(&self) -> impl DoubleEndedIterator<Item = &CatalogEntry> {
+        self.entries.iter().filter(|e| snapshot(e))
+    }
+}
+
+/// Whether `entry` is a snapshot.
+pub(crate) fn snapshot(entry: &CatalogEntry) -> bool {
+    entry.metadata.kind == MigrationKind::Snapshot
 }
 
 impl CatalogEntry {
@@ -235,130 +301,6 @@ pub(crate) fn normalize(source: &str, path: &str) -> Result<String, ValidationEr
     }
 
     Ok(normalized)
-}
-
-/// The artifact checksum. A planned entry's identity is its plan plus any
-/// declared inputs (an SQL file's source); a planned Rust migration declares
-/// none, so source refactors that keep its plan keep its checksum. An
-/// imperative body is opaque, so its declared source closure is required. A
-/// down body is appended last and only when present, so an irreversible
-/// artifact keeps the checksum it had before down bodies existed.
-fn checksum(
-    stream: &str,
-    scheme: VersionScheme,
-    metadata: &Metadata,
-    plan: Option<&Plan>,
-    reversal: &Reversal,
-) -> Result<Checksum, ValidationError> {
-    let mut hash = Sha256::new();
-    let kind = match metadata.kind {
-        MigrationKind::Incremental => "incremental",
-        MigrationKind::Snapshot => "snapshot",
-    };
-    let policy = match metadata.policy {
-        Policy::TransactionalRequired => "transactional-required",
-        Policy::NonTransactional => "nontransactional",
-    };
-    let empty = |plan: &Plan| plan.operations().is_empty();
-
-    if metadata.inputs.is_empty() && plan.is_none() {
-        return Err(ValidationError::NoInputs(metadata.version.into()));
-    }
-
-    if plan.is_some_and(empty) || matches!(reversal, Reversal::Planned(down) if empty(down)) {
-        return Err(ValidationError::EmptyPlan(metadata.version.into()));
-    }
-
-    for field in [
-        CHECKSUM_FORMAT,
-        stream,
-        scheme.as_str(),
-        kind,
-        metadata.version,
-        "sync",
-        policy,
-    ] {
-        hash_field(&mut hash, field.as_bytes());
-    }
-
-    match plan {
-        Some(plan) => {
-            hash_field(&mut hash, b"planned");
-            hash_plan(&mut hash, plan)?;
-        }
-        None => hash_field(&mut hash, b"imperative"),
-    }
-
-    hash_inputs(&mut hash, metadata.inputs)?;
-
-    match reversal {
-        Reversal::Irreversible => {}
-        Reversal::Planned(down) => {
-            hash_field(&mut hash, b"down-planned");
-            hash_plan(&mut hash, down)?;
-        }
-        Reversal::Imperative => hash_field(&mut hash, b"down-imperative"),
-    }
-
-    Ok(Checksum(hash.finalize().into()))
-}
-
-/// Hashes a plan's operation count and each operation.
-fn hash_plan(hash: &mut Sha256, plan: &Plan) -> Result<(), ValidationError> {
-    let operations = plan.operations();
-
-    hash_field(hash, &(operations.len() as u64).to_be_bytes());
-
-    for operation in operations {
-        match operation {
-            Operation::Sql(sql) => {
-                let sql = normalize(sql, "planned SQL")?;
-
-                hash_field(hash, b"sql");
-                hash_field(hash, sql.as_bytes());
-            }
-            Operation::Schema(op) => {
-                hash_field(hash, b"schema");
-                encode::Encoder(hash).schema(op);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-/// Hashes the declared inputs in path order, rejecting invalid or duplicate paths.
-fn hash_inputs(hash: &mut Sha256, inputs: &[crate::ArtifactInput]) -> Result<(), ValidationError> {
-    let mut inputs: Vec<_> = inputs.iter().collect();
-
-    hash_field(hash, b"inputs");
-    hash_field(hash, &(inputs.len() as u64).to_be_bytes());
-    inputs.sort_by_key(|input| input.path);
-
-    for (index, input) in inputs.iter().enumerate() {
-        if input.path.is_empty()
-            || input.path.contains('\\')
-            || input
-                .path
-                .split('/')
-                .any(|c| c.is_empty() || c == "." || c == ".." || c.contains(':'))
-            || (index > 0 && inputs[index - 1].path == input.path)
-        {
-            return Err(ValidationError::InputPath(input.path.into()));
-        }
-
-        let contents = normalize(input.contents, input.path)?;
-
-        hash_field(hash, input.path.as_bytes());
-        hash_field(hash, contents.as_bytes());
-    }
-
-    Ok(())
-}
-
-fn hash_field(hash: &mut Sha256, bytes: &[u8]) {
-    hash.update((bytes.len() as u64).to_be_bytes());
-    hash.update(bytes);
 }
 
 #[cfg(test)]

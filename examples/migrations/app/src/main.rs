@@ -12,6 +12,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let report = catalog.apply(connection)?;
 
+    if let Some(snapshot) = report.snapshot {
+        println!(
+            "initialized from snapshot {snapshot}, covering {:?}",
+            report.covered
+        );
+    }
+
     for version in report.applied {
         println!("applied {version}");
     }

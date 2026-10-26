@@ -215,7 +215,12 @@ fn info(
     );
     emit!(
         out,
-        "            kind: {runtime}::MigrationKind::Incremental,"
+        "            kind: {runtime}::MigrationKind::{},",
+        if artifact.snapshot {
+            "Snapshot"
+        } else {
+            "Incremental"
+        }
     );
     emit!(out, "            inputs: &[{inputs}],");
     emit!(out, "        }};\n");
@@ -239,12 +244,19 @@ fn policy(policy: Policy) -> &'static str {
     }
 }
 
+/// The generated module, `s`-prefixed for a snapshot so that it never
+/// collides with the incremental of its version.
 fn module(artifact: &Artifact) -> String {
-    format!("m{}_{}", artifact.version, artifact.name)
+    let prefix = if artifact.snapshot { 's' } else { 'm' };
+
+    format!("{prefix}{}_{}", artifact.version, artifact.name)
 }
 
+/// The catalog variant, `S`-prefixed for a snapshot.
 fn variant(artifact: &Artifact) -> String {
-    format!("V{}{}", artifact.version, pascal(&artifact.name))
+    let prefix = if artifact.snapshot { 'S' } else { 'V' };
+
+    format!("{prefix}{}{}", artifact.version, pascal(&artifact.name))
 }
 
 fn type_path(artifact: &Artifact) -> String {

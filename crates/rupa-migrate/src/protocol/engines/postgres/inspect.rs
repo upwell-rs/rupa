@@ -31,13 +31,20 @@ macro_rules! inspect {
             let journal = journal(namespace);
             let stored = query(io, &sql::stored(&journal), &[], &[SqlType::Text; 2]) $($await)*?;
             let history = query(io, &sql::history(&journal), &[], &HISTORY_COLUMNS) $($await)*?;
+            let coverage = query(io, &sql::coverage(&journal), &[], &COVERAGE_COLUMNS) $($await)*?;
             let running = query(io, &sql::running(&journal), &[], &RUNNING_COLUMNS) $($await)*?;
             let [stream, scheme] = <[Value; 2]>::try_from(single(stored, "journal header")?)
                 .map_err(|_| Error::History("invalid journal header".into()))?;
 
             Ok(Inspection {
                 exclusion,
-                journal: records(stream, scheme, history, running)?,
+                journal: records(Rows {
+                    stream,
+                    scheme,
+                    history,
+                    coverage,
+                    running,
+                })?,
             })
         }
 

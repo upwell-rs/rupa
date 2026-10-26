@@ -1,4 +1,4 @@
-use crate::{Blocker, Checksum, RecoveryError, ValidationError, Version};
+use crate::{AdoptionError, Blocker, Checksum, RecoveryError, ValidationError, Version};
 
 /// Migration infrastructure failed without erasing the driver's error type.
 #[derive(Debug, thiserror::Error)]
@@ -12,11 +12,12 @@ pub enum Error<E: std::error::Error + 'static> {
     /// Ownership, schema or history no longer matches the runner's assumptions.
     #[error("invalid migration history: {0}")]
     History(String),
-    /// Installed history no longer matches the catalog, pending artifacts
-    /// are late without permission, or a revert cannot undo what it selects.
-    /// Each blocker carries its artifact identity: `Missing`, `Changed`,
-    /// `Duplicate` or `Late`, and for a revert `Irreversible`, `Interleaved`
-    /// or `Exceeds`. Nothing ran.
+    /// Installed history or coverage no longer matches the catalog, pending
+    /// artifacts are late without permission or uncovered below a coverage
+    /// boundary, or a revert cannot undo what it selects. Each blocker
+    /// carries its artifact identity: `Missing`, `Changed`, `Duplicate`,
+    /// `Late` or `Uncovered`, and for a revert `Irreversible`,
+    /// `Interleaved`, `Exceeds` or `Boundary`. Nothing ran.
     #[error("migration history does not match the catalog: {0:?}")]
     Blocked(Vec<Blocker>),
     /// An entry declares an imperative down body through
@@ -43,9 +44,13 @@ pub enum Error<E: std::error::Error + 'static> {
     /// An operator's recovery assertion was refused before anything was recorded.
     #[error(transparent)]
     Recovery(#[from] RecoveryError),
+    /// An operator's adoption was refused before anything was recorded.
+    #[error(transparent)]
+    Adoption(#[from] AdoptionError),
 }
 
-/// Durable successfully executed incremental history.
+/// Durable successfully executed incremental history. Covered incrementals
+/// are not installations: [`Coverage`](crate::Coverage) records them.
 #[derive(Debug, Clone)]
 pub struct HistoryEntry {
     /// Strictly increasing installation order, separate from version order.

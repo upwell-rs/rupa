@@ -18,7 +18,9 @@ a directory migration with a private helper. Each Rust migration declares the
 `notes` shape it needs locally instead of using the crate's current `Note`.
 Migrations 1, 3 and 4 are reversible, through a `.down.sql` file, a scripted
 `down` and a down plan; migration 2 is irreversible, so a revert reaching it is
-refused before anything runs.
+refused before anything runs. `snapshots/0003_notes_with_slugs.sql` creates the
+state migrations 1 to 3 leave, so a fresh database runs it and then only
+migration 4; the tests compare that path with a full replay.
 
 ## Feature flags
 

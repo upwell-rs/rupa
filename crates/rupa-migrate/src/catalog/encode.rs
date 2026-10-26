@@ -13,7 +13,7 @@ use rupa_core::schema::{
 use rupa_core::{Generated, Value};
 use sha2::Sha256;
 
-use super::hash_field;
+use super::checksum::hash_field;
 
 /// Writes canonical records into a running digest.
 pub(super) struct Encoder<'h>(pub(super) &'h mut Sha256);

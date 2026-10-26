@@ -9,12 +9,13 @@ macro_rules! steps {
             use super::{State, sql};
             use crate::protocol::$mode::SqliteIo;
             use crate::protocol::{
-                HISTORY_COLUMNS, RUNNING_COLUMNS, absent, decode_history, finish, int, attempt_row,
-                records, single, status, text,
+                COVERAGE_COLUMNS, HISTORY_COLUMNS, RUNNING_COLUMNS, Rows, absent, attempt_row,
+                covered_row, decode_coverage, decode_history, finish, int, records, single, status,
+                text,
             };
             use crate::{
-                CHECKSUM_FORMAT, CatalogEntry, Direction, Error, Exclusion, HistoryEntry, Inspection, Policy,
-                StateError, VersionScheme,
+                CHECKSUM_FORMAT, CatalogEntry, Coverage, Covered, Direction, Error, Exclusion,
+                HistoryEntry, Inspection, Policy, StateError, VersionScheme,
             };
 
             $($async)* fn query<T: SqliteIo<State = State>>(
@@ -184,6 +185,22 @@ macro_rules! steps {
                 Ok(rows.iter().filter_map(|row| int(&row[0])).collect())
             }
 
+            /// Creates the journal with its header row for `stream` and `scheme`.
+            $($async)* fn create_journal<T: SqliteIo<State = State>>(
+                io: &mut T,
+                stream: &str,
+                scheme: VersionScheme,
+            ) -> Result<(), Error<T::Error>> {
+                batch(io, sql::CREATE) $($await)*?;
+                execute(
+                    io,
+                    sql::INSERT_HEADER,
+                    &[bound(stream), bound(scheme.as_str()), bound(CHECKSUM_FORMAT)],
+                ) $($await)*?;
+
+                Ok(())
+            }
+
             /// Classifies `main`, creates the journal on a fresh target, checks
             /// the stream and outstanding attempts, reconciles interrupted
             /// transactional ones, and claims the target durably.
@@ -199,12 +216,7 @@ macro_rules! steps {
                         return Err(Error::Unmanaged);
                     }
 
-                    batch(io, sql::CREATE) $($await)*?;
-                    execute(
-                        io,
-                        sql::INSERT_HEADER,
-                        &[bound(stream), bound(scheme.as_str()), bound(CHECKSUM_FORMAT)],
-                    ) $($await)*?;
+                    create_journal(io, stream, scheme) $($await)*?;
                 }
 
                 if check_header(io, stream, scheme) $($await)*?.is_some() {
@@ -398,6 +410,7 @@ macro_rules! steps {
             $($async)* fn record_completion<T: SqliteIo<State = State>>(
                 io: &mut T,
                 attempt: i64,
+                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
                 let count = execute(io, sql::FINISH, &finish(attempt, status::APPLIED, None)) $($await)*?;
 
@@ -407,15 +420,17 @@ macro_rules! steps {
                     ));
                 }
 
+                record_covered(io, &entry.covers, attempt) $($await)*?;
                 batch(io, "COMMIT") $($await)*
             }
 
             /// Commits the attempt's completion with the artifact's effects. The
-            /// journal row already names the entry it runs.
+            /// journal row already names the entry it runs; a snapshot's
+            /// coverage commits with it.
             pub $($async)* fn complete<T: SqliteIo<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                _entry: &CatalogEntry,
+                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
                 verify_owner(io) $($await)*?;
                 validate_schema(io) $($await)*?;
@@ -426,7 +441,7 @@ macro_rules! steps {
                     ));
                 }
 
-                let result = record_completion(io, attempt) $($await)*;
+                let result = record_completion(io, attempt, entry) $($await)*;
                 let state = io.state();
 
                 if result.is_err() {
@@ -514,6 +529,7 @@ macro_rules! steps {
 
             super::inspect::inspect!([$($async)*] [$($await)*]);
             super::recovery::recovery!([$($async)*] [$($await)*]);
+            super::coverage::coverage_steps!([$($async)*] [$($await)*]);
         }
     };
 }

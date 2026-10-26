@@ -71,7 +71,7 @@ pub const HEADER: &str = "
 pub const UNRESOLVED: &str = "
     SELECT id
     FROM main._rupa_migrations
-    WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'nontransactional'
+    WHERE kind IN ('up', 'down', 'snapshot') AND status = 'running' AND policy = 'nontransactional'
     ORDER BY id
     LIMIT 1";
 
@@ -79,20 +79,20 @@ pub const UNRESOLVED: &str = "
 pub const RECONCILABLE: &str = "
     SELECT id
     FROM main._rupa_migrations
-    WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'transactional'
+    WHERE kind IN ('up', 'down', 'snapshot') AND status = 'running' AND policy = 'transactional'
     ORDER BY id";
 
 /// Records every running transactional attempt as rolled back.
 pub const RECONCILE: &str = "
     UPDATE main._rupa_migrations
     SET status = 'rolled_back', finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    WHERE kind IN ('up', 'down') AND status = 'running' AND policy = 'transactional'";
+    WHERE kind IN ('up', 'down', 'snapshot') AND status = 'running' AND policy = 'transactional'";
 
 /// Attempt `?1`.
 pub const ATTEMPT: &str = "
-    SELECT version, checksum, status
+    SELECT version, checksum, status, kind
     FROM main._rupa_migrations
-    WHERE id = ?1 AND kind IN ('up', 'down')";
+    WHERE id = ?1 AND kind IN ('up', 'down', 'snapshot')";
 
 /// Journals a running attempt: kind, version, checksum, policy, undone installation.
 pub const INSERT_ATTEMPT: &str = "
@@ -104,7 +104,7 @@ pub const FINISH: &str = "
     UPDATE main._rupa_migrations
     SET status = ?2, reason = ?3, evidence = ?4,
         finished_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-    WHERE id = ?1 AND kind IN ('up', 'down') AND status = 'running'";
+    WHERE id = ?1 AND kind IN ('up', 'down', 'snapshot') AND status = 'running'";
 
 /// Installed history, in installation order: completed installations no
 /// completed reversal undoes.
@@ -117,6 +117,27 @@ pub const HISTORY: &str = "
           WHERE reversal.kind = 'down' AND reversal.undoes = installed.id
             AND reversal.status IN ('applied', 'recovered'))
     ORDER BY id";
+
+/// Coverage rows, in member order: each covered incremental with the
+/// snapshot attempt or adoption event that covers it.
+pub const COVERAGE: &str = "
+    SELECT claim.kind, claim.id, claim.version, claim.checksum, claim.status,
+           member.version, member.checksum
+    FROM main._rupa_migrations AS member
+    JOIN main._rupa_migrations AS claim ON claim.id = member.covered_by
+    WHERE member.kind = 'covered'
+    ORDER BY member.id";
+
+/// Records a covered incremental: version, checksum, covering snapshot
+/// attempt or adoption event.
+pub const INSERT_COVERED: &str = "
+    INSERT INTO main._rupa_migrations (kind, version, checksum, covered_by)
+    VALUES ('covered', ?1, ?2, ?3)";
+
+/// Records an adoption event: boundary, reason, evidence.
+pub const INSERT_ADOPTION: &str = "
+    INSERT INTO main._rupa_migrations (kind, version, reason, evidence)
+    VALUES ('adopt', ?1, ?2, ?3)";
 
 /// A fresh owner token.
 pub const TOKEN: &str = "SELECT lower(hex(randomblob(16)))";
@@ -160,5 +181,5 @@ pub const READ: &str = "BEGIN DEFERRED";
 pub const RUNNING: &str = "
     SELECT id, version, checksum, policy, kind, undoes
     FROM main._rupa_migrations
-    WHERE kind IN ('up', 'down') AND status = 'running'
+    WHERE kind IN ('up', 'down', 'snapshot') AND status = 'running'
     ORDER BY id";

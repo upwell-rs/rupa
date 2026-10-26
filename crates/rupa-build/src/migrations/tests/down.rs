@@ -45,8 +45,31 @@ fn down_files_pair_with_their_sql_migration() {
 }
 
 #[test]
+fn down_directory_scripts_pair_like_sibling_files() {
+    let fixture = Fixture::new(&[
+        ("1_create.sql", "CREATE TABLE notes (title text);\n"),
+        ("down/1_create.sql", "DROP TABLE notes;\n"),
+    ]);
+
+    let artifacts = fixture
+        .discover(VersionScheme::Numbered)
+        .expect("valid directory");
+
+    assert!(
+        matches!(
+            &artifacts[..],
+            [artifact] if matches!(
+                &artifact.body,
+                Body::Sql { down: Some(down), .. } if down.contents == "DROP TABLE notes;\n"
+            )
+        ),
+        "{artifacts:?}"
+    );
+}
+
+#[test]
 fn down_files_without_a_matching_sql_migration_fail() {
-    let cases: [RejectedCase; 5] = [
+    let cases: [RejectedCase; 7] = [
         (
             &[
                 ("1_create.sql", "SELECT 1;"),
@@ -85,6 +108,21 @@ fn down_files_without_a_matching_sql_migration_fail() {
                 ("001_create.down.sql", "SELECT 3;"),
             ],
             |e| matches!(e, Error::Duplicate { version, .. } if version == "1"),
+        ),
+        (
+            &[
+                ("1_create.sql", "SELECT 1;"),
+                ("1_create.down.sql", "SELECT 2;"),
+                ("down/1_create.sql", "SELECT 3;"),
+            ],
+            |e| matches!(e, Error::Duplicate { version, .. } if version == "1"),
+        ),
+        (
+            &[
+                ("1_create.sql", "SELECT 1;"),
+                ("down/1_create.rs", "pub struct Create;\n"),
+            ],
+            |e| matches!(e, Error::Name(path) if path.ends_with("down/1_create.rs")),
         ),
     ];
 

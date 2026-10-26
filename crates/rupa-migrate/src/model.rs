@@ -48,7 +48,8 @@ impl Policy {
 pub enum MigrationKind {
     /// Changes the preceding managed state.
     Incremental,
-    /// Initializes a fresh target with explicit coverage; execution is not in this first slice.
+    /// Creates, on a fresh target, the state of every incremental at or
+    /// below its version, which it covers instead of running them.
     Snapshot,
 }
 

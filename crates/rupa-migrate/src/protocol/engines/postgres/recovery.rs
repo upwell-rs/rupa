@@ -29,7 +29,7 @@ macro_rules! recovery {
             reconcile(io, &journal) $($await)*?;
 
             let rows = query(io, &sql::attempt(&journal), &[Value::I64(attempt)], &ATTEMPT_COLUMNS) $($await)*?;
-            let resolved = resolve(attempt, recovery.action, rows, entries)?;
+            let (resolved, covers) = resolve(attempt, recovery.action, rows, entries)?;
             let count = execute(io, &sql::finish(&journal), &finish(attempt, resolved, Some(recovery))) $($await)*?;
 
             if count != 1 {
@@ -38,6 +38,7 @@ macro_rules! recovery {
                 ));
             }
 
+            record_covered(io, &journal, covers, attempt) $($await)*?;
             batch(io, "COMMIT") $($await)*
         }
 

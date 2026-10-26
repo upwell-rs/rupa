@@ -33,10 +33,14 @@ the generated catalog never assumes where it is applied.
 Entries are `<version>_<snake_name>.sql`, `<version>_<snake_name>.rs` (a unit
 struct named `<SnakeName>` implementing `Migration<S>` or `PlannedMigration`), or
 a `<version>_<snake_name>/` directory whose `mod.rs` is the root and whose other
-files are private helpers. A `<version>_<snake_name>.down.sql` file is the down
-script of the SQL migration with the same version and name; both files are its
-checksummed inputs. A down file without that SQL migration, beside a Rust
-migration, or with frontmatter fails the build. A scripted Rust migration whose
+files are private helpers. A `<version>_<snake_name>.down.sql` file, or a
+`<version>_<snake_name>.sql` file in `down/`, is the down script of the SQL
+migration with the same version and name; both files are its checksummed
+inputs. A down file without that SQL migration, beside a Rust migration, with
+frontmatter, or given twice fails the build. A `.snapshot.sql` or
+`.snapshot.rs` file, or any entry in `snapshots/`, is a snapshot, generated
+with `MigrationKind::Snapshot` in its own `s<version>_<name>` module; a
+snapshot with a down file, or two snapshots of one version, fail the build. A scripted Rust migration whose
 `Migration` impl defines `down` is generated as reversible. Leading `--` or `//!` lines are the description and
 are excluded from the checksum. From the first line starting with `rupa:`, the
 header is YAML frontmatter instead (`-- rupa:` then `--   policy: nontransactional`,

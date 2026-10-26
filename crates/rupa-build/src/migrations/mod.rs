@@ -45,9 +45,13 @@ const GENERATED_DIR: &str = "rupa-migrations";
 /// lines are the description and are excluded from the checksum; from the first
 /// line starting with `rupa:`, they are YAML frontmatter instead, such as
 /// `rupa: { policy: nontransactional }`. A `<version>_<snake_name>.down.sql`
-/// file is the down script of the SQL migration with the same version and
-/// name. Unrecognized entries and invalid frontmatter fail the build;
-/// dotfiles are ignored.
+/// file, or a `<version>_<snake_name>.sql` file in `down/`, is the down
+/// script of the SQL migration with the same version and name. A
+/// `<version>_<snake_name>.snapshot.sql` or `.snapshot.rs` file, or any
+/// migration entry in `snapshots/`, is a snapshot: on a fresh target it
+/// creates the state of every incremental at or below its version, which it
+/// covers instead of running them. Unrecognized entries and invalid
+/// frontmatter fail the build; dotfiles are ignored.
 #[derive(Debug, Clone)]
 pub struct Migrations {
     stream: String,

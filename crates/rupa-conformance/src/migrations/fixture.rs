@@ -58,6 +58,16 @@ pub fn with_policy(version: &'static str, sql: &'static str, policy: Policy) -> 
     script_fixture(version, &[("body.sql", sql)], policy)
 }
 
+/// A script snapshot fixture: `sql` creates the state of every incremental
+/// at or below `version`.
+pub fn snapshot(version: &'static str, sql: &'static str, policy: Policy) -> Body {
+    Body(Box::leak(Box::new(Metadata {
+        description: "snapshot fixture",
+        kind: MigrationKind::Snapshot,
+        ..*with_policy(version, sql, policy).0
+    })))
+}
+
 /// A reversible script fixture: `up`, undone by `down`.
 pub fn reversible(
     version: &'static str,

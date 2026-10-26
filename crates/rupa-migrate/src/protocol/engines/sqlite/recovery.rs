@@ -47,7 +47,7 @@ macro_rules! recovery {
             reconcile(io) $($await)*?;
 
             let rows = query(io, sql::ATTEMPT, &[Value::I64(attempt)], &crate::protocol::ATTEMPT_COLUMNS) $($await)*?;
-            let resolved = crate::protocol::resolve(attempt, action, rows, entries)?;
+            let (resolved, covers) = crate::protocol::resolve(attempt, action, rows, entries)?;
             let count = execute(io, sql::FINISH, &finish(attempt, resolved, Some(recovery))) $($await)*?;
 
             if count != 1 {
@@ -56,7 +56,27 @@ macro_rules! recovery {
                 ));
             }
 
-            Ok(())
+            record_covered(io, covers, attempt) $($await)*
+        }
+
+        /// Ends the writer transaction [`begin_writer`] opened, committing
+        /// what `recorded` succeeded at, and restores the connection's
+        /// `busy_timeout`.
+        $($async)* fn end_writer<T: SqliteIo<State = State>>(
+            io: &mut T,
+            original: i64,
+            mut recorded: Result<(), Error<T::Error>>,
+        ) -> Result<(), Error<T::Error>> {
+            let end = if recorded.is_ok() { "COMMIT" } else { "ROLLBACK" };
+
+            if let Err(error) = io.batch(end) $($await)* {
+                io.state().poisoned = true;
+                recorded = recorded.and(Err(Error::Database(error)));
+            }
+
+            set_busy_timeout(io, original) $($await)*?;
+
+            recorded
         }
 
         /// Records an operator's `recovery` assertion in one writer
@@ -71,17 +91,9 @@ macro_rules! recovery {
             crate::protocol::check_reason(recovery)?;
 
             let original = begin_writer(io) $($await)*?;
-            let mut recorded = record_recovery(io, stream, scheme, entries, recovery) $($await)*;
-            let end = if recorded.is_ok() { "COMMIT" } else { "ROLLBACK" };
+            let recorded = record_recovery(io, stream, scheme, entries, recovery) $($await)*;
 
-            if let Err(error) = io.batch(end) $($await)* {
-                io.state().poisoned = true;
-                recorded = recorded.and(Err(Error::Database(error)));
-            }
-
-            set_busy_timeout(io, original) $($await)*?;
-
-            recorded
+            end_writer(io, original, recorded) $($await)*
         }
     };
 }

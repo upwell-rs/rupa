@@ -2,6 +2,7 @@
 //! by [`Target::advisory_key`], the journal table in the current schema, and
 //! transactional or autocommit bodies.
 
+mod coverage;
 mod inspect;
 mod recovery;
 pub mod sql;

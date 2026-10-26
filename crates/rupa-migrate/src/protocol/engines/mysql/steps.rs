@@ -9,12 +9,15 @@ macro_rules! steps {
             use super::{Connection, Owner, State, bound, finish, lock_failed, sql};
             use crate::protocol::$mode::Io;
             use crate::protocol::{
-                ATTEMPT_COLUMNS, HISTORY_COLUMNS, RUNNING_COLUMNS, SqlState as _, absent,
-                check_reason, decode_history, int, attempt_row, records, resolve, single, status, text,
+                ATTEMPT_COLUMNS, COVERAGE_COLUMNS, HISTORY_COLUMNS, RUNNING_COLUMNS, Rows,
+                SqlState as _, absent, adoption_row, attempt_row, check_reason, check_unmanaged,
+                covered_row, decode_coverage, decode_history, int, records, resolve, single,
+                status, text,
             };
             use crate::{
-                CHECKSUM_FORMAT, CatalogEntry, Direction, Error, Exclusion, HistoryEntry, Inspection, Policy,
-                Recovery, RecoveryAction, RecoveryError, VersionScheme,
+                Adoption, AdoptionError, CHECKSUM_FORMAT, CatalogEntry, Coverage, Covered, Direction,
+                Error, Exclusion, HistoryEntry, Inspection, Policy, Recovery, RecoveryAction,
+                RecoveryError, VersionScheme,
             };
 
             $($async)* fn query<T: Io<State = State>>(
@@ -243,10 +246,29 @@ macro_rules! steps {
                 Ok(int(&unresolved))
             }
 
-            /// Records the attempt applied, after the body's effects already committed.
+            /// Records the attempt applied, with a snapshot's coverage.
+            $($async)* fn record_applied<T: Io<State = State>>(
+                io: &mut T,
+                attempt: i64,
+                entry: &CatalogEntry,
+            ) -> Result<(), Error<T::Error>> {
+                let count = execute(io, sql::FINISH, &finish(attempt, status::APPLIED, None)) $($await)*?;
+
+                if count != 1 {
+                    return Err(Error::History(
+                        "attempt completion did not match a running attempt".into(),
+                    ));
+                }
+
+                record_covered(io, &entry.covers, attempt) $($await)*
+            }
+
+            /// Records the attempt applied, after the body's effects already
+            /// committed, in one InnoDB transaction with a snapshot's coverage.
             $($async)* fn checked_completion<T: Io<State = State>>(
                 io: &mut T,
                 attempt: i64,
+                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
                 let state = io.state();
 
@@ -258,16 +280,19 @@ macro_rules! steps {
 
                 verify_owner(io) $($await)*?;
                 validate_schema(io) $($await)*?;
+                batch(io, "START TRANSACTION") $($await)*?;
 
-                let count = execute(io, sql::FINISH, &finish(attempt, status::APPLIED, None)) $($await)*?;
+                let recorded = record_applied(io, attempt, entry) $($await)*;
 
-                if count != 1 {
-                    return Err(Error::History(
-                        "attempt completion did not match a running attempt".into(),
-                    ));
+                if recorded.is_err() {
+                    if io.batch("ROLLBACK") $($await)* .is_err() {
+                        io.state().poisoned = true;
+                    }
+
+                    return recorded;
                 }
 
-                Ok(())
+                batch(io, "COMMIT") $($await)*
             }
 
             /// Takes the named lock, sets the migration `sql_mode`, and validates
@@ -384,13 +409,14 @@ macro_rules! steps {
             }
 
             /// Records the attempt applied, poisoning the session on failure.
-            /// The journal row already names the entry it runs.
+            /// The journal row already names the entry it runs; a snapshot's
+            /// coverage commits with it.
             pub $($async)* fn complete<T: Io<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                _entry: &CatalogEntry,
+                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
-                let result = checked_completion(io, attempt) $($await)*;
+                let result = checked_completion(io, attempt, entry) $($await)*;
                 let state = io.state();
 
                 if result.is_err() {
@@ -514,6 +540,7 @@ macro_rules! steps {
 
             super::inspect::inspect!([$($async)*] [$($await)*]);
             super::recovery::recovery!([$($async)*] [$($await)*]);
+            super::coverage::coverage_steps!([$($async)*] [$($await)*]);
         }
     };
 }

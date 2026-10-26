@@ -17,12 +17,21 @@
 -- kind = 'down'            one reversal attempt per row, with the statuses of
 --                          'up'; undoes is the id of the installation it
 --                          reverses
+-- kind = 'snapshot'        one attempt of a snapshot on a fresh target, with
+--                          the statuses of 'up'; its id is its installation
+--                          rank, and completing it records its coverage
+-- kind = 'adopt'           an operator adopted an unmanaged target through
+--                          version, with a reason and evidence
+-- kind = 'covered'         one incremental a completed snapshot or an
+--                          adoption covers: its version and checksum, and
+--                          covered_by, the id of that snapshot or adoption
 -- kind = 'claim_released'  an operator cleared a stale owner claim; only
 --                          SQLite runners hold one, in the init row's owner
 --
 -- Installed history is every 'up' row that is applied or recovered and that no
 -- applied or recovered 'down' row undoes. Reapplying an undone artifact adds a
--- new 'up' row, with a new installation rank.
+-- new 'up' row, with a new installation rank. Covered incrementals are not
+-- installations: they never ran, and nothing undoes them.
 CREATE TABLE _rupa_migrations (
     id              bigint      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     kind            text        NOT NULL,
@@ -40,8 +49,9 @@ CREATE TABLE _rupa_migrations (
     checksum_format text,
     owner           text,
     undoes          bigint,
+    covered_by      bigint,
 
-    CHECK (kind IN ('init', 'up', 'down', 'claim_released')),
+    CHECK (kind IN ('init', 'up', 'down', 'snapshot', 'adopt', 'covered', 'claim_released')),
     CHECK (kind <> 'init' OR (
         schema_version IS NOT NULL
         AND schema_version = 1
@@ -49,7 +59,7 @@ CREATE TABLE _rupa_migrations (
         AND scheme IS NOT NULL
         AND checksum_format IS NOT NULL
     )),
-    CHECK (kind NOT IN ('up', 'down') OR (
+    CHECK (kind NOT IN ('up', 'down', 'snapshot') OR (
         version IS NOT NULL
         AND checksum IS NOT NULL
         AND length(checksum) = 32
@@ -58,5 +68,12 @@ CREATE TABLE _rupa_migrations (
         AND status IS NOT NULL
         AND status IN ('running', 'applied', 'failed', 'rolled_back', 'recovered', 'abandoned')
     )),
-    CHECK ((kind = 'down') = (undoes IS NOT NULL))
+    CHECK (kind <> 'adopt' OR (version IS NOT NULL AND reason IS NOT NULL)),
+    CHECK (kind <> 'covered' OR (
+        version IS NOT NULL
+        AND checksum IS NOT NULL
+        AND length(checksum) = 32
+    )),
+    CHECK ((kind = 'down') = (undoes IS NOT NULL)),
+    CHECK ((kind = 'covered') = (covered_by IS NOT NULL))
 )

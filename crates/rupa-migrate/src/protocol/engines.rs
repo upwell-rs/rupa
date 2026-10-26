@@ -1,23 +1,39 @@
 //! The engine protocols and the row helpers their steps share; they exist
 //! only with a mode to generate steps for.
 
+mod decode;
 pub mod mysql;
 pub mod postgres;
 pub mod sqlite;
 
+pub use decode::*;
+
 use rupa_core::{SqlType, Value};
 
 use crate::{
-    Attempt, CatalogEntry, Checksum, Direction, Error, HistoryEntry, Journal, Policy, Provenance,
-    Records, Recovery, RecoveryAction, RecoveryError,
+    Adoption, AdoptionError, CatalogEntry, Covered, Direction, Error, Journal, MigrationKind,
+    Policy, Recovery, RecoveryAction, RecoveryError,
 };
 
 /// Column types of a history row: rank, version, checksum, status.
 pub const HISTORY_COLUMNS: [SqlType; 4] =
     [SqlType::I64, SqlType::Text, SqlType::Bytes, SqlType::Text];
 
-/// Column types of an attempt row: version, checksum, status.
-pub const ATTEMPT_COLUMNS: [SqlType; 3] = [SqlType::Text, SqlType::Bytes, SqlType::Text];
+/// Column types of an attempt row: version, checksum, status, kind.
+pub const ATTEMPT_COLUMNS: [SqlType; 4] =
+    [SqlType::Text, SqlType::Bytes, SqlType::Text, SqlType::Text];
+
+/// Column types of a coverage row: the source's kind, id, version,
+/// checksum and status, then the member's version and checksum.
+pub const COVERAGE_COLUMNS: [SqlType; 7] = [
+    SqlType::Text,
+    SqlType::I64,
+    SqlType::Text,
+    SqlType::Bytes,
+    SqlType::Text,
+    SqlType::Text,
+    SqlType::Bytes,
+];
 
 /// Column types of a running attempt row: id, version, checksum, policy,
 /// kind, undone installation.
@@ -56,9 +72,10 @@ pub fn policy(policy: Policy) -> Value {
 /// The parameters that journal a running attempt of `entry` in `direction`:
 /// kind, version, checksum, policy and the installation it undoes.
 pub fn attempt_row(entry: &CatalogEntry, direction: Direction) -> [Value; 5] {
-    let (kind, undoes) = match direction {
-        Direction::Up => ("up", Value::Null(SqlType::I64)),
-        Direction::Down { undoes } => ("down", Value::I64(undoes.cast_signed())),
+    let (kind, undoes) = match (entry.metadata.kind, direction) {
+        (MigrationKind::Snapshot, Direction::Up) => ("snapshot", Value::Null(SqlType::I64)),
+        (MigrationKind::Incremental, Direction::Up) => ("up", Value::Null(SqlType::I64)),
+        (_, Direction::Down { undoes }) => ("down", Value::I64(undoes.cast_signed())),
     };
 
     [
@@ -68,6 +85,39 @@ pub fn attempt_row(entry: &CatalogEntry, direction: Direction) -> [Value; 5] {
         policy(entry.metadata.policy),
         undoes,
     ]
+}
+
+/// The parameters that record `member` covered by the snapshot attempt or
+/// adoption event `source`: version, checksum, source.
+pub fn covered_row(member: &Covered, source: i64) -> [Value; 3] {
+    [
+        Value::Text(member.version.to_string()),
+        Value::Bytes(member.checksum.as_bytes().to_vec()),
+        Value::I64(source),
+    ]
+}
+
+/// The parameters that record an adoption event: boundary, reason, evidence.
+pub fn adoption_row(adoption: &Adoption<'_>) -> [Value; 3] {
+    [
+        Value::Text(adoption.through.to_string()),
+        Value::Text(adoption.reason.to_owned()),
+        adoption
+            .evidence
+            .map_or(Value::Null(SqlType::Text), |evidence| {
+                Value::Text(evidence.to_owned())
+            }),
+    ]
+}
+
+/// Refuses to adopt a target without a journal and without user objects,
+/// counted as `objects`: apply creates a fresh target's schema.
+pub fn check_unmanaged<E: std::error::Error>(objects: &Value) -> Result<(), Error<E>> {
+    if int(objects) == Some(0) {
+        return Err(AdoptionError::Fresh.into());
+    }
+
+    Ok(())
 }
 
 /// Refuses a recovery assertion without a reason, before the target is touched.
@@ -80,15 +130,16 @@ pub fn check_reason<E: std::error::Error>(recovery: &Recovery<'_>) -> Result<(),
 }
 
 /// Checks an assertion about `attempt` against its journal row, read under
-/// exclusion, and the catalog's `entries`, returning the status it records. A
-/// completed artifact must be the one the attempt ran; a restored one need
-/// not be in the catalog any more.
+/// exclusion, and the catalog's `entries`, returning the status it records
+/// and the incrementals a completed snapshot covers, which the engine
+/// records with it. A completed artifact must be the one the attempt ran; a
+/// restored one need not be in the catalog any more.
 pub fn resolve<E: std::error::Error>(
     attempt: i64,
     action: RecoveryAction,
     rows: Vec<Vec<Value>>,
     entries: &[CatalogEntry],
-) -> Result<&'static str, Error<E>> {
+) -> Result<(&'static str, &[Covered]), Error<E>> {
     let Some(row) = rows.into_iter().next() else {
         return Err(RecoveryError::UnknownAttempt(attempt).into());
     };
@@ -97,10 +148,15 @@ pub fn resolve<E: std::error::Error>(
             Value::Text(version),
             Value::Bytes(checksum),
             Value::Text(current),
+            Value::Text(kind),
         ],
-    ) = <[Value; 3]>::try_from(row)
+    ) = <[Value; 4]>::try_from(row)
     else {
         return Err(Error::History("invalid attempt row".into()));
+    };
+    let kind = match kind.as_str() {
+        "snapshot" => MigrationKind::Snapshot,
+        _ => MigrationKind::Incremental,
     };
 
     if current != status::RUNNING {
@@ -108,10 +164,13 @@ pub fn resolve<E: std::error::Error>(
     }
 
     if action != RecoveryAction::Completed(attempt) {
-        return Ok(status::ABANDONED);
+        return Ok((status::ABANDONED, &[]));
     }
 
-    let Some(entry) = entries.iter().find(|e| e.version.to_string() == version) else {
+    let Some(entry) = entries
+        .iter()
+        .find(|e| e.metadata.kind == kind && e.version.to_string() == version)
+    else {
         return Err(RecoveryError::Missing { attempt, version }.into());
     };
 
@@ -119,7 +178,7 @@ pub fn resolve<E: std::error::Error>(
         return Err(RecoveryError::Changed { attempt, version }.into());
     }
 
-    Ok(status::RECOVERED)
+    Ok((status::RECOVERED, &entry.covers))
 }
 
 /// The parameters that finish running attempt `attempt` with `status`: the
@@ -171,45 +230,6 @@ pub fn text(value: Value) -> Option<String> {
     }
 }
 
-/// Decodes history rows.
-pub fn decode_history<E: std::error::Error>(
-    rows: Vec<Vec<Value>>,
-) -> Result<Vec<HistoryEntry>, Error<E>> {
-    rows.into_iter()
-        .map(|row| {
-            let [
-                rank,
-                Value::Text(version),
-                Value::Bytes(checksum),
-                Value::Text(recorded),
-            ] = <[Value; 4]>::try_from(row)
-                .map_err(|_| Error::History("invalid history row".into()))?
-            else {
-                return Err(Error::History("invalid history row".into()));
-            };
-            let provenance = match recorded.as_str() {
-                status::APPLIED => Provenance::Executed,
-                status::RECOVERED => Provenance::Recovered,
-                _ => return Err(Error::History("invalid history status".into())),
-            };
-            let installation_rank = int(&rank)
-                .and_then(|rank| u64::try_from(rank).ok())
-                .filter(|rank| *rank > 0)
-                .ok_or_else(|| Error::History("invalid installation rank".into()))?;
-            let bytes = checksum
-                .try_into()
-                .map_err(|_| Error::History("invalid stored checksum length".into()))?;
-
-            Ok(HistoryEntry {
-                installation_rank,
-                version,
-                checksum: Checksum::from_bytes(bytes),
-                provenance,
-            })
-        })
-        .collect()
-}
-
 /// A target without a journal: fresh without user objects, unmanaged with
 /// `objects` of them.
 pub fn absent(objects: &Value) -> Journal {
@@ -218,63 +238,4 @@ pub fn absent(objects: &Value) -> Journal {
     } else {
         Journal::Unmanaged
     }
-}
-
-/// Decodes a journal's records: its stored `stream` and `scheme`, history
-/// rows and running attempt rows.
-pub fn records<E: std::error::Error>(
-    stream: Value,
-    scheme: Value,
-    history: Vec<Vec<Value>>,
-    running: Vec<Vec<Value>>,
-) -> Result<Journal, Error<E>> {
-    let (Some(stream), Some(scheme)) = (text(stream), text(scheme)) else {
-        return Err(Error::History("invalid journal header".into()));
-    };
-
-    Ok(Journal::Managed(Records {
-        stream,
-        scheme,
-        history: decode_history(history)?,
-        attempts: decode_attempts(running)?,
-    }))
-}
-
-/// Decodes running attempt rows.
-fn decode_attempts<E: std::error::Error>(rows: Vec<Vec<Value>>) -> Result<Vec<Attempt>, Error<E>> {
-    rows.into_iter()
-        .map(|row| {
-            let invalid = || Error::History("invalid attempt row".into());
-            let [
-                id,
-                Value::Text(version),
-                Value::Bytes(checksum),
-                Value::Text(policy),
-                Value::Text(kind),
-                undoes,
-            ] = <[Value; 6]>::try_from(row).map_err(|_| invalid())?
-            else {
-                return Err(invalid());
-            };
-            let policy = [Policy::TransactionalRequired, Policy::NonTransactional]
-                .into_iter()
-                .find(|known| known.as_str() == policy)
-                .ok_or_else(invalid)?;
-            let checksum = checksum.try_into().map_err(|_| invalid())?;
-            let undoes = int(&undoes).and_then(|rank| u64::try_from(rank).ok());
-            let direction = match (kind.as_str(), undoes) {
-                ("up", None) => Direction::Up,
-                ("down", Some(undoes)) => Direction::Down { undoes },
-                _ => return Err(invalid()),
-            };
-
-            Ok(Attempt {
-                id: int(&id).ok_or_else(invalid)?,
-                version,
-                checksum: Checksum::from_bytes(checksum),
-                policy,
-                direction,
-            })
-        })
-        .collect()
 }

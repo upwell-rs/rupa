@@ -49,10 +49,12 @@ impl<M> Catalog<'_, M> {
         dialect: DialectId,
         target: RevertTarget,
     ) -> Result<RevertPlan<'c>, ValidationError> {
+        let boundary = self.boundary(status.coverage.as_ref());
+
         Order::AllowLate.permit(&mut status.blockers);
 
         let Selection { undo, remaining } =
-            self.select(&status.history, target, &mut status.blockers);
+            self.select(&status.history, boundary, target, &mut status.blockers);
         let steps = undo
             .into_iter()
             .map(|(installation_rank, entry)| {
@@ -75,12 +77,14 @@ impl<M> Catalog<'_, M> {
 
     /// Splits `history`, in installation order, into the newest installations
     /// `target` undoes and the rest, adding a blocker for every undone
-    /// installation that is irreversible or that the target retains, and for
-    /// a count beyond the installations. An installation the catalog lacks
-    /// is skipped: comparing history reports it.
+    /// installation that is irreversible or that the target retains, for a
+    /// count beyond the installations, and for a target version below the
+    /// coverage `boundary`. An installation the catalog lacks is skipped:
+    /// comparing history reports it.
     pub(crate) fn select(
         &self,
         history: &[HistoryEntry],
+        boundary: Option<Version>,
         target: RevertTarget,
         blockers: &mut Vec<Blocker>,
     ) -> Selection<'_> {
@@ -103,6 +107,15 @@ impl<M> Catalog<'_, M> {
         let (kept, undone) = installed.split_at(split.unwrap_or(installed.len()));
         let mut selection = Selection::default();
 
+        if let (RevertTarget::To(requested), Some(boundary)) = (target, boundary)
+            && requested < boundary
+        {
+            blockers.push(Blocker::Boundary {
+                requested,
+                boundary,
+            });
+        }
+
         if split.is_none() {
             blockers.push(Blocker::Exceeds {
                 requested: count,
@@ -121,7 +134,7 @@ impl<M> Catalog<'_, M> {
                 continue;
             }
 
-            let Some(entry) = self.entries.iter().find(|entry| entry.version == version) else {
+            let Some(entry) = self.incrementals().find(|entry| entry.version == version) else {
                 continue;
             };
 

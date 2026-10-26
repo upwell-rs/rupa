@@ -3,6 +3,7 @@
 //! [`Target::lock_name`] keeps runners exclusive across the per-artifact
 //! commits, and the InnoDB journal table lives in the selected database.
 
+mod coverage;
 mod inspect;
 mod recovery;
 pub mod sql;

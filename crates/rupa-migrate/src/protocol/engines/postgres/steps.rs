@@ -9,13 +9,15 @@ macro_rules! steps {
             use super::{Body, Connection, LOCK_NOT_AVAILABLE, Owner, State, journal, lock_parts, sql};
             use crate::protocol::$mode::Io;
             use crate::protocol::{
-                ATTEMPT_COLUMNS, HISTORY_COLUMNS, RUNNING_COLUMNS, SqlState as _, absent,
-                check_reason, decode_history, finish, int, attempt_row, records, resolve, single,
+                ATTEMPT_COLUMNS, COVERAGE_COLUMNS, HISTORY_COLUMNS, RUNNING_COLUMNS, Rows,
+                SqlState as _, absent, adoption_row, attempt_row, check_reason, check_unmanaged,
+                covered_row, decode_coverage, decode_history, finish, int, records, resolve, single,
                 status, text,
             };
             use crate::{
-                CHECKSUM_FORMAT, CatalogEntry, Direction, Error, Exclusion, HistoryEntry, Inspection, Policy,
-                Recovery, RecoveryAction, RecoveryError, VersionScheme,
+                Adoption, AdoptionError, CHECKSUM_FORMAT, CatalogEntry, Coverage, Covered, Direction,
+                Error, Exclusion, HistoryEntry, Inspection, Policy, Recovery, RecoveryAction,
+                RecoveryError, VersionScheme,
             };
 
             $($async)* fn query<T: Io<State = State>>(
@@ -264,6 +266,27 @@ macro_rules! steps {
                 Ok(rows.iter().filter_map(|row| int(&row[0])).collect())
             }
 
+            /// Creates `journal` with its header row for `stream` and `scheme`.
+            $($async)* fn create_journal<T: Io<State = State>>(
+                io: &mut T,
+                journal: &str,
+                stream: &str,
+                scheme: VersionScheme,
+            ) -> Result<(), Error<T::Error>> {
+                batch(io, &sql::create(journal)) $($await)*?;
+                execute(
+                    io,
+                    &sql::insert_header(journal),
+                    &[
+                        Value::Text(stream.to_owned()),
+                        Value::Text(scheme.as_str().to_owned()),
+                        Value::Text(CHECKSUM_FORMAT.to_owned()),
+                    ],
+                ) $($await)*?;
+
+                Ok(())
+            }
+
             /// Classifies the namespace and creates the journal on a fresh target,
             /// then checks the stream and outstanding attempts and reconciles
             /// interrupted transactional ones, in one transaction under the
@@ -290,16 +313,7 @@ macro_rules! steps {
                         return Err(Error::Unmanaged);
                     }
 
-                    batch(io, &sql::create(&journal)) $($await)*?;
-                    execute(
-                        io,
-                        &sql::insert_header(&journal),
-                        &[
-                            Value::Text(stream.to_owned()),
-                            Value::Text(scheme.as_str().to_owned()),
-                            Value::Text(CHECKSUM_FORMAT.to_owned()),
-                        ],
-                    ) $($await)*?;
+                    create_journal(io, &journal, stream, scheme) $($await)*?;
                 }
 
                 if let Some(attempt) = check_header(io, &journal, stream, scheme) $($await)*? {
@@ -320,6 +334,7 @@ macro_rules! steps {
             $($async)* fn checked_completion<T: Io<State = State>>(
                 io: &mut T,
                 attempt: i64,
+                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
                 let state = io.state();
                 let body = state.body;
@@ -356,6 +371,7 @@ macro_rules! steps {
                     ));
                 }
 
+                record_covered(io, &journal, &entry.covers, attempt) $($await)*?;
                 batch(io, "COMMIT") $($await)*
             }
 
@@ -408,15 +424,21 @@ macro_rules! steps {
                 Ok(reconciled)
             }
 
+            /// The owned namespace, or the connection's current one outside a run.
+            $($async)* fn namespace<T: Io<State = State>>(io: &mut T) -> Result<String, Error<T::Error>> {
+                let owned = io.state().owner.as_ref().map(|owner| owner.namespace.clone());
+
+                match owned {
+                    Some(namespace) => Ok(namespace),
+                    None => Ok(describe_connection(io) $($await)*?.namespace),
+                }
+            }
+
             /// Reads installed history from the owned or current namespace.
             pub $($async)* fn history<T: Io<State = State>>(
                 io: &mut T,
             ) -> Result<Vec<HistoryEntry>, Error<T::Error>> {
-                let owned = io.state().owner.as_ref().map(|owner| owner.namespace.clone());
-                let namespace = match owned {
-                    Some(namespace) => namespace,
-                    None => describe_connection(io) $($await)*?.namespace,
-                };
+                let namespace = namespace(io) $($await)*?;
 
                 if !has_journal(io, &namespace) $($await)*? {
                     return Ok(Vec::new());
@@ -496,13 +518,14 @@ macro_rules! steps {
             }
 
             /// Records the attempt applied, poisoning the session on failure.
-            /// The journal row already names the entry it runs.
+            /// The journal row already names the entry it runs; a snapshot's
+            /// coverage commits with it.
             pub $($async)* fn complete<T: Io<State = State>>(
                 io: &mut T,
                 attempt: i64,
-                _entry: &CatalogEntry,
+                entry: &CatalogEntry,
             ) -> Result<(), Error<T::Error>> {
-                let result = checked_completion(io, attempt) $($await)*;
+                let result = checked_completion(io, attempt, entry) $($await)*;
                 let state = io.state();
 
                 if result.is_err() {
@@ -627,6 +650,7 @@ macro_rules! steps {
 
             super::inspect::inspect!([$($async)*] [$($await)*]);
             super::recovery::recovery!([$($async)*] [$($await)*]);
+            super::coverage::coverage_steps!([$($async)*] [$($await)*]);
         }
     };
 }
