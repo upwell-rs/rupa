@@ -2,11 +2,13 @@
 //! a catalog, and what an apply would run. Nothing here acquires exclusion,
 //! writes or runs a body.
 
+mod plan;
+
 use std::collections::BTreeSet;
 
-use rupa_core::DialectId;
+use crate::{Catalog, CatalogEntry, Checksum, HistoryEntry, Policy, Version};
 
-use crate::{Catalog, CatalogEntry, Checksum, HistoryEntry, Policy, ValidationError, Version};
+pub use plan::{ApplyPlan, Execution, Step};
 
 /// What a session read from a target, without exclusion or writes.
 #[derive(Debug, Clone)]
@@ -158,35 +160,6 @@ pub struct Status<'c> {
     pub blockers: Vec<Blocker>,
 }
 
-/// What apply would do on a target: its status and the exact steps it
-/// would run, if nothing blocks it.
-#[derive(Debug, Clone)]
-pub struct ApplyPlan<'c> {
-    /// The target's status; apply runs `steps` only when its blockers are empty.
-    pub status: Status<'c>,
-    /// The pending entries, in the order apply runs them.
-    pub steps: Vec<Step<'c>>,
-}
-
-/// One pending entry apply would run: its identity, policy and body.
-#[derive(Debug, Clone)]
-pub struct Step<'c> {
-    /// The entry: version, checksum and metadata, policy included.
-    pub entry: &'c CatalogEntry,
-    /// What its body sends.
-    pub execution: Execution,
-}
-
-/// What a pending entry's body sends.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Execution {
-    /// A planned body: one script per plan operation, exactly as apply sends
-    /// them for the session's dialect.
-    Static(Vec<String>),
-    /// An imperative Rust body, opaque until it runs.
-    Opaque,
-}
-
 impl<M> Catalog<'_, M> {
     /// Classifies `inspection` against this catalog. Pure: performs no IO.
     pub fn classify(&self, inspection: Inspection) -> Status<'_> {
@@ -253,7 +226,11 @@ impl<M> Catalog<'_, M> {
     /// The installed versions the catalog contains, adding a blocker for
     /// every installed version that is missing, changed or recorded twice,
     /// and for every pending one below the newest installed version.
-    fn compare(&self, history: &[HistoryEntry], blockers: &mut Vec<Blocker>) -> BTreeSet<Version> {
+    pub(crate) fn compare(
+        &self,
+        history: &[HistoryEntry],
+        blockers: &mut Vec<Blocker>,
+    ) -> BTreeSet<Version> {
         let mut installed = BTreeSet::new();
         let mut newest = None;
 
@@ -299,33 +276,6 @@ impl<M> Catalog<'_, M> {
         blockers.extend(late);
 
         installed
-    }
-
-    /// The steps apply would run for `status`, rendered for `dialect`.
-    pub fn plan_for<'c>(
-        &self,
-        status: Status<'c>,
-        dialect: DialectId,
-    ) -> Result<ApplyPlan<'c>, ValidationError> {
-        let steps = status
-            .pending
-            .iter()
-            .map(|entry| {
-                let execution = match &entry.plan {
-                    Some(plan) => Execution::Static(
-                        plan.operations()
-                            .iter()
-                            .map(|operation| crate::catalog::render(operation, dialect))
-                            .collect::<Result<_, _>>()?,
-                    ),
-                    None => Execution::Opaque,
-                };
-
-                Ok(Step { entry, execution })
-            })
-            .collect::<Result<_, ValidationError>>()?;
-
-        Ok(ApplyPlan { status, steps })
     }
 }
 

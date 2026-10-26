@@ -252,8 +252,37 @@ rejected before initialization and is never downgraded: SQLite runs
 `TransactionalRequired` only, PostgreSQL also `NonTransactional`, and MySQL
 `NonTransactional` only, because it commits DDL implicitly. A nonempty unmanaged
 target is refused; absence of a history table is not proof of freshness.
-Changed or missing applied artifacts and late arrivals block pending work.
-There is no silent reordering, checksum replacement or automatic body retry.
+Changed or missing applied artifacts and late arrivals block pending work
+with `Error::Blocked`, whose `Blocker`s name each artifact. There is no silent
+reordering, checksum replacement or automatic body retry.
+
+### Late artifacts
+
+A late artifact is a pending version below the newest installed one, such as
+`101` merged after a target installed `100` and `102`. Strict apply, the
+default, refuses it before running anything. An operator who has checked that
+both orders are correct can permit it for one run:
+
+```rust,ignore
+use rupa::migrate::{ApplyOptions, Order, sync::{Apply, Inspect}};
+
+let options = ApplyOptions { order: Order::AllowLate };
+
+let plan = catalog.plan_with(connect()?, &options)?;  // plan.late == [101]
+let report = catalog.apply_with(connect()?, &options)?;
+
+assert_eq!(report.late, report.applied);              // [101]
+```
+
+The late version runs after the installed ones and gets a new installation
+rank, so history records `100, 102, 101`. The report lists it in `late`, and a
+plan with the same options lists it in `ApplyPlan::late` instead of as a
+blocker. Once installed, it is no longer late. The permission is per run, not
+per artifact: it makes the operator acknowledge the target's actual order. The
+engine cannot prove two migrations commute; their author answers for both
+orders. It lifts only `Blocker::Late`. Missing, changed and duplicate history,
+interrupted or unresolved attempts, and another stream or scheme still refuse
+the run.
 
 ## Inspecting a target
 
@@ -291,14 +320,15 @@ concerns:
 | `Claimed` | report `Error::Busy` until SQLite's owner claim is released |
 | `Interrupted(attempt)` | record it rolled back and stop with `Error::Reconciled` |
 | `Unresolved(attempt)` | stop with `Error::Uncertain` until it is [recovered](#recovery) |
-| `Missing`, `Changed`, `Duplicate`, `Late` | refuse history that no longer matches the catalog |
+| `Missing`, `Changed`, `Duplicate` | refuse history that no longer matches the catalog (`Error::Blocked`) |
+| `Late` | refuse a version below an installed one, unless the run [allows late work](#late-artifacts) |
 
 `apply` runs the pending entries only when there are no blockers. While a
 runner is live, its running attempts are listed but not reported as
 blockers, since they may be in progress.
 
 `plan` returns the status and one `Step` per pending entry, in the order
-`apply` runs them: the entry's version, checksum and policy, and its
+`apply` runs them (`plan_with` takes the same `ApplyOptions` as `apply_with`): the entry's version, checksum and policy, and its
 `Execution`. A planned body is `Static`, with its exact scripts rendered
 for the session's dialect. A Rust body is `Opaque` until it runs.
 
@@ -543,7 +573,7 @@ effects, and that the old runner is stopped, before asserting anything. Never
 edit the journal by hand.
 
 Dynamic (registry) sessions, transactional work on MySQL,
-nontransactional work on SQLite, snapshots/adoption,
-authored down migrations and allowed late application are not yet
+nontransactional work on SQLite, snapshots/adoption and
+authored down migrations are not yet
 implemented. Their accepted
 design is in [the migration contract](design/migrations-contract.md).

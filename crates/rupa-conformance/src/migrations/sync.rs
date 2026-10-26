@@ -36,6 +36,8 @@ mod history;
 mod inspection;
 #[path = "cases/nontransactional.rs"]
 mod nontransactional;
+#[path = "cases/ordering.rs"]
+mod ordering;
 #[path = "cases/recovery.rs"]
 mod recovery;
 #[path = "cases/schema.rs"]

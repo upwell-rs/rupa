@@ -1,10 +1,8 @@
 //! The execution engine shared by both modes, compiled only with one of them.
 
-use std::collections::BTreeSet;
-
 use rupa_core::dialect::DialectId;
 
-use crate::{ApplyReport, Catalog, Error, HistoryEntry, RunError, Version};
+use crate::{ApplyReport, Catalog, CatalogEntry, Error, HistoryEntry, Order, RunError, Version};
 
 impl<E: std::error::Error + 'static, M: std::error::Error + 'static> RunError<E, M> {
     pub(crate) fn infrastructure(source: Error<E>) -> Self {
@@ -43,49 +41,38 @@ impl<E: std::error::Error + 'static, M: std::error::Error + 'static> RunError<E,
     }
 }
 
-/// The installed versions, after checking history against the catalog:
-/// every installed artifact is present and unchanged, and nothing pending
-/// sorts below the newest installed version.
-pub(crate) fn installed<E: std::error::Error, M>(
-    catalog: &Catalog<'_, M>,
+/// The catalog entries an apply runs on a target with `history`, in
+/// version order.
+pub(crate) struct Pending<'c> {
+    /// The entries history does not record.
+    pub(crate) entries: Vec<&'c CatalogEntry>,
+    /// Those below an installed version, which `order` permits.
+    pub(crate) late: Vec<Version>,
+}
+
+/// The pending entries, after checking history against the catalog with the
+/// comparison status uses: every installed artifact is present, unchanged and
+/// recorded once, and nothing pending is late unless `order` permits it.
+pub(crate) fn pending<'c, E: std::error::Error, M>(
+    catalog: &'c Catalog<'_, M>,
     history: &[HistoryEntry],
-) -> Result<BTreeSet<Version>, Error<E>> {
-    let mut installed = BTreeSet::new();
+    order: Order,
+) -> Result<Pending<'c>, Error<E>> {
+    let mut blockers = Vec::new();
+    let installed = catalog.compare(history, &mut blockers);
+    let late = order.permit(&mut blockers);
 
-    for record in history {
-        let version = catalog
-            .scheme
-            .parse(&record.version)
-            .map_err(|e| Error::Validation(e.into()))?;
-        let entry = catalog
-            .entries
-            .iter()
-            .find(|e| e.version == version)
-            .ok_or_else(|| {
-                Error::History(format!(
-                    "installed migration {version} is missing from the catalog"
-                ))
-            })?;
-
-        if entry.checksum != record.checksum || !installed.insert(version) {
-            return Err(Error::History(format!(
-                "installed migration {version} changed checksum or appears twice"
-            )));
-        }
+    if !blockers.is_empty() {
+        return Err(Error::Blocked(blockers));
     }
 
-    if let Some(maximum) = installed.last() {
-        for entry in &catalog.entries {
-            if entry.version < *maximum && !installed.contains(&entry.version) {
-                return Err(Error::History(format!(
-                    "late migration {} below installed {maximum}; strict apply refuses it",
-                    entry.version
-                )));
-            }
-        }
-    }
+    let entries = catalog
+        .entries
+        .iter()
+        .filter(|entry| !installed.contains(&entry.version))
+        .collect();
 
-    Ok(installed)
+    Ok(Pending { entries, late })
 }
 
 /// Combines a locked run with its release, never letting a release failure
@@ -93,17 +80,17 @@ pub(crate) fn installed<E: std::error::Error, M>(
 pub(crate) fn finish<E: std::error::Error + 'static, M: std::error::Error + 'static>(
     result: Result<(), RunError<E, M>>,
     released: Result<(), Error<E>>,
-    applied: Vec<Version>,
+    report: ApplyReport,
 ) -> Result<ApplyReport, RunError<E, M>> {
     match (result, released) {
-        (Ok(()), Ok(())) => Ok(ApplyReport { applied }),
-        (Ok(()), Err(source)) => Err(RunError::infrastructure(source).with_applied(applied)),
+        (Ok(()), Ok(())) => Ok(report),
+        (Ok(()), Err(source)) => Err(RunError::infrastructure(source).with_applied(report.applied)),
         (Err(mut error), released) => {
             if let Err(cleanup) = released {
                 error.cleanup(cleanup);
             }
 
-            Err(error.with_applied(applied))
+            Err(error.with_applied(report.applied))
         }
     }
 }
@@ -186,8 +173,9 @@ macro_rules! mode {
         pub(crate) $($async)* fn apply<S: Session, M: Migration<S> $($bound)*>(
             session: &mut S,
             catalog: &crate::Catalog<'_, M>,
+            options: &crate::ApplyOptions,
         ) -> Result<crate::ApplyReport, crate::RunError<S::Error, M::Error>> {
-            let mut applied = Vec::new();
+            let mut report = crate::ApplyReport::default();
 
             catalog
                 .check(rupa_core::dialect::Dialect::id(session.dialect()), S::POLICIES)
@@ -204,7 +192,7 @@ macro_rules! mode {
             };
 
             let result = if reconciled.is_empty() {
-                apply_locked(&mut *guard.session, catalog, &mut applied) $($await)*
+                apply_locked(&mut *guard.session, catalog, options, &mut report) $($await)*
             } else {
                 Err(crate::RunError::infrastructure(crate::Error::Reconciled(reconciled)))
             };
@@ -212,7 +200,7 @@ macro_rules! mode {
 
             guard.armed = false;
 
-            crate::runner::finish(result, released, applied)
+            crate::runner::finish(result, released, report)
         }
 
         /// Records `recovery` against `entries`, abandoning the session if the
@@ -263,17 +251,14 @@ macro_rules! mode {
         $($async)* fn apply_locked<S: Session, M: Migration<S> $($bound)*>(
             session: &mut S,
             catalog: &crate::Catalog<'_, M>,
-            applied: &mut Vec<crate::Version>,
+            options: &crate::ApplyOptions,
+            report: &mut crate::ApplyReport,
         ) -> Result<(), crate::RunError<S::Error, M::Error>> {
             let history = session.history() $($await)* .map_err(crate::RunError::infrastructure)?;
-            let installed = crate::runner::installed(catalog, &history)
+            let pending = crate::runner::pending(catalog, &history, options.order)
                 .map_err(crate::RunError::infrastructure)?;
-            let pending = catalog
-                .entries
-                .iter()
-                .filter(|entry| !installed.contains(&entry.version));
 
-            for entry in pending {
+            for entry in pending.entries {
                 let attempt = session
                     .start_attempt(entry)
                     $($await)*
@@ -303,7 +288,11 @@ macro_rules! mode {
                     );
                 }
 
-                applied.push(entry.version);
+                report.applied.push(entry.version);
+
+                if pending.late.contains(&entry.version) {
+                    report.late.push(entry.version);
+                }
             }
 
             Ok(())

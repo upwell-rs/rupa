@@ -14,6 +14,7 @@ mod catalog;
 mod error;
 mod macros;
 mod model;
+mod options;
 mod plan;
 #[cfg(feature = "protocol")]
 #[doc(hidden)]
@@ -36,6 +37,7 @@ pub use model::{
     ArtifactInput, Metadata, MigrationInfo, MigrationKind, Operation, Planned, PlannedMigration,
     Policy,
 };
+pub use options::{ApplyOptions, Order};
 pub use plan::Plan;
 pub use recovery::{Recovery, RecoveryAction, RecoveryError};
 pub use report::{ApplyReport, RunError};

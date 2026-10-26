@@ -55,9 +55,12 @@ lock keys independently of driver and URL, and the typed `StateError` drivers
 report for misused migration connections. No boxed body errors or erased catalog dispatch is required.
 
 The runner applies incrementals under the policies a session declares in
-`Session::POLICIES`. Changed/missing applied artifacts, duplicate versions, late
-arrivals and policies the session cannot honour fail explicitly before the
-target is touched. Each successful transactional body commits with history and
+`Session::POLICIES`. Changed/missing applied artifacts, duplicate versions and
+late arrivals fail with typed `Error::Blocked` blockers, and policies the
+session cannot honour fail before the target is touched. Late arrivals run only
+under an explicit per-run `ApplyOptions { order: Order::AllowLate }`
+(`Apply::apply_with`, `Inspect::plan_with`), after the installed versions and
+with new installation ranks; the report lists them in `late`. Each successful transactional body commits with history and
 attempt completion; a failed later body rolls back without undoing earlier
 commits. A nontransactional body (`Policy::NonTransactional`, on PostgreSQL and
 MySQL) runs in autocommit. Drivers dispatch its statements one by one using

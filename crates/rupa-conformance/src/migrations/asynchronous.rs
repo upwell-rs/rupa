@@ -89,6 +89,9 @@ mod inspection {
 mod nontransactional {
     include!("cases/nontransactional.rs");
 }
+mod ordering {
+    include!("cases/ordering.rs");
+}
 mod recovery {
     include!("cases/recovery.rs");
 }
