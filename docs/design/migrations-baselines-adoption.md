@@ -1,7 +1,9 @@
 # Adoption, snapshots, and coverage
 
 Status: accepted design through owner-reviewed [PR #29](https://github.com/upwell-rs/rupa/pull/29),
-merged into the migration integration branch on 2026-10-19. Not implemented.
+merged into the migration integration branch on 2026-10-19. Implemented by
+[#63](https://github.com/upwell-rs/rupa/issues/63); usage is in
+[the migrations guide](../migrations.md#initializing-from-a-snapshot).
 Addresses [#13](https://github.com/upwell-rs/rupa/issues/13), under discovery
 [#4](https://github.com/upwell-rs/rupa/issues/4) and epic
 [#3](https://github.com/upwell-rs/rupa/issues/3). Builds on the accepted

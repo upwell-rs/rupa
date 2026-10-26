@@ -1,3 +1,4 @@
+mod coverage;
 mod revert;
 
 use rupa_core::DialectId;
@@ -58,12 +59,16 @@ enum Entry {
     /// An imperative entry declaring a down body.
     Reversible(Imperative),
     Undone(Planned<Undone>),
+    /// An imperative snapshot.
+    Snapshot(Imperative),
 }
 
 impl MigrationInfo for Entry {
     fn info(&self) -> &'static Metadata {
         match self {
-            Self::Imperative(entry) | Self::Reversible(entry) => entry.info(),
+            Self::Imperative(entry) | Self::Reversible(entry) | Self::Snapshot(entry) => {
+                entry.info()
+            }
             Self::Planned(entry) => entry.info(),
             Self::Undone(entry) => entry.info(),
         }
@@ -71,7 +76,9 @@ impl MigrationInfo for Entry {
 
     fn planned(&self) -> Option<Plan> {
         match self {
-            Self::Imperative(entry) | Self::Reversible(entry) => entry.planned(),
+            Self::Imperative(entry) | Self::Reversible(entry) | Self::Snapshot(entry) => {
+                entry.planned()
+            }
             Self::Planned(entry) => entry.planned(),
             Self::Undone(entry) => entry.planned(),
         }
@@ -79,7 +86,7 @@ impl MigrationInfo for Entry {
 
     fn reversal(&self) -> Reversal {
         match self {
-            Self::Imperative(_) | Self::Planned(_) => Reversal::Irreversible,
+            Self::Imperative(_) | Self::Planned(_) | Self::Snapshot(_) => Reversal::Irreversible,
             Self::Reversible(_) => Reversal::Imperative,
             Self::Undone(entry) => entry.reversal(),
         }
@@ -116,6 +123,15 @@ fn undone(version: &'static str) -> Entry {
     Entry::Undone(Planned(Undone(metadata(version, &[]))))
 }
 
+fn snapshot(version: &'static str) -> Entry {
+    const INPUTS: &[ArtifactInput] = &[ArtifactInput::new("snapshot.rs", "fn up() {}")];
+
+    Entry::Snapshot(Imperative(Box::leak(Box::new(Metadata {
+        kind: MigrationKind::Snapshot,
+        ..*metadata(version, INPUTS)
+    }))))
+}
+
 fn version(text: &str) -> Version {
     VersionScheme::Numbered.parse(text).expect("version")
 }
@@ -140,10 +156,19 @@ fn installed(catalog: &Catalog<'_, Entry>, version: &str, rank: u64) -> HistoryE
 }
 
 fn managed(history: Vec<HistoryEntry>, attempts: Vec<Attempt>) -> Journal {
+    journal(history, None, attempts)
+}
+
+fn journal(
+    history: Vec<HistoryEntry>,
+    coverage: Option<Coverage>,
+    attempts: Vec<Attempt>,
+) -> Journal {
     Journal::Managed(Records {
         stream: "primary".into(),
         scheme: "numbered".into(),
         history,
+        coverage,
         attempts,
     })
 }
@@ -158,6 +183,7 @@ fn attempt(id: i64, policy: Policy) -> Attempt {
         version: "2".into(),
         checksum: Checksum::from_bytes([7; 32]),
         policy,
+        kind: MigrationKind::Incremental,
         direction: Direction::Up,
     }
 }
@@ -317,6 +343,7 @@ fn another_stream_is_not_compared() {
         stream: "other".into(),
         scheme: "numbered".into(),
         history: vec![installed(&catalog, "7", 1)],
+        coverage: None,
         attempts: Vec::new(),
     });
 
@@ -370,6 +397,7 @@ fn late_permission_plans_late_entries_and_keeps_every_other_blocker() {
     let history = vec![changed, installed(&catalog, "3", 2)];
     let allow_late = ApplyOptions {
         order: Order::AllowLate,
+        ..ApplyOptions::DEFAULT
     };
     let plan = |options: &ApplyOptions| {
         let journal = managed(history.clone(), Vec::new());

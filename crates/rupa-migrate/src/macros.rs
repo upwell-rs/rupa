@@ -2,14 +2,18 @@
 /// the invoking source file, as with `include_str!`; explicit catalogs track
 /// changes to each referenced file through normal Rust dependency tracking.
 /// `policy` names a [`Policy`](crate::Policy) variant and defaults to
-/// `TransactionalRequired`. An optional `down` file is the authored down
-/// body; both files are artifact inputs, so either one changes the checksum.
+/// `TransactionalRequired`. `kind` names a [`MigrationKind`](crate::MigrationKind)
+/// variant and defaults to `Incremental`; a `Snapshot` covers every
+/// incremental at or below its version and has no down body. An optional
+/// `down` file is the authored down body; both files are artifact inputs,
+/// so either one changes the checksum.
 #[macro_export]
 macro_rules! sql_migration {
     ($(#[$meta:meta])* $vis:vis struct $name:ident {
         version: $version:literal,
         description: $description:literal,
         $(policy: $policy:ident,)?
+        $(kind: $kind:ident,)?
         up: $path:literal
         $(, down: $down:literal)? $(,)?
     }) => {
@@ -23,7 +27,7 @@ macro_rules! sql_migration {
                     version: $version,
                     description: $description,
                     policy: $crate::__policy!($($policy)?),
-                    kind: $crate::MigrationKind::Incremental,
+                    kind: $crate::__kind!($($kind)?),
                     inputs: &[
                         $crate::ArtifactInput::new($path, ::std::include_str!($path)),
                         $($crate::ArtifactInput::new($down, ::std::include_str!($down)),)?
@@ -57,6 +61,18 @@ macro_rules! __policy {
     };
     ($policy:ident) => {
         $crate::Policy::$policy
+    };
+}
+
+/// The declared kind of a SQL migration, `Incremental` when omitted.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __kind {
+    () => {
+        $crate::MigrationKind::Incremental
+    };
+    ($kind:ident) => {
+        $crate::MigrationKind::$kind
     };
 }
 

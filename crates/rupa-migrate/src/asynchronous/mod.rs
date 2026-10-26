@@ -10,9 +10,9 @@ use rupa_core::dialect::Dialect;
 
 use crate::runner::mode;
 use crate::{
-    ApplyOptions, ApplyPlan, ApplyReport, Catalog, CatalogEntry, Direction, Error, HistoryEntry,
-    Inspection, MigrationInfo, Plan, Policy, Recovery, RevertPlan, RevertReport, RevertTarget,
-    RunError, Status, VersionScheme,
+    AdoptReport, Adoption, ApplyOptions, ApplyPlan, ApplyReport, Catalog, CatalogEntry, Coverage,
+    Covered, Direction, Error, HistoryEntry, Inspection, MigrationInfo, Plan, Policy, Recovery,
+    RevertPlan, RevertReport, RevertTarget, RunError, Status, VersionScheme,
 };
 
 /// Driver-owned dedicated physical migration connection, awaited.
@@ -42,6 +42,12 @@ pub trait Session: Connection {
         &mut self,
     ) -> impl Future<Output = Result<Vec<HistoryEntry>, Error<Self::Error>>> + Send;
 
+    /// Reads the target's coverage claim, if any, without executing user
+    /// code or creating metadata.
+    fn coverage(
+        &mut self,
+    ) -> impl Future<Output = Result<Option<Coverage>, Error<Self::Error>>> + Send;
+
     /// Reads the target's journal and whether another runner excludes it,
     /// without acquiring exclusion, writing or executing user code. Only
     /// possible on a session that owns no run.
@@ -63,7 +69,8 @@ pub trait Session: Connection {
     ) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
 
     /// Records history/completion and commits them with the artifact's
-    /// effects. A completed down attempt makes the installation it undoes inactive.
+    /// effects. A completed down attempt makes the installation it undoes
+    /// inactive; a completed snapshot records its coverage manifest.
     fn complete(
         &mut self,
         attempt: i64,
@@ -93,6 +100,18 @@ pub trait Session: Connection {
         scheme: VersionScheme,
         entries: &[CatalogEntry],
         recovery: &Recovery<'_>,
+    ) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
+
+    /// Records an operator's `adoption` of an unmanaged target under newly
+    /// acquired exclusion, then releases exclusion: creates the journal with
+    /// the adoption event and its `members` in one transaction. Refuses a
+    /// fresh or managed target. Executes no body.
+    fn adopt(
+        &mut self,
+        stream: &str,
+        scheme: VersionScheme,
+        adoption: &Adoption<'_>,
+        members: &[Covered],
     ) -> impl Future<Output = Result<(), Error<Self::Error>>> + Send;
 
     /// Marks the session unusable after a run ended without returning (a
@@ -240,6 +259,18 @@ pub trait Recover {
     ) -> impl Future<Output = Result<(), Error<S::Error>>> + Send;
 }
 
+/// Records an operator's adoption on a dedicated native connection, then
+/// closes it.
+pub trait Adopt {
+    /// Records `adoption` of this catalog's incrementals at or below its
+    /// boundary under exclusion, without running any body.
+    fn adopt<S: Session>(
+        &self,
+        connection: S,
+        adoption: &Adoption<'_>,
+    ) -> impl Future<Output = Result<AdoptReport, Error<S::Error>>> + Send;
+}
+
 /// Reads a target on a dedicated native connection, then closes it, without
 /// acquiring exclusion, writing or executing a body.
 pub trait Inspect {
@@ -319,6 +350,16 @@ impl<M> Recover for Catalog<'_, M> {
         let (stream, scheme, entries) = (self.stream, self.scheme, &self.entries);
 
         async move { recover(&mut connection, stream, scheme, entries, recovery).await }
+    }
+}
+
+impl<M: Sync> Adopt for Catalog<'_, M> {
+    async fn adopt<S: Session>(
+        &self,
+        mut connection: S,
+        adoption: &Adoption<'_>,
+    ) -> Result<AdoptReport, Error<S::Error>> {
+        adopt(&mut connection, self, adoption).await
     }
 }
 

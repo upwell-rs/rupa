@@ -92,24 +92,35 @@ Each undo is its own journaled `down` attempt that commits on its own; a later
 failure keeps earlier undos, and the `RevertReport` lists the remaining stack.
 `Inspect::revert_plan` shows the steps without running them.
 
+A snapshot (`MigrationKind::Snapshot`, `sql_migration!`'s `kind: Snapshot`)
+covers every incremental at or below its version; the catalog derives that
+manifest and checksums it with the snapshot. On a target that records no
+installation or coverage, apply runs the newest snapshot at or below
+`ApplyOptions::through` and then the tail, unless `Init::FullReplay` asks for
+the incrementals; `ApplyReport` lists the snapshot and what it covered.
+`Adopt::adopt` records an operator's `Adoption` of an unmanaged target through
+a version, executing no body, and refuses fresh and managed targets with
+`AdoptionError`. Either way the target holds one `Coverage` claim: covered
+incrementals are not installations, an incremental added later at or below
+the boundary is `Blocker::Uncovered` whatever the order permission, and no
+revert crosses the boundary (`Blocker::Boundary`).
+
 Every engine keeps its state in one reserved journal table, `_rupa_migrations`,
 defined per engine in [`sql/`](sql/) (`postgres.sql`, `mysql.sql`,
 `sqlite.sql`), the files the runner executes on a fresh target.
 
-Dynamic adapters, snapshots and adoption remain subsequent implementation
-slices. Declaring their
-metadata is not a claim that this slice executes them.
+Dynamic adapters remain a subsequent implementation slice.
 
 ## Feature flags
 
 | feature | adds |
 |---|---|
-| `sync` | `sync::{Session, Migration, Context, Apply, Inspect, Recover, Revert}` |
-| `async` | `asynchronous::{Session, Migration, Context, Apply, Inspect, Recover, Revert}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
+| `sync` | `sync::{Session, Migration, Context, Apply, Inspect, Recover, Revert, Adopt}` |
+| `async` | `asynchronous::{Session, Migration, Context, Apply, Inspect, Recover, Revert, Adopt}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
 | `protocol` | the engine session protocols (`protocol::{postgres, mysql, sqlite}`) and their per-mode `Io` traits, for driver crates; not public API |
 
-Neither is default. With exactly one enabled, all seven of its names are
+Neither is default. With exactly one enabled, all eight of its names are
 re-exported at the crate root, and `prelude` brings its method traits (`Apply`,
-`Inspect`, `Recover`, `Revert`, `Session`) into scope anonymously; with both, use the mode modules. The facade
+`Inspect`, `Recover`, `Revert`, `Adopt`, `Session`) into scope anonymously; with both, use the mode modules. The facade
 gates the crate with `migrations` and forwards its own `sync`/`async`; driver
 adapters have their own optional `migrations` feature.

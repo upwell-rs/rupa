@@ -1,5 +1,6 @@
 mod down;
 mod plans;
+mod snapshots;
 
 use super::*;
 use crate::{

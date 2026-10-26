@@ -4,17 +4,18 @@ use std::path::{Path, PathBuf};
 
 use rupa_migrate::{Policy, Version, VersionScheme};
 
+mod name;
+
 use super::Error;
 use super::header::{self, Header};
 use super::isolation::{self, Layout};
 use super::kind::{self, Kind};
 use super::render::pascal;
+use name::Entry;
 
 const SQL_MARKER: &str = "--";
-const DOWN_SUFFIX: &str = ".down.sql";
 const RUST_MARKER: &str = "//!";
 const RUST_ROOT: &str = "mod.rs";
-const RESERVED_TYPE: &str = "Self";
 
 /// One discovered migration with the exact bytes its checksum covers.
 #[derive(Debug)]
@@ -24,6 +25,8 @@ pub(super) struct Artifact {
     pub(super) description: String,
     pub(super) documented: bool,
     pub(super) policy: Policy,
+    /// Whether it is a snapshot rather than an incremental.
+    pub(super) snapshot: bool,
     pub(super) body: Body,
 }
 
@@ -69,28 +72,23 @@ impl Input {
     }
 }
 
-/// The shape of a directory entry, decided by its name and file type.
-enum Entry {
-    Sql,
-    SqlDown,
-    RustFile,
-    RustDir,
-}
-
-/// Reads every migration in `dir`, ordered by version, each `.down.sql`
-/// file paired with the SQL migration of its version and name.
+/// Reads every migration in `dir`, ordered by version with a snapshot after
+/// the incremental of its version. Snapshots are `.snapshot.sql` or
+/// `.snapshot.rs` files or the entries of `snapshots/`; down scripts are
+/// `.down.sql` files or the `.sql` files of `down/`, each paired with the
+/// SQL migration of its version and name.
 pub(super) fn discover(dir: &Path, scheme: VersionScheme) -> Result<Vec<Artifact>, Error> {
-    let mut seen: BTreeMap<Version, PathBuf> = BTreeMap::new();
+    let mut seen: BTreeMap<(Version, bool), PathBuf> = BTreeMap::new();
     let mut downs: BTreeMap<Version, (String, PathBuf)> = BTreeMap::new();
     let mut artifacts = Vec::new();
 
-    for path in entries(dir)? {
-        let (version, name, entry) = parse(&path, scheme)?;
+    for (path, place) in name::places(dir)? {
+        let (version, name, entry) = name::parse(&path, scheme, place)?;
         let earlier = match entry {
             Entry::SqlDown => downs
                 .insert(version, (name.clone(), path.clone()))
                 .map(|(_, first)| first),
-            _ => seen.insert(version, path.clone()),
+            _ => seen.insert((version, entry.snapshot()), path.clone()),
         };
 
         if let Some(first) = earlier {
@@ -111,9 +109,9 @@ pub(super) fn discover(dir: &Path, scheme: VersionScheme) -> Result<Vec<Artifact
     }
 
     for (version, (name, path)) in downs {
-        let artifact = artifacts
-            .iter_mut()
-            .find(|artifact| artifact.version == version && artifact.name == name);
+        let artifact = artifacts.iter_mut().find(|artifact| {
+            artifact.version == version && artifact.name == name && !artifact.snapshot
+        });
 
         match artifact.map(|artifact| &mut artifact.body) {
             Some(Body::Sql { down, .. }) => *down = Some(down_input(&path)?),
@@ -122,12 +120,12 @@ pub(super) fn discover(dir: &Path, scheme: VersionScheme) -> Result<Vec<Artifact
         }
     }
 
-    artifacts.sort_by_key(|a| a.version);
+    artifacts.sort_by_key(|a| (a.version, a.snapshot));
 
     Ok(artifacts)
 }
 
-fn entries(dir: &Path) -> Result<Vec<PathBuf>, Error> {
+pub(super) fn entries(dir: &Path) -> Result<Vec<PathBuf>, Error> {
     let io = |source| Error::Io {
         path: dir.to_path_buf(),
         source,
@@ -162,72 +160,30 @@ fn entries(dir: &Path) -> Result<Vec<PathBuf>, Error> {
     Ok(paths)
 }
 
-fn parse(path: &Path, scheme: VersionScheme) -> Result<(Version, String, Entry), Error> {
-    let file_name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| Error::Utf8(path.to_path_buf()))?;
-    let invalid = || Error::Name(path.to_path_buf());
-    let (stem, entry) = if path.is_dir() {
-        (file_name, Entry::RustDir)
-    } else if let Some(stem) = file_name.strip_suffix(DOWN_SUFFIX) {
-        (stem, Entry::SqlDown)
-    } else if let Some(stem) = file_name.strip_suffix(".sql") {
-        (stem, Entry::Sql)
-    } else if let Some(stem) = file_name.strip_suffix(".rs") {
-        (stem, Entry::RustFile)
-    } else {
-        return Err(invalid());
-    };
-    let (digits, name) = stem.split_once('_').ok_or_else(invalid)?;
-    let snake = name.starts_with(|c: char| c.is_ascii_lowercase())
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) || !snake {
-        return Err(invalid());
-    }
-
-    if pascal(name) == RESERVED_TYPE {
-        return Err(Error::ReservedName(path.to_path_buf()));
-    }
-
-    let canonical = match scheme {
-        VersionScheme::Numbered => digits.trim_start_matches('0'),
-        VersionScheme::UtcTimestamp => digits,
-    };
-    let version = scheme.parse(canonical).map_err(|source| Error::Version {
-        path: path.to_path_buf(),
-        source,
-    })?;
-
-    Ok((version, name.to_owned(), entry))
-}
-
 fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Artifact, Error> {
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| Error::Utf8(path.to_path_buf()))?;
     let root = match entry {
-        Entry::RustDir => path.join(RUST_ROOT),
+        Entry::RustDir(_) => path.join(RUST_ROOT),
         _ => path.to_path_buf(),
     };
+    let snapshot = entry.snapshot();
     let kind = match entry {
-        Entry::RustFile | Entry::RustDir => rust_kind(&root, file_name, &name)?,
-        Entry::Sql | Entry::SqlDown => Kind::default(),
+        Entry::RustFile(_) | Entry::RustDir(_) => rust_kind(&root, file_name, &name)?,
+        Entry::Sql(_) | Entry::SqlDown => Kind::default(),
     };
     let (header, body) = match entry {
-        Entry::Sql | Entry::SqlDown => {
+        Entry::Sql(_) | Entry::SqlDown => {
             let source = read(path)?;
             let split = header::split(&source, SQL_MARKER);
             let up = Input::new(file_name.to_owned(), split.body, path)?;
 
             (split.header(path)?, Body::Sql { up, down: None })
         }
-        Entry::RustFile | Entry::RustDir if kind.planned => planned_body(&root, path)?,
-        Entry::RustFile => {
+        Entry::RustFile(_) | Entry::RustDir(_) if kind.planned => planned_body(&root, path)?,
+        Entry::RustFile(_) => {
             let (header, input) = rust_input(path, file_name.to_owned(), Layout::File)?;
             let module = path.to_path_buf();
 
@@ -240,7 +196,7 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
                 },
             )
         }
-        Entry::RustDir => rust_dir(path, file_name, kind)?,
+        Entry::RustDir(_) => rust_dir(path, file_name, kind)?,
     };
     let documented = header.description.is_some();
     let description = header.description.unwrap_or_else(|| name.replace('_', " "));
@@ -251,6 +207,7 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
         description,
         documented,
         policy: header.frontmatter.unwrap_or_default().policy,
+        snapshot,
         body,
     })
 }

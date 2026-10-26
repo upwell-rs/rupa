@@ -20,7 +20,7 @@ macro_rules! recovery {
             batch(io, "START TRANSACTION") $($await)*?;
 
             let rows = query(io, sql::ATTEMPT, &[Value::I64(attempt)], &ATTEMPT_COLUMNS) $($await)*?;
-            let resolved = resolve(attempt, recovery.action, rows, entries)?;
+            let (resolved, covers) = resolve(attempt, recovery.action, rows, entries)?;
             let count = execute(io, sql::FINISH, &finish(attempt, resolved, Some(recovery))) $($await)*?;
 
             if count != 1 {
@@ -29,6 +29,7 @@ macro_rules! recovery {
                 ));
             }
 
+            record_covered(io, covers, attempt) $($await)*?;
             batch(io, "COMMIT") $($await)*
         }
 

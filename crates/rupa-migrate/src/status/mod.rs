@@ -2,13 +2,16 @@
 //! a catalog, and what an apply would run. Nothing here acquires exclusion,
 //! writes or runs a body.
 
+mod compare;
 mod plan;
 mod revert;
 
-use std::collections::BTreeSet;
+use crate::{
+    Catalog, CatalogEntry, Checksum, Coverage, HistoryEntry, MigrationKind, Policy, Version,
+};
 
-use crate::{Catalog, CatalogEntry, Checksum, HistoryEntry, Policy, Version};
-
+#[cfg(any(feature = "sync", feature = "async"))]
+pub(crate) use plan::Schedule;
 pub use plan::{ApplyPlan, Execution, Step};
 #[cfg(any(feature = "sync", feature = "async"))]
 pub(crate) use revert::Selection;
@@ -57,6 +60,8 @@ pub struct Records {
     pub scheme: String,
     /// Installed history, in installation order.
     pub history: Vec<HistoryEntry>,
+    /// The coverage claim of an executed snapshot or an adoption, if any.
+    pub coverage: Option<Coverage>,
     /// Attempts journaled as running, oldest first: interrupted, unresolved
     /// or, while a runner is live, in progress.
     pub attempts: Vec<Attempt>,
@@ -73,6 +78,8 @@ pub struct Attempt {
     pub checksum: Checksum,
     /// The policy it runs under.
     pub policy: Policy,
+    /// Whether it runs an incremental or a snapshot.
+    pub kind: MigrationKind,
     /// Whether it installs its artifact or undoes an installation.
     pub direction: Direction,
 }
@@ -133,14 +140,17 @@ pub enum Blocker {
     /// apply stops with [`Error::Uncertain`](crate::Error::Uncertain) until
     /// an operator recovers it.
     Unresolved(Attempt),
-    /// An installed version the catalog does not contain.
+    /// An installed or covered version, or an executed snapshot, that the
+    /// catalog does not contain.
     Missing {
         /// The installed version, as stored.
         version: String,
         /// The installed checksum.
         checksum: Checksum,
     },
-    /// An installed version whose catalog artifact changed.
+    /// An installed or covered version, or an executed snapshot, whose
+    /// catalog artifact changed. A snapshot's checksum covers its coverage
+    /// manifest, so changing or adding an incremental it covers changes it.
     Changed {
         /// The version.
         version: Version,
@@ -159,6 +169,16 @@ pub enum Blocker {
         /// The catalog's checksum.
         checksum: Checksum,
     },
+    /// A catalog incremental at or below the target's coverage boundary
+    /// that the coverage claim does not list: it was added after the
+    /// snapshot ran or the target was adopted. No order permits it; write a
+    /// corrective migration above the boundary instead.
+    Uncovered {
+        /// The version.
+        version: Version,
+        /// The coverage boundary.
+        boundary: Version,
+    },
     /// An installation a revert would undo has no down body. Blocks only a revert.
     Irreversible(Version),
     /// A retained installation sits among those a revert to a version would
@@ -173,6 +193,15 @@ pub enum Blocker {
         /// The installations present.
         installed: usize,
     },
+    /// A revert to a version below the coverage boundary. Covered
+    /// incrementals never ran individually, so no down body undoes them.
+    /// Blocks only a revert.
+    Boundary {
+        /// The requested version.
+        requested: Version,
+        /// The coverage boundary.
+        boundary: Version,
+    },
 }
 
 /// A catalog against a target, read without exclusion, writes or bodies.
@@ -184,10 +213,12 @@ pub struct Status<'c> {
     pub exclusion: Exclusion,
     /// Installed history, in installation order, with provenance.
     pub history: Vec<HistoryEntry>,
+    /// The coverage claim of an executed snapshot or an adoption, if any.
+    pub coverage: Option<Coverage>,
     /// Running attempts, oldest first.
     pub attempts: Vec<Attempt>,
-    /// Catalog entries not installed, in version order; empty when the
-    /// journal belongs to another stream.
+    /// Catalog incrementals neither installed nor covered, in version
+    /// order; empty when the journal belongs to another stream.
     pub pending: Vec<&'c CatalogEntry>,
     /// Everything that stops apply, each with its artifact identity. Apply
     /// runs `pending` only when this is empty.
@@ -202,6 +233,7 @@ impl<M> Catalog<'_, M> {
             classification: Classification::Fresh,
             exclusion,
             history: Vec::new(),
+            coverage: None,
             attempts: Vec::new(),
             pending: Vec::new(),
             blockers: match exclusion {
@@ -213,7 +245,7 @@ impl<M> Catalog<'_, M> {
 
         let records = match journal {
             Journal::Fresh => {
-                status.pending = self.entries.iter().collect();
+                status.pending = self.incrementals().collect();
 
                 return status;
             }
@@ -242,74 +274,23 @@ impl<M> Catalog<'_, M> {
                 scheme: records.scheme,
             });
         } else {
-            let installed = self.compare(&records.history, &mut status.blockers);
+            let installed = self.compare(
+                &records.history,
+                records.coverage.as_ref(),
+                &mut status.blockers,
+            );
 
             status.pending = self
-                .entries
-                .iter()
+                .incrementals()
                 .filter(|entry| !installed.contains(&entry.version))
                 .collect();
         }
 
         status.history = records.history;
+        status.coverage = records.coverage;
         status.attempts = records.attempts;
 
         status
-    }
-
-    /// The installed versions the catalog contains, adding a blocker for
-    /// every installed version that is missing, changed or recorded twice,
-    /// and for every pending one below the newest installed version.
-    pub(crate) fn compare(
-        &self,
-        history: &[HistoryEntry],
-        blockers: &mut Vec<Blocker>,
-    ) -> BTreeSet<Version> {
-        let mut installed = BTreeSet::new();
-        let mut newest = None;
-
-        for record in history {
-            let version = self.scheme.parse(&record.version).ok();
-            let entry = version
-                .and_then(|version| self.entries.iter().find(|entry| entry.version == version));
-
-            newest = newest.max(version);
-
-            let Some(entry) = entry else {
-                blockers.push(Blocker::Missing {
-                    version: record.version.clone(),
-                    checksum: record.checksum,
-                });
-
-                continue;
-            };
-
-            if !installed.insert(entry.version) {
-                blockers.push(Blocker::Duplicate(entry.version));
-            }
-
-            if entry.checksum != record.checksum {
-                blockers.push(Blocker::Changed {
-                    version: entry.version,
-                    installed: record.checksum,
-                    catalog: entry.checksum,
-                });
-            }
-        }
-
-        let late = self
-            .entries
-            .iter()
-            .filter(|entry| newest.is_some_and(|newest| entry.version < newest))
-            .filter(|entry| !installed.contains(&entry.version))
-            .map(|entry| Blocker::Late {
-                version: entry.version,
-                checksum: entry.checksum,
-            });
-
-        blockers.extend(late);
-
-        installed
     }
 }
 

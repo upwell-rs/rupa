@@ -4,6 +4,7 @@ use rupa_core::schema::{
 };
 use rupa_core::{Reference, Value};
 use rupa_sql::SchemaError;
+use sha2::{Digest, Sha256};
 
 use super::*;
 

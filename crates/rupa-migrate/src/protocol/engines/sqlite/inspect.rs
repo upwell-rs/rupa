@@ -16,6 +16,7 @@ macro_rules! inspect {
 
             let header = query(io, sql::HEADER, &[], &[SqlType::Text; 3]) $($await)*?;
             let history = query(io, sql::HISTORY, &[], &HISTORY_COLUMNS) $($await)*?;
+            let coverage = query(io, sql::COVERAGE, &[], &COVERAGE_COLUMNS) $($await)*?;
             let running = query(io, sql::RUNNING, &[], &RUNNING_COLUMNS) $($await)*?;
             let [stream, scheme, owner] = <[Value; 3]>::try_from(single(header, "journal header")?)
                 .map_err(|_| Error::History("invalid journal header".into()))?;
@@ -27,7 +28,13 @@ macro_rules! inspect {
 
             Ok(Inspection {
                 exclusion,
-                journal: records(stream, scheme, history, running)?,
+                journal: records(Rows {
+                    stream,
+                    scheme,
+                    history,
+                    coverage,
+                    running,
+                })?,
             })
         }
 

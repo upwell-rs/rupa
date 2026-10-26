@@ -4,8 +4,11 @@ use std::fmt::Debug;
 
 use rupa_core::dialect::DialectId;
 
-use crate::status::Selection;
-use crate::{Catalog, CatalogEntry, Error, HistoryEntry, Order, RevertTarget, RunError, Version};
+mod preflight;
+
+use crate::{Error, RunError, Version};
+
+pub(crate) use preflight::{adopted, schedule, undo};
 
 impl<E: std::error::Error + 'static, M: std::error::Error + 'static, R: Default + Debug>
     RunError<E, M, R>
@@ -44,62 +47,6 @@ impl<E: std::error::Error + 'static, M: std::error::Error + 'static, R: Default 
 
         self
     }
-}
-
-/// The catalog entries an apply runs on a target with `history`, in
-/// version order.
-pub(crate) struct Pending<'c> {
-    /// The entries history does not record.
-    pub(crate) entries: Vec<&'c CatalogEntry>,
-    /// Those below an installed version, which `order` permits.
-    pub(crate) late: Vec<Version>,
-}
-
-/// The pending entries, after checking history against the catalog with the
-/// comparison status uses: every installed artifact is present, unchanged and
-/// recorded once, and nothing pending is late unless `order` permits it.
-pub(crate) fn pending<'c, E: std::error::Error, M>(
-    catalog: &'c Catalog<'_, M>,
-    history: &[HistoryEntry],
-    order: Order,
-) -> Result<Pending<'c>, Error<E>> {
-    let mut blockers = Vec::new();
-    let installed = catalog.compare(history, &mut blockers);
-    let late = order.permit(&mut blockers);
-
-    if !blockers.is_empty() {
-        return Err(Error::Blocked(blockers));
-    }
-
-    let entries = catalog
-        .entries
-        .iter()
-        .filter(|entry| !installed.contains(&entry.version))
-        .collect();
-
-    Ok(Pending { entries, late })
-}
-
-/// The installations a revert to `target` undoes on a target with
-/// `history`, after checking history against the catalog as apply does,
-/// except that late artifacts never block a revert.
-pub(crate) fn undo<'c, E: std::error::Error, M>(
-    catalog: &'c Catalog<'_, M>,
-    history: &[HistoryEntry],
-    target: RevertTarget,
-) -> Result<Selection<'c>, Error<E>> {
-    let mut blockers = Vec::new();
-
-    catalog.compare(history, &mut blockers);
-    Order::AllowLate.permit(&mut blockers);
-
-    let selection = catalog.select(history, target, &mut blockers);
-
-    if !blockers.is_empty() {
-        return Err(Error::Blocked(blockers));
-    }
-
-    Ok(selection)
 }
 
 /// Combines a locked run with its release, never letting a release failure
@@ -234,6 +181,28 @@ macro_rules! mode {
             result
         }
 
+        /// Records `adoption` of the catalog's incrementals through its
+        /// boundary, abandoning the session if the call ends without returning.
+        pub(crate) $($async)* fn adopt<S: Session, M>(
+            session: &mut S,
+            catalog: &crate::Catalog<'_, M>,
+            adoption: &crate::Adoption<'_>,
+        ) -> Result<crate::AdoptReport, crate::Error<S::Error>> {
+            let members = crate::runner::adopted(catalog, adoption)?;
+            let mut guard = RunGuard { session, armed: true };
+            let result = guard
+                .session
+                .adopt(catalog.stream, catalog.scheme, adoption, &members)
+                $($await)*;
+
+            guard.armed = false;
+            result?;
+
+            Ok(crate::AdoptReport {
+                adopted: members.iter().map(|member| member.version).collect(),
+            })
+        }
+
         /// Reads the target without exclusion, abandoning the session if the
         /// call ends without returning.
         pub(crate) $($async)* fn inspect<S: Session>(
@@ -269,14 +238,21 @@ macro_rules! mode {
             report: &mut crate::ApplyReport,
         ) -> Result<(), crate::RunError<S::Error, M::Error>> {
             let history = session.history() $($await)* .map_err(crate::RunError::infrastructure)?;
-            let pending = crate::runner::pending(catalog, &history, options.order)
+            let coverage = session.coverage() $($await)* .map_err(crate::RunError::infrastructure)?;
+            let schedule = crate::runner::schedule(catalog, &history, coverage.as_ref(), options)
                 .map_err(crate::RunError::infrastructure)?;
 
-            for entry in pending.entries {
+            if let Some(snapshot) = schedule.snapshot {
+                attempt(session, catalog, snapshot, crate::Direction::Up) $($await)*?;
+                report.snapshot = Some(snapshot.version);
+                report.covered = snapshot.covers.iter().map(|covered| covered.version).collect();
+            }
+
+            for entry in schedule.entries {
                 attempt(session, catalog, entry, crate::Direction::Up) $($await)*?;
                 report.applied.push(entry.version);
 
-                if pending.late.contains(&entry.version) {
+                if schedule.late.contains(&entry.version) {
                     report.late.push(entry.version);
                 }
             }
@@ -295,7 +271,8 @@ macro_rules! mode {
             report: &mut crate::RevertReport,
         ) -> Result<(), crate::RunError<S::Error, M::Error, crate::RevertReport>> {
             let history = session.history() $($await)* .map_err(crate::RunError::infrastructure)?;
-            let selection = crate::runner::undo(catalog, &history, target);
+            let coverage = session.coverage() $($await)* .map_err(crate::RunError::infrastructure)?;
+            let selection = crate::runner::undo(catalog, &history, coverage.as_ref(), target);
 
             report.remaining = history
                 .iter()

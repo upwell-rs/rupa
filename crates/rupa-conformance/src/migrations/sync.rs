@@ -1,7 +1,7 @@
 //! The cases against `rupa::migrate::sync`.
 
 use rupa::core::sync::Connection;
-use rupa::migrate::sync::{Apply, Inspect, Recover, Revert, Session};
+use rupa::migrate::sync::{Adopt, Apply, Inspect, Recover, Revert, Session};
 
 pub use super::Target;
 use super::{catalog, versions};
@@ -26,6 +26,8 @@ macro_rules! wait {
 #[macro_use]
 #[path = "cases/support.rs"]
 mod support;
+#[path = "cases/adoption.rs"]
+mod adoption;
 #[path = "cases/control.rs"]
 mod control;
 #[path = "cases/exclusion.rs"]
@@ -44,6 +46,8 @@ mod recovery;
 mod reversal;
 #[path = "cases/schema.rs"]
 mod schema;
+#[path = "cases/snapshots.rs"]
+mod snapshots;
 
 /// Runs every case through the sync contracts.
 pub fn run<H: Harness + Sync>(h: &mut H) {

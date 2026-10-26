@@ -4,7 +4,7 @@ use std::future::Future;
 
 use rupa::core::asynchronous::Connection;
 use rupa::core::exec::Blocking;
-use rupa::migrate::asynchronous::{Apply, Inspect, Recover, Revert, Session};
+use rupa::migrate::asynchronous::{Adopt, Apply, Inspect, Recover, Revert, Session};
 
 pub use super::Target;
 use super::{catalog, versions};
@@ -74,6 +74,9 @@ macro_rules! wait {
 mod support {
     include!("cases/support.rs");
 }
+mod adoption {
+    include!("cases/adoption.rs");
+}
 mod control {
     include!("cases/control.rs");
 }
@@ -100,6 +103,9 @@ mod reversal {
 }
 mod schema {
     include!("cases/schema.rs");
+}
+mod snapshots {
+    include!("cases/snapshots.rs");
 }
 
 /// Runs every case through the async contracts.

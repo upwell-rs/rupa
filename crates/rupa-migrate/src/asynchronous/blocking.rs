@@ -2,7 +2,8 @@ use rupa_core::exec::Blocking;
 
 use super::Session;
 use crate::{
-    CatalogEntry, Direction, Error, HistoryEntry, Inspection, Policy, Recovery, VersionScheme, sync,
+    Adoption, CatalogEntry, Coverage, Covered, Direction, Error, HistoryEntry, Inspection, Policy,
+    Recovery, VersionScheme, sync,
 };
 
 /// A sync session driven through the async contracts. Each call runs on the
@@ -21,6 +22,10 @@ impl<S: sync::Session + Send> Session for Blocking<S> {
 
     async fn history(&mut self) -> Result<Vec<HistoryEntry>, Error<S::Error>> {
         self.0.history()
+    }
+
+    async fn coverage(&mut self) -> Result<Option<Coverage>, Error<S::Error>> {
+        self.0.coverage()
     }
 
     async fn inspect(&mut self) -> Result<Inspection, Error<S::Error>> {
@@ -67,6 +72,16 @@ impl<S: sync::Session + Send> Session for Blocking<S> {
         recovery: &Recovery<'_>,
     ) -> Result<(), Error<S::Error>> {
         self.0.recover(stream, scheme, entries, recovery)
+    }
+
+    async fn adopt(
+        &mut self,
+        stream: &str,
+        scheme: VersionScheme,
+        adoption: &Adoption<'_>,
+        members: &[Covered],
+    ) -> Result<(), Error<S::Error>> {
+        self.0.adopt(stream, scheme, adoption, members)
     }
 
     fn abandon(&mut self) {

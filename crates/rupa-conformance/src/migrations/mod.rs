@@ -61,6 +61,21 @@ macro_rules! all_cases {
                 case_a_declared_down_without_a_body_rolls_back,
                 case_an_uncertain_down_is_recovered_like_an_up,
             ],
+            snapshots: [
+                case_a_fresh_target_runs_the_snapshot_then_the_tail,
+                case_the_target_version_selects_the_snapshot_and_replay_skips_it,
+                case_a_managed_target_never_runs_a_newer_snapshot,
+                case_snapshot_and_replay_reach_the_same_state,
+                case_work_added_at_or_below_a_snapshot_is_uncovered,
+                case_covered_sources_must_stay_unchanged_and_present,
+                case_a_revert_stops_at_the_snapshot_boundary,
+                case_an_uncertain_snapshot_is_recovered_never_replayed,
+            ],
+            adoption: [
+                case_an_unmanaged_target_is_adopted_without_running_bodies,
+                case_adoption_needs_an_unmanaged_target_a_reason_and_coverage,
+                case_an_adopted_boundary_refuses_uncovered_work_and_deeper_reverts,
+            ],
             schema: [
                 case_planned_schema_creates_entity_tables,
                 case_changed_plan_is_reported_as_changed_history,
@@ -70,6 +85,7 @@ macro_rules! all_cases {
             exclusion: [
                 case_owner_excludes_competitors_between_commits,
                 case_concurrent_first_runners_execute_once,
+                case_concurrent_fresh_runners_run_a_snapshot_once,
                 case_apply_takes_and_closes_a_native_connection,
             ],
             recovery: [

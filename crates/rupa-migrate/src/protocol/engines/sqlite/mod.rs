@@ -4,6 +4,7 @@
 //! transaction. User statements run under [`authorize`], installed through
 //! the driver's `SqliteIo` (in `protocol::sync` or `protocol::asynchronous`).
 
+mod coverage;
 mod inspect;
 mod recovery;
 pub mod sql;

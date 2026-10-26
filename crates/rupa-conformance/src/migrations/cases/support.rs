@@ -1,15 +1,32 @@
 use rupa::core::dialect::{Dialect, DialectId};
 use rupa::migrate::{
-    ApplyOptions, Blocker, Error, Order, Policy, RunError, Version, VersionScheme,
+    ApplyOptions, Blocker, Error, Init, Order, Policy, RunError, Version, VersionScheme,
 };
 
 use super::{Connection, Harness, Session};
-use crate::migrations::fixture::{Body, planned_with, reversible, with_policy};
+use crate::migrations::fixture::{Body, planned_with, reversible, snapshot, with_policy};
 
 /// Permission to run late artifacts.
 pub(super) const ALLOW_LATE: ApplyOptions = ApplyOptions {
     order: Order::AllowLate,
+    ..ApplyOptions::DEFAULT
 };
+
+/// An apply through `text`, preferring a snapshot on a fresh target.
+pub(super) fn through(text: &str) -> ApplyOptions {
+    ApplyOptions {
+        through: Some(version(text)),
+        ..ApplyOptions::DEFAULT
+    }
+}
+
+/// An apply through `text` that replays incrementals, never a snapshot.
+pub(super) fn replay(text: &str) -> ApplyOptions {
+    ApplyOptions {
+        init: Init::FullReplay,
+        ..through(text)
+    }
+}
 
 /// A numbered version.
 pub(super) fn version(text: &str) -> Version {
@@ -64,6 +81,11 @@ pub(super) fn policy<H: Harness>() -> Policy {
 /// A script fixture under the session's default policy.
 pub(super) fn script<H: Harness>(version: &'static str, sql: &'static str) -> Body {
     with_policy(version, sql, policy::<H>())
+}
+
+/// A snapshot script fixture under the session's default policy.
+pub(super) fn snapshot_of<H: Harness>(version: &'static str, sql: &'static str) -> Body {
+    snapshot(version, sql, policy::<H>())
 }
 
 /// A reversible script fixture under the session's default policy.

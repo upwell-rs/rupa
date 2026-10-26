@@ -3,7 +3,12 @@ use crate::{Error, Version};
 /// Successfully committed versions from one explicit invocation.
 #[derive(Debug, Default)]
 pub struct ApplyReport {
-    /// Versions executed in actual installation order.
+    /// The snapshot executed to initialize a fresh target, if one was.
+    pub snapshot: Option<Version>,
+    /// The incrementals that snapshot covers, in version order. None of
+    /// their bodies ran.
+    pub covered: Vec<Version>,
+    /// Incremental versions executed in actual installation order.
     pub applied: Vec<Version>,
     /// The applied versions that ran late, below an installed version, by
     /// explicit [`Order::AllowLate`](crate::Order::AllowLate) permission.

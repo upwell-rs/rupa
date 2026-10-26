@@ -1,6 +1,6 @@
 use rupa::migrate::{
-    Blocker, Catalog, Error, Metadata, MigrationKind, Plan, Planned, Policy, RunError, ScriptError,
-    ValidationError, VersionScheme,
+    Blocker, Catalog, Error, Plan, Planned, Policy, RunError, ScriptError, ValidationError,
+    VersionScheme,
 };
 
 use super::support::{planned, script, supports, transactional};
@@ -200,15 +200,10 @@ pub(super) fn case_version_scheme_cannot_change<H: Harness>(h: &mut H) {
 
 pub(super) fn case_unsupported_policy_is_rejected_before_bootstrap<H: Harness>(h: &mut H) {
     let sql = "CREATE TABLE forbidden (id INTEGER);";
-    let snapshot = Body(Box::leak(Box::new(Metadata {
-        kind: MigrationKind::Snapshot,
-        ..*script::<H>("1", sql).0
-    })));
     let unsupported = [Policy::TransactionalRequired, Policy::NonTransactional]
         .into_iter()
         .filter(|policy| !supports::<H>(*policy))
-        .map(|policy| with_policy("1", sql, policy))
-        .chain([snapshot]);
+        .map(|policy| with_policy("1", sql, policy));
 
     for entry in unsupported {
         let entries = [entry];
@@ -221,8 +216,7 @@ pub(super) fn case_unsupported_policy_is_rejected_before_bootstrap<H: Harness>(h
                     ..
                 })
             ),
-            "{:?} {:?} must be rejected",
-            entry.0.kind,
+            "{:?} must be rejected",
             entry.0.policy
         );
         assert!(!h.table_exists("_rupa_migrations"));

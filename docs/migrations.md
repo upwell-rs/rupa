@@ -92,14 +92,23 @@ db::migrations::catalog()?.apply(SqliteExecutor::open("app.db")?)?;
 | `0002_normalize_titles.rs` | Scripted Rust migration; exports a unit struct `NormalizeTitles` implementing `Migration<S>` |
 | `0003_add_slugs/mod.rs` (+ helpers) | Scripted Rust migration whose private helper files are part of its checksum |
 | `0004_create_tags.rs` | Planned Rust migration; `CreateTags` implements `PlannedMigration` |
+| `snapshots/0003_notes_with_slugs.sql` | [Snapshot](#initializing-from-a-snapshot) at version `3`; `0003_notes_with_slugs.snapshot.sql` beside the incrementals is the same |
+| `down/0001_create_notes.sql` | Down script of `0001_create_notes.sql`, the same as `0001_create_notes.down.sql` |
 
-A `.down.sql` file pairs with the SQL migration of the same version and name,
+A down script lives beside its migration as `.down.sql` or in `down/` with
+the migration's own file name; giving one migration both fails the build. It
+pairs with the SQL migration of the same version and name,
 and both files are inputs of one artifact, so editing either changes its
 checksum. It may start with a description header, but not with frontmatter:
 the migration's settings apply to both directions. A down file without its SQL
 migration, or beside a Rust migration (which declares `down` in code), fails
 the build. A scripted Rust migration is reversible when its `Migration` impl
 defines `down`, and a planned one when its `PlannedMigration` impl does.
+
+A snapshot is any migration shape (SQL, single-file Rust or directory) either
+in `snapshots/` or named `.snapshot.sql` or `.snapshot.rs`. Its version may be
+that of an incremental, but two snapshots may not share one, and a snapshot
+has no down script.
 
 Leading zeros are dropped for numbered versions, so `1_a.sql` and `001_b.sql`
 collide at build time. Leading `--` (SQL) or `//!` (Rust) lines are the
@@ -255,15 +264,19 @@ closed, which on PostgreSQL rolls back the open transaction and releases the
 lock; the journaled attempt stays running and blocks the next apply until it is
 reconciled. Nothing an abandoned transactional body did is committed.
 
-The apply path is strict: incremental migrations only, with the policies the
-session supports (`Session::POLICIES`). An unsupported policy or kind is
-rejected before initialization and is never downgraded: SQLite runs
-`TransactionalRequired` only, PostgreSQL also `NonTransactional`, and MySQL
-`NonTransactional` only, because it commits DDL implicitly. A nonempty unmanaged
-target is refused; absence of a history table is not proof of freshness.
-Changed or missing applied artifacts and late arrivals block pending work
-with `Error::Blocked`, whose `Blocker`s name each artifact. There is no silent
-reordering, checksum replacement or automatic body retry.
+The apply path is strict: only the policies the session supports
+(`Session::POLICIES`). An unsupported policy is rejected before
+initialization and is never downgraded: SQLite runs `TransactionalRequired`
+only, PostgreSQL also `NonTransactional`, and MySQL `NonTransactional` only,
+because it commits DDL implicitly. A nonempty unmanaged target is refused
+until it is [adopted](#adopting-an-existing-database); absence of a history
+table is not proof of freshness. Changed or missing applied artifacts, late
+arrivals and uncovered artifacts block pending work with `Error::Blocked`,
+whose `Blocker`s name each artifact. There is no silent reordering, checksum
+replacement or automatic body retry.
+
+`ApplyOptions::through` stops an apply at a version: later versions stay
+pending, and a late version above it is left pending rather than refused.
 
 ### Late artifacts
 
@@ -275,7 +288,7 @@ both orders are correct can permit it for one run:
 ```rust,ignore
 use rupa::migrate::{ApplyOptions, Order, sync::{Apply, Inspect}};
 
-let options = ApplyOptions { order: Order::AllowLate };
+let options = ApplyOptions { order: Order::AllowLate, ..ApplyOptions::DEFAULT };
 
 let plan = catalog.plan_with(connect()?, &options)?;  // plan.late == [101]
 let report = catalog.apply_with(connect()?, &options)?;
@@ -290,8 +303,52 @@ blocker. Once installed, it is no longer late. The permission is per run, not
 per artifact: it makes the operator acknowledge the target's actual order. The
 engine cannot prove two migrations commute; their author answers for both
 orders. It lifts only `Blocker::Late`. Missing, changed and duplicate history,
-interrupted or unresolved attempts, and another stream or scheme still refuse
-the run.
+interrupted or unresolved attempts, uncovered artifacts, and another stream or
+scheme still refuse the run.
+
+### Initializing from a snapshot
+
+A snapshot creates, on a fresh target, the state of every incremental at or
+below its version, so a new database need not replay the whole history. The
+catalog derives its coverage manifest, every such incremental with its
+checksum, and makes it part of the snapshot's checksum: editing a covered
+incremental, or adding one at or below the snapshot's version, changes the
+snapshot. Adding one above it does not.
+
+On a target that records no installation and no coverage, `apply` runs the
+newest snapshot at or below `ApplyOptions::through` (or the newest of all),
+records its manifest as covered, and then runs only the incrementals above
+it. Without an eligible snapshot it replays the incrementals.
+`Init::FullReplay` always replays them, for operators and for equivalence
+tests:
+
+```rust,ignore
+use rupa::migrate::{ApplyOptions, Init, sync::Apply};
+
+let report = catalog.apply(connect()?)?;
+assert_eq!(report.snapshot, Some(v3));      // ran snapshot 3
+assert_eq!(report.covered, [v1, v2, v3]);   // recorded, never run
+assert_eq!(report.applied, [v4]);           // the tail
+
+let replay = ApplyOptions { init: Init::FullReplay, ..ApplyOptions::DEFAULT };
+catalog.apply_with(connect()?, &replay)?;   // runs 1, 2, 3 and 4
+```
+
+A snapshot never runs on a managed target, even if it is newer than
+everything installed: it describes how to create a database, not how to
+change one. Covered incrementals are not installations. History lists only
+what ran, and `status` reports the claim as `Status::coverage`: its boundary,
+the snapshot's installation rank and checksum, and the covered versions with
+the checksums they stood for. The snapshot and its coverage commit with the
+snapshot's completion. Two runners on one fresh target serialize, and the
+second finds it managed. The covered sources stay in the catalog: a missing
+or changed covered incremental or snapshot blocks every later run. A snapshot
+is not permission to delete its source chain.
+
+An incremental added later at or below the boundary is not covered:
+`Blocker::Uncovered` refuses every run, whatever the order permission, and
+names the artifact and the boundary. Write a corrective migration above the
+boundary instead.
 
 ## Reverting
 
@@ -323,7 +380,11 @@ exclusion as `apply`. History must match the catalog (missing, changed and
 duplicate artifacts refuse a revert as they refuse an apply), and every
 selected installation needs a down body: one without refuses the whole revert
 with `Blocker::Irreversible`. Late artifacts never block a revert. Interrupted
-and unresolved attempts do.
+and unresolved attempts do, and so do uncovered artifacts. A revert reaches a
+snapshot or adoption boundary but never crosses it: the covered incrementals
+never ran individually, so a version target below the boundary is refused
+with `Blocker::Boundary`. Reverting the tail keeps the coverage, so the next
+apply runs the tail again, not the snapshot.
 
 Each down body runs as its own journaled attempt under the artifact's policy,
 and commits on its own. A later failure keeps the earlier undos: the
@@ -339,6 +400,35 @@ declares it with `MigrationInfo::reversal` returning `Reversal::Imperative`. If
 it declares a down body that its impl does not provide, the revert fails with
 `Error::MissingDown` and rolls the attempt back. A down body is not a promise
 to restore deleted data, only to undo what its migration did to the schema.
+
+## Adopting an existing database
+
+A database that already holds the schema, created before Rupa managed it or
+restored from elsewhere, is unmanaged: `apply` refuses it. Adoption records,
+on the operator's assertion, that it is equivalent to every incremental at or
+below a version. It executes no body and proves nothing for you: compare the
+schema and required data first.
+
+```rust,ignore
+use rupa::migrate::{Adoption, sync::Adopt};
+
+let adoption = Adoption::new(v2, "restored from the legacy schema")
+    .with_evidence("schema diff in INC-1234");
+let report = catalog.adopt(connect()?, &adoption)?;  // report.adopted == [1, 2]
+
+catalog.apply(connect()?)?;                           // runs only 3 and later
+```
+
+Under the same exclusion as `apply`, adoption creates the journal with an
+`adopt` event holding the reason and evidence and the adopted incrementals as
+covered, in one transaction (on MySQL, after the journal's implicitly
+committed creation). It refuses with a typed `AdoptionError` when there is no
+reason, when no incremental is at or below the version, when the target is
+fresh (`apply` creates its schema instead), and when it already has a journal:
+a managed target is never adopted again, and adoption never settles an
+uncertain attempt. After adoption the target is managed: the same coverage
+rules as a snapshot apply, so a later incremental at or below the boundary is
+uncovered, and no revert crosses the boundary.
 
 ## Inspecting a target
 
@@ -359,7 +449,7 @@ let plan = catalog.plan(connect()?)?;
 ```
 
 `validate` runs the checks `apply` runs before it touches a target: supported
-kinds and policies, planned scripts that pass the engine's grammar, and schema
+policies, planned scripts that pass the engine's grammar, and schema
 operations that render for it.
 
 `status` classifies the target as `Fresh`, `Managed`, `Unmanaged` or
@@ -378,17 +468,19 @@ concerns:
 | `Unresolved(attempt)` | stop with `Error::Uncertain` until it is [recovered](#recovery) |
 | `Missing`, `Changed`, `Duplicate` | refuse history that no longer matches the catalog (`Error::Blocked`) |
 | `Late` | refuse a version below an installed one, unless the run [allows late work](#late-artifacts) |
+| `Uncovered` | refuse an incremental at or below the coverage boundary that the claim does not list |
 
-A [revert plan](#reverting) adds its own: `Irreversible`, `Interleaved` and
-`Exceeds`.
+A [revert plan](#reverting) adds its own: `Irreversible`, `Interleaved`,
+`Exceeds` and `Boundary`.
 
 `apply` runs the pending entries only when there are no blockers. While a
 runner is live, its running attempts are listed but not reported as
 blockers, since they may be in progress.
 
-`plan` returns the status and one `Step` per pending entry, in the order
-`apply` runs them (`plan_with` takes the same `ApplyOptions` as `apply_with`): the entry's version, checksum and policy, and its
-`Execution`. A planned body is `Static`, with its exact scripts rendered
+`plan` returns the status and one `Step` per entry `apply` would run, in
+order, a selected snapshot first (`plan_with` takes the same `ApplyOptions`
+as `apply_with`), and in `covered` what that snapshot covers. A step holds
+the entry's version, checksum, kind and policy, and its `Execution`. A planned body is `Static`, with its exact scripts rendered
 for the session's dialect. A Rust body is `Opaque` until it runs.
 
 The engines read inside a snapshot the server refuses to write through
@@ -488,12 +580,14 @@ Its definition per engine, with every row kind and status explained, is in
 fresh target, so they always describe the real table.
 
 One `init` row records the stream, version scheme and checksum format. Each
-attempt is an `up` row, or a `down` row naming the installation it `undoes`,
-journaled `running` before its body starts and finished as `applied`, `failed`,
-`rolled_back`, `recovered` or `abandoned`. Installed history is the applied and
-recovered `up` rows that no applied or recovered `down` row undoes; an
-installation rank is the row's id, so ranks increase in installation order but
-are not consecutive. The
+attempt is an `up` row, a `snapshot` row, or a `down` row naming the
+installation it `undoes`, journaled `running` before its body starts and
+finished as `applied`, `failed`, `rolled_back`, `recovered` or `abandoned`.
+Installed history is the applied and recovered `up` rows that no applied or
+recovered `down` row undoes; an installation rank is the row's id, so ranks
+increase in installation order but are not consecutive. A completed snapshot,
+or an `adopt` event, has one `covered` row per incremental it covers, naming
+it in `covered_by`. The
 journal's columns, the header and the stream, scheme and checksum format must
 match before managed execution. Incompatible same-named objects are never
 replaced.
@@ -631,7 +725,8 @@ catalog.recover(connect()?, &release)?;
 ```
 
 The reason and evidence are stored on the attempt's journal row; a released
-claim appends a `claim_released` row. `Completed` requires the catalog's
+claim appends a `claim_released` row. Completing an uncertain snapshot attempt
+also records its coverage, as its own completion would have. `Completed` requires the catalog's
 artifact to have the checksum the attempt ran. `Restored` does not, so a
 corrected artifact may replace it. Recovery refuses with a typed
 `RecoveryError` when there is no reason, the attempt is unknown or already
@@ -641,7 +736,6 @@ incorrect assertion is the operator's responsibility: check the database
 effects, and that the old runner is stopped, before asserting anything. Never
 edit the journal by hand.
 
-Dynamic (registry) sessions, transactional work on MySQL,
-nontransactional work on SQLite and snapshots/adoption are not yet
-implemented. Their accepted
+Dynamic (registry) sessions, transactional work on MySQL and
+nontransactional work on SQLite are not yet implemented. Their accepted
 design is in [the migration contract](design/migrations-contract.md).

@@ -29,7 +29,7 @@ pub enum Error {
     Symlink(PathBuf),
     /// The entry does not follow the migration naming grammar.
     #[error(
-        "{0}: expected `<version>_<snake_name>.sql`, `<version>_<snake_name>.down.sql`, `<version>_<snake_name>.rs` or a `<version>_<snake_name>/` directory containing `mod.rs`"
+        "{0}: expected `<version>_<snake_name>` as a `.sql`, `.down.sql`, `.snapshot.sql`, `.rs` or `.snapshot.rs` file or a directory containing `mod.rs`; `snapshots/` holds `.sql`, `.rs` and directory snapshots, and `down/` holds `.sql` down scripts"
     )]
     Name(PathBuf),
     /// The migration type implements both `Migration` and `PlannedMigration`.
@@ -56,6 +56,9 @@ pub enum Error {
     /// body in code.
     #[error("{0}: a Rust migration declares its down body in code, not in a `.down.sql` file")]
     RustDown(PathBuf),
+    /// A down script for a snapshot, which is never undone.
+    #[error("{0}: a snapshot has no down script; it is never undone")]
+    SnapshotDown(PathBuf),
     /// A `.down.sql` file declares frontmatter; its migration's settings apply.
     #[error("{0}: a down file cannot declare `rupa:` frontmatter; its migration's settings apply")]
     DownFrontmatter(PathBuf),
