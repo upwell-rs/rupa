@@ -11,12 +11,6 @@ fn user_objects_in_main_are_allowed() {
         Some("notes"),
         Some("main")
     ));
-    assert!(authorize(
-        ALTER_TABLE,
-        Some("main"),
-        Some("notes"),
-        Some("main")
-    ));
     assert!(authorize(FUNCTION, None, Some("lower"), None));
     assert!(authorize(SELECT, None, None, None));
 }
@@ -51,6 +45,22 @@ fn reserved_objects_are_refused_in_any_case() {
         ALTER_TABLE,
         Some("main"),
         Some("_rupa_migrations"),
+        None
+    ));
+}
+
+#[test]
+fn alter_table_names_its_database_first_and_a_dropped_column_last() {
+    assert!(authorize(ALTER_TABLE, Some("main"), Some("notes"), None));
+    assert!(
+        authorize(ALTER_TABLE, Some("main"), Some("notes"), Some("slug")),
+        "DROP COLUMN passes the column where other actions pass the database"
+    );
+    assert!(!authorize(ALTER_TABLE, Some("temp"), Some("notes"), None));
+    assert!(!authorize(
+        ALTER_TABLE,
+        Some("aux"),
+        Some("notes"),
         Some("main")
     ));
 }
