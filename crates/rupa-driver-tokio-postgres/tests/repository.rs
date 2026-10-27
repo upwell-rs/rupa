@@ -9,7 +9,7 @@ use rupa_driver_tokio_postgres::PgExecutor;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
-#[repository(dynamic_dispatch)]
+#[repository]
 pub trait Notes: Send + Sync {
     #[query(filter = pinned == $pinned, order_by = id)]
     async fn pinned(&self, pinned: bool) -> Result<Vec<Note>, DynError>;

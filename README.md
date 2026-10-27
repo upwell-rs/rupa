@@ -31,7 +31,7 @@ struct User {
 #[insertable(entity = User)]
 struct NewUser { email: String, prefs: Prefs }
 
-#[repository]                           // native, unboxed futures
+#[repository]                           // dyn-compatible: inject Arc<dyn UserRepository>
 pub trait UserRepository: Send + Sync {
     #[query(filter = email == $email)]
     async fn by_email(&self, email: &str) -> Result<Option<User>, rupa::DynError>;
@@ -55,8 +55,9 @@ let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&mut 
 let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&mut pg).await?;   // async
 ```
 
-Async repository futures are unboxed by default. Use
-`#[repository(dynamic_dispatch)]` when a trait must support `dyn Trait`.
+Repository traits are dyn-compatible by default, so they can be injected as
+`Arc<dyn Trait>`. Use `#[repository(static_dispatch)]` for native, unboxed
+futures when the trait is only used through its generated `Repo`/`View` types.
 Repositories open native transactions with `begin` and `begin_with_security`;
 exclusive `&mut self` queries borrow those transactions directly. Shared
 `&self` transaction views use an explicit `TxSession` or `AsyncTxSession`.

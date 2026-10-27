@@ -32,6 +32,16 @@ pub use shared::{Shared, SharedConn};
 pub use shared::{SharedAsync, SharedAsyncConn};
 pub use transactions::TransactionSource;
 
+/// A repository trait object that can be built over a connection source `S`.
+///
+/// `#[repository]` implements it for `dyn Trait` of every dyn-compatible
+/// repository, so DI integrations can provide `Arc<dyn Trait>` over their
+/// pools without naming the generated repository types.
+pub trait DynRepository<S> {
+    /// The repository over `source`.
+    fn over(source: S) -> std::sync::Arc<Self>;
+}
+
 /// A source of sync connections, used through `&self`.
 pub trait Acquire: Send + Sync {
     /// The connections' dialect.

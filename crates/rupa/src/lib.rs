@@ -73,9 +73,9 @@ pub use rupa_core::security::{SecureTransactional, SecureTx, SecurityContext};
 pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional};
 pub use rupa_core::tx::{IsolationLevel, Transaction, Transactional, TxOptions};
 pub use rupa_core::{
-    Acquire, Column, Deletable, Entity, Executor, Expr, ExprOps, FromRow, Gettable, Insertable,
-    Json, NoKey, Query, Repo, RepoMut, RepoView, Scalar, Shared, TxSession, Updatable, bind,
-    delete, get, insert, raw, select, update,
+    Acquire, Column, Deletable, DynRepository, Entity, Executor, Expr, ExprOps, FromRow, Gettable,
+    Insertable, Json, NoKey, Query, Repo, RepoMut, RepoView, Scalar, Shared, TxSession, Updatable,
+    bind, delete, get, insert, raw, select, update,
 };
 #[cfg(feature = "async")]
 pub use rupa_core::{AcquireAsync, AsyncExecutor, SharedAsync};

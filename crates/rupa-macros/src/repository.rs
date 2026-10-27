@@ -11,9 +11,12 @@
 //! - **Errors.** Methods return `Result<R, E>`; the implementation requires
 //!   `E: From<rupa::DynError>`.
 //!
-//! Async methods return unboxed `impl Future + Send` by default.
-//! `#[repository(dynamic_dispatch)]` opts into boxed futures for callers
-//! that need a dyn-compatible trait such as `Arc<dyn Trait>`.
+//! Every repository is dyn-compatible by default: async methods return boxed
+//! futures, so the trait works as `Arc<dyn Trait>` (which Upwell injects),
+//! and `dyn Trait` can be built over any matching source through
+//! `DynRepository`. `#[repository(static_dispatch)]` opts into unboxed
+//! `impl Future + Send` methods instead; such a trait is used through its
+//! generated `Repo`/`View` types, not as a trait object.
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote, quote_spanned};
@@ -161,15 +164,15 @@ fn result_parts(ty: &Type) -> Option<(Type, Type)> {
 
 /// Whether the trait uses native, unboxed futures.
 fn parse_options(args: TokenStream) -> syn::Result<bool> {
-    let mut static_dispatch = true;
+    let mut static_dispatch = false;
     let parser = syn::meta::parser(|m| {
-        if m.path.is_ident("dynamic_dispatch") {
-            static_dispatch = false;
+        if m.path.is_ident("static_dispatch") {
+            static_dispatch = true;
 
             return Ok(());
         }
 
-        Err(m.error("unknown `repository` option; expected `dynamic_dispatch`"))
+        Err(m.error("unknown `repository` option; expected `static_dispatch`"))
     });
 
     syn::parse::Parser::parse2(parser, args)?;
@@ -431,6 +434,18 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
         .map(|m| method_impl(&tr, m, access, &ms, static_dispatch))
         .collect::<syn::Result<Vec<_>>>()?;
     let trait_ident = &tr.ident;
+    let dyn_repository = (!static_dispatch).then(|| {
+        quote! {
+            impl<__S> #ms::DynRepository<__S> for dyn #trait_ident
+            where
+                #ms::Repo<__S, #key, #mode>: #trait_ident + 'static,
+            {
+                fn over(source: __S) -> ::std::sync::Arc<Self> {
+                    ::std::sync::Arc::new(#ms::Repo::<__S, #key, #mode>::new(source))
+                }
+            }
+        }
+    });
 
     Ok(quote! {
         #tr
@@ -452,6 +467,8 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
         {
             #(#impl_fns)*
         }
+
+        #dyn_repository
     })
 }
 

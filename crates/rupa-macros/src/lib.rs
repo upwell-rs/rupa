@@ -126,8 +126,8 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// ```
 ///
 /// See the `rupa_macros::repository` module docs for the rules on receivers,
-/// sync/async methods, errors and optional `dynamic_dispatch`.
-/// Async methods use unboxed futures by default.
+/// sync/async methods, errors and the optional `static_dispatch`. Async methods
+/// return boxed futures by default, so the trait is dyn-compatible.
 ///
 /// Keep the trait so code using it still resolves; only the
 /// macro's own error is reported.
