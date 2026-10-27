@@ -2,25 +2,64 @@ use std::error::Error;
 use std::io::Write as _;
 use std::process::ExitCode;
 
+use rupa_core::error::ConnectError;
 use rupa_migrate::ValidationError;
 use rupa_migrate::commands::Exit;
-use upwell_app::CliError;
-use upwell_config::ConfigError;
+use upwell::{CliError, ConfigError};
+
+use super::SettingsError;
+
+/// Why a declared database could not be built at startup.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum DatabaseError {
+    /// The configuration cannot produce a connection.
+    #[error(transparent)]
+    Settings(#[from] SettingsError),
+    /// The migration catalog is invalid.
+    #[error("invalid migration catalog: {0}")]
+    Catalog(#[from] ValidationError),
+    /// The runtime pool could not be opened.
+    #[error(transparent)]
+    Connect(#[from] ConnectError),
+    /// `startup = "check"` found migrations that are not installed yet.
+    #[error(
+        "database `{database}` has {pending} pending migration(s); apply them with the migration command or set `migrations.startup = \"apply\"`\n{report}"
+    )]
+    Pending {
+        /// The declared database.
+        database: &'static str,
+        /// How many migrations are pending.
+        pending: usize,
+        /// The status report.
+        report: String,
+    },
+    /// The migration check or apply did not succeed.
+    #[error("database `{database}` migrations ended with status {}\n{report}", .exit.as_str())]
+    Migrations {
+        /// The declared database.
+        database: &'static str,
+        /// The command's exit status.
+        exit: Exit,
+        /// The command's report.
+        report: String,
+    },
+}
 
 /// Why a migration command did not succeed.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum CommandError {
-    /// The target's configuration could not be read.
-    #[error("cannot read the migration target configuration at `{path}`: {source}")]
+    /// The database's configuration could not be read.
+    #[error("cannot read the database configuration at `{path}`: {source}")]
     Config {
-        /// The target's configuration path.
+        /// The database's configuration path.
         path: &'static str,
         /// The cause.
         #[source]
         source: ConfigError,
     },
-    /// The target's catalog is invalid.
+    /// The migration catalog is invalid.
     #[error("invalid migration catalog: {0}")]
     Catalog(#[from] ValidationError),
     /// The command ran and printed an outcome that was not a success.

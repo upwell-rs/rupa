@@ -3156,11 +3156,12 @@ dependencies = [
 name = "rupa-upwell"
 version = "0.1.0"
 dependencies = [
+ "rupa-core",
  "rupa-migrate",
  "serde",
+ "serde_json",
  "thiserror",
- "upwell-app",
- "upwell-config",
+ "upwell",
 ]
 
 [[package]]
