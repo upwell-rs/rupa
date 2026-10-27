@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use rupa::DynError;
-use rupa::core::exec::Executor;
 use rupa::dsl::{self, DslError, Expr, Value};
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
@@ -68,7 +67,11 @@ fn db() -> MemoryDb {
             beta,
         },
     });
-    db.run(insert::<User>().values(&users).affected()).unwrap();
+    insert::<User>()
+        .values(&users)
+        .affected()
+        .execute(&mut db)
+        .unwrap();
     db
 }
 

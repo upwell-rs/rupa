@@ -1,6 +1,5 @@
 //! Native row-level security with the sync driver.
 
-use rupa::core::exec::Executor;
 use rupa::core::tx::TxConnection;
 use rupa::core::tx::{Transaction, TxOptions};
 use rupa::prelude::*;
@@ -53,7 +52,7 @@ fn native_row_level_security_sync() {
     let mut tx = db
         .begin_with_security(TxOptions::default(), tenant(1))
         .unwrap();
-    let docs = tx.run(select::<Doc>().all()).unwrap();
+    let docs = select::<Doc>().all().execute(&mut tx).unwrap();
     assert_eq!(
         docs.iter().map(|d| d.title.as_str()).collect::<Vec<_>>(),
         ["a1"]
@@ -63,7 +62,13 @@ fn native_row_level_security_sync() {
         tenant_id: 2,
         title: "x".into(),
     };
-    assert!(tx.run(insert::<Doc>().value(&foreign).affected()).is_err());
+    assert!(
+        insert::<Doc>()
+            .value(&foreign)
+            .affected()
+            .execute(&mut tx)
+            .is_err()
+    );
     tx.rollback().unwrap();
 
     // Dropped: rolled back on the spot (sync), and the connection is clean.
@@ -72,5 +77,5 @@ fn native_row_level_security_sync() {
             .unwrap(),
     );
     assert!(!db.is_dirty());
-    assert_eq!(db.run(select::<Doc>().all()).unwrap().len(), 2);
+    assert_eq!(select::<Doc>().all().execute(&mut db).unwrap().len(), 2);
 }

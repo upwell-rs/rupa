@@ -117,7 +117,7 @@ impl MySqlExecutor {
     /// `exec*` prepares through the connection's statement cache.
     ///
     /// Dropping the iterator drains the remaining rows.
-    fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, MySqlError> {
+    fn dispatch(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, MySqlError> {
         self.clean()?;
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let params = if rendered.params.is_empty() {
@@ -177,7 +177,7 @@ impl Executor for MySqlExecutor {
             return self.execute_migration_statement(statement, expect);
         }
 
-        self.run(statement, expect)
+        self.dispatch(statement, expect)
     }
 }
 

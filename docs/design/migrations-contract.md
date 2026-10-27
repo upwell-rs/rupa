@@ -113,12 +113,12 @@ Catalog execution entry: Planned(AddIndex)
 Imperative Rust module:
     pub struct NormalizeTitles;
     impl Migration<S> for NormalizeTitles:
-        rows = context.run(typed_select_notes)?
+        rows = typed_select_notes.execute(context)?
         for row in rows:
             title = normalize_in_rust(row.title)
-            context.run(typed_update_title(row.id, title))?
+            typed_update_title(row.id, title).execute(context)?
 Catalog execution entry: NormalizeTitles
-Async variant explicitly implements AsyncMigration<S> and awaits context.run.
+Async variant explicitly implements AsyncMigration<S> and awaits each execute.
 ```
 
 `Planned<T>` has one execution error type wrapping a driver/session error and

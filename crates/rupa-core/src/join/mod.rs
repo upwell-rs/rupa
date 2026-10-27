@@ -10,7 +10,7 @@
 //!     .left_join_on::<Order>(|(u, o)| o.col(Order::USER_ID).eq(u.col(User::ID)))
 //!     .filter(|(u, _)| u.col(User::ACTIVE).eq(true))
 //!     .all()
-//!     .run(&mut db)?;
+//!     .execute(&mut db)?;
 //! ```
 //!
 //! `on!(Order::user_id == User::id)` writes the same closure: it finds each

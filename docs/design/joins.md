@@ -109,7 +109,7 @@ let rows: Vec<(User, Option<Order>)> = select::<User>()
     .filter(|(u, _)| u.col(col!(User::active)).eq(true))
     .order_by(|(_, o)| o.col(col!(Order::placed_at)).desc())
     .all()
-    .run(&mut db)?;
+    .execute(&mut db)?;
 ```
 
 - **Join builder type.** `left_join_on`/`inner_join_on` turn `SelectBuilder<User>`
@@ -286,7 +286,7 @@ let lines: Vec<OrderLine> = select::<Order>()
     .filter(on!(Order::total > 100))
     .into::<OrderLine>()
     .all()
-    .run(&mut db)?;
+    .execute(&mut db)?;
 ```
 
 - **Read-only.** A `Joined` struct belongs to the repository side. It isn't an

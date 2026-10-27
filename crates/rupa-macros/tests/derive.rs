@@ -1,7 +1,6 @@
 //! Derived entities and capabilities, end to end on the memory backend.
 
 use chrono::{DateTime, Utc};
-use rupa::core::exec::Executor;
 use rupa::core::{ColumnKind, Entity as _, Generated, SqlType, Value};
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
@@ -139,15 +138,15 @@ fn entity_metadata() {
 #[test]
 fn companion_insert_returns_generated_values() {
     let mut db = db();
-    let ada: User = db
-        .run(insert::<User>().value(&new_user("ada@x")).returning_one())
+    let ada: User = insert::<User>()
+        .value(&new_user("ada@x"))
+        .returning_one()
+        .execute(&mut db)
         .unwrap();
-    let both: Vec<User> = db
-        .run(
-            insert::<User>()
-                .values(&[new_user("b@x"), new_user("c@x")])
-                .returning_all(),
-        )
+    let both: Vec<User> = insert::<User>()
+        .values(&[new_user("b@x"), new_user("c@x")])
+        .returning_all()
+        .execute(&mut db)
         .unwrap();
     assert_eq!(ada.id, 1);
     assert_eq!(
@@ -173,8 +172,10 @@ fn one_model_insert_skips_generated_columns() {
         raw_label: "l".into(),
         version: 0, // ignored: generated
     };
-    let saved = db
-        .run(insert::<User>().value(&draft).returning_one())
+    let saved = insert::<User>()
+        .value(&draft)
+        .returning_one()
+        .execute(&mut db)
         .unwrap();
     assert_eq!(
         saved,
@@ -189,19 +190,37 @@ fn one_model_insert_skips_generated_columns() {
 #[test]
 fn get_update_and_delete() {
     let mut db = db();
-    let mut user = db
-        .run(insert::<User>().value(&new_user("ada@x")).returning_one())
+    let mut user = insert::<User>()
+        .value(&new_user("ada@x"))
+        .returning_one()
+        .execute(&mut db)
         .unwrap();
-    db.run(insert::<User>().value(&new_user("bob@x")).affected())
+    insert::<User>()
+        .value(&new_user("bob@x"))
+        .affected()
+        .execute(&mut db)
         .unwrap();
 
-    assert_eq!(db.run(get::<User>(&1)).unwrap().as_ref(), Some(&user));
-    assert_eq!(db.run(get::<User>(&99)).unwrap(), None);
+    assert_eq!(
+        get::<User>(&1).execute(&mut db).unwrap().as_ref(),
+        Some(&user)
+    );
+    assert_eq!(get::<User>(&99).execute(&mut db).unwrap(), None);
 
     // Full-entity update by id.
     user.email = "ada@new".into();
-    assert_eq!(db.run(update::<User>().one(&user).affected()).unwrap(), 1);
-    assert_eq!(db.run(get::<User>(&1)).unwrap().unwrap().email, "ada@new");
+    assert_eq!(
+        update::<User>()
+            .one(&user)
+            .affected()
+            .execute(&mut db)
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        get::<User>(&1).execute(&mut db).unwrap().unwrap().email,
+        "ada@new"
+    );
 
     // Keyed patch: only `Some` fields change.
     let patch = UserPatch {
@@ -209,27 +228,44 @@ fn get_update_and_delete() {
         nickname: Some(Some("ada".into())),
         prefs: None,
     };
-    db.run(update::<User>().one(&patch).affected()).unwrap();
-    let got = db.run(get::<User>(&1)).unwrap().unwrap();
+    update::<User>()
+        .one(&patch)
+        .affected()
+        .execute(&mut db)
+        .unwrap();
+    let got = get::<User>(&1).execute(&mut db).unwrap().unwrap();
     assert_eq!(
         (got.nickname.as_deref(), got.prefs.theme.as_str()),
         (Some("ada"), "dark")
     );
 
     // Unkeyed patch: applied to a filter.
-    let n = db.run(
-        update::<User>()
-            .apply(&Rename {
-                email: Some("same@x".into()),
-            })
-            .filter(User::ID.gt(0))
-            .affected(),
-    );
+    let n = update::<User>()
+        .apply(&Rename {
+            email: Some("same@x".into()),
+        })
+        .filter(User::ID.gt(0))
+        .affected()
+        .execute(&mut db);
     assert_eq!(n.unwrap(), 2);
 
-    assert_eq!(db.run(delete::<User>().one(&got).affected()).unwrap(), 1);
-    assert_eq!(db.run(delete::<User>().by_id(&2).affected()).unwrap(), 1);
-    assert!(!db.run(select::<User>().exists()).unwrap());
+    assert_eq!(
+        delete::<User>()
+            .one(&got)
+            .affected()
+            .execute(&mut db)
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        delete::<User>()
+            .by_id(&2)
+            .affected()
+            .execute(&mut db)
+            .unwrap(),
+        1
+    );
+    assert!(!select::<User>().exists().execute(&mut db).unwrap());
 }
 
 #[test]
@@ -251,7 +287,7 @@ fn update_values_follow_the_patch() {
 fn entities_without_capabilities_are_readable() {
     let mut db = MemoryDb::new();
     db.register::<Audit>();
-    assert_eq!(db.run(select::<Audit>().all()).unwrap().len(), 0);
+    assert_eq!(select::<Audit>().all().execute(&mut db).unwrap().len(), 0);
 }
 
 #[test]

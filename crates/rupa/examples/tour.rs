@@ -229,7 +229,6 @@ fn run_in_memory(
     by_email: Query<Option<User>>,
     patch: Query<u64>,
 ) -> MemoryDb {
-    use rupa::core::exec::Executor;
     use rupa::core::tx::Transactional;
     use rupa_driver_memory::MemoryError;
 
@@ -237,15 +236,17 @@ fn run_in_memory(
     let mut db = MemoryDb::new();
     db.register::<User>();
 
-    let ada = db.run(signup).unwrap();
+    let ada = signup.execute(&mut db).unwrap();
     println!("   inserted {} with generated id {}", ada.email, ada.id);
     let others = [
         new_user("grace@example.com", None, true, "dark", 2),
         new_user("linus@example.com", Some("torvalds"), false, "dark", 3),
         new_user("barbara@example.com", Some("barb"), true, "light", 4),
     ];
-    let rest = db
-        .run(insert::<User>().values(&others).returning_all())
+    let rest = insert::<User>()
+        .values(&others)
+        .returning_all()
+        .execute(&mut db)
         .unwrap();
     println!(
         "   inserted {} more, ids {:?}",
@@ -253,44 +254,55 @@ fn run_in_memory(
         rest.iter().map(|u| u.id).collect::<Vec<_>>()
     );
 
-    let found = db.run(active_dark).unwrap();
+    let found = active_dark.execute(&mut db).unwrap();
     println!(
         "   active + dark, newest first: {:?}",
         found.iter().map(|u| &u.email).collect::<Vec<_>>()
     );
 
-    let by_ci = db.run(by_email).unwrap();
+    let by_ci = by_email.execute(&mut db).unwrap();
     println!(
         "   ci_eq lookup (evaluated, not lowered): {:?}",
         by_ci.map(|u| u.email)
     );
 
-    db.run(patch).unwrap();
-    let mut ada = db.run(get::<User>(&1)).unwrap().expect("ada exists");
+    patch.execute(&mut db).unwrap();
+    let mut ada = get::<User>(&1)
+        .execute(&mut db)
+        .unwrap()
+        .expect("ada exists");
     println!("   after the patch, ada's nickname is {:?}", ada.nickname);
 
     // One model: update the whole entity by its id.
     ada.prefs.theme = "light".into();
-    db.run(update::<User>().one(&ada).affected()).unwrap();
+    update::<User>()
+        .one(&ada)
+        .affected()
+        .execute(&mut db)
+        .unwrap();
     println!(
         "   full update -> theme is now {:?}",
-        db.run(get::<User>(&1)).unwrap().unwrap().prefs.theme
+        get::<User>(&1)
+            .execute(&mut db)
+            .unwrap()
+            .unwrap()
+            .prefs
+            .theme
     );
 
     // Transactions. The closure form commits on Ok and rolls back on Err;
     // a nested call is a savepoint, so its failure leaves the outer work intact.
     let outcome = db.transaction(|tx| {
-        tx.run(
-            update::<User>()
-                .one(&UserPatch {
-                    id: 2,
-                    nickname: Some(Some("amazing grace".into())),
-                    active: None,
-                })
-                .affected(),
-        )?;
+        update::<User>()
+            .one(&UserPatch {
+                id: 2,
+                nickname: Some(Some("amazing grace".into())),
+                active: None,
+            })
+            .affected()
+            .execute(tx)?;
         let nested: Result<(), MemoryError> = tx.transaction(|inner| {
-            inner.run(delete::<User>().by_id(&1).affected())?;
+            delete::<User>().by_id(&1).affected().execute(inner)?;
             Err(MemoryError::Unsupported("changed my mind".into()))
         });
         println!("   nested transaction rolled back: {}", nested.is_err());
@@ -299,28 +311,33 @@ fn run_in_memory(
     outcome.unwrap();
     println!(
         "   after commit: grace is {:?}, ada still exists: {}",
-        db.run(get::<User>(&2)).unwrap().unwrap().nickname,
-        db.run(get::<User>(&1)).unwrap().is_some()
+        get::<User>(&2).execute(&mut db).unwrap().unwrap().nickname,
+        get::<User>(&1).execute(&mut db).unwrap().is_some()
     );
 
     // The guard form: a dropped `Tx` rolls back.
     {
         let mut tx = db.begin().unwrap();
-        tx.run(delete::<User>().filter(User::ID.gt(0)).affected())
+        delete::<User>()
+            .filter(User::ID.gt(0))
+            .affected()
+            .execute(&mut tx)
             .unwrap();
     }
     println!(
         "   dropped tx (deleted everything) -> {} users still there",
-        db.run(select::<User>().all()).unwrap().len()
+        select::<User>().all().execute(&mut db).unwrap().len()
     );
 
-    let removed = db
-        .run(delete::<User>().filter(User::ACTIVE.eq(false)).affected())
+    let removed = delete::<User>()
+        .filter(User::ACTIVE.eq(false))
+        .affected()
+        .execute(&mut db)
         .unwrap();
     println!("   deleted {removed} inactive user(s)");
 
     // Result shapes are checked: `.one()` on several rows is an error, not a silent pick.
-    let err = db.run(select::<User>().one()).unwrap_err();
+    let err = select::<User>().one().execute(&mut db).unwrap_err();
     println!("   .one() over several rows -> {err}");
 
     db
@@ -336,12 +353,17 @@ fn run_boxed(db: MemoryDb) -> MemoryDb {
         "\nBoxed async executor, dialect {:?}:",
         dynamic.dialect().id()
     );
-    let count = pollster::block_on(dynamic.run(select::<User>().all()))
+    let count = pollster::block_on(select::<User>().all().execute(&mut dynamic))
         .unwrap()
         .len();
     println!("   {count} user(s) remain");
-    let missing = pollster::block_on(dynamic.run(select::<User>().filter(User::ID.eq(99)).one()))
-        .unwrap_err();
+    let missing = pollster::block_on(
+        select::<User>()
+            .filter(User::ID.eq(99))
+            .one()
+            .execute(&mut dynamic),
+    )
+    .unwrap_err();
     println!(
         "   missing row -> {:?} (inspectable through any driver)",
         missing.result_error()

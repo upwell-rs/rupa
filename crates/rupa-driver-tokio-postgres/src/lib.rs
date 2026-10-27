@@ -125,7 +125,11 @@ impl PgExecutor {
     /// SQL text: a repeated query skips both rendering and parsing.
     ///
     /// The statement may be stale; prepare it afresh next time.
-    async fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
+    async fn dispatch(
+        &mut self,
+        statement: &Statement,
+        expect: Expect,
+    ) -> Result<Outcome, PgError> {
         self.clean().await?;
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let prepared = self.prepare(&rendered.sql).await?;
@@ -192,7 +196,7 @@ impl AsyncExecutor for PgExecutor {
             return self.execute_migration_statement(statement, expect).await;
         }
 
-        self.run(statement, expect).await
+        self.dispatch(statement, expect).await
     }
 }
 

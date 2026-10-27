@@ -93,8 +93,10 @@ fn tenant(id: i64) -> SecurityContext {
 }
 
 async fn titles<E: AsyncExecutor>(e: &mut E) -> Vec<String> {
-    let docs = e
-        .run(select::<Doc>().order_by(Doc::ID.asc()).all())
+    let docs = select::<Doc>()
+        .order_by(Doc::ID.asc())
+        .all()
+        .execute(e)
         .await
         .unwrap();
     docs.into_iter().map(|d| d.title).collect()
@@ -136,15 +138,13 @@ async fn native_row_level_security() {
     assert_eq!(titles(&mut tx).await, ["b1"]);
 
     // WITH CHECK: writing another tenant's row is refused by the database.
-    let foreign = tx
-        .run(
-            insert::<Doc>()
-                .value(&NewDoc {
-                    tenant_id: 1,
-                    title: "x".into(),
-                })
-                .affected(),
-        )
+    let foreign = insert::<Doc>()
+        .value(&NewDoc {
+            tenant_id: 1,
+            title: "x".into(),
+        })
+        .affected()
+        .execute(&mut tx)
         .await;
     assert!(
         foreign.is_err(),
@@ -155,16 +155,15 @@ async fn native_row_level_security() {
         .begin_with_security(TxOptions::default(), tenant(2))
         .await
         .unwrap();
-    tx.run(
-        insert::<Doc>()
-            .value(&NewDoc {
-                tenant_id: 2,
-                title: "b2".into(),
-            })
-            .affected(),
-    )
-    .await
-    .unwrap();
+    insert::<Doc>()
+        .value(&NewDoc {
+            tenant_id: 2,
+            title: "b2".into(),
+        })
+        .affected()
+        .execute(&mut tx)
+        .await
+        .unwrap();
 
     // Savepoints are part of the same transaction: same context.
     let mut inner = tx.begin().await.unwrap();
@@ -214,16 +213,15 @@ async fn native_row_level_security() {
             .begin_with_security(TxOptions::default(), tenant(1))
             .await
             .unwrap();
-        tx.run(
-            insert::<Doc>()
-                .value(&NewDoc {
-                    tenant_id: 1,
-                    title: "gone".into(),
-                })
-                .affected(),
-        )
-        .await
-        .unwrap();
+        insert::<Doc>()
+            .value(&NewDoc {
+                tenant_id: 1,
+                title: "gone".into(),
+            })
+            .affected()
+            .execute(&mut tx)
+            .await
+            .unwrap();
     }
     assert_eq!(titles(&mut db).await.len(), 4);
 
@@ -276,14 +274,12 @@ async fn native_row_level_security() {
         .begin_with_security(TxOptions::default(), tenant(1))
         .await
         .unwrap();
-    let rows = tx
-        .run(
-            select::<Doc>()
-                .join::<Comment>()
-                .left()
-                .order_by(|(d, _)| d.col(Doc::ID).asc())
-                .all(),
-        )
+    let rows = select::<Doc>()
+        .join::<Comment>()
+        .left()
+        .order_by(|(d, _)| d.col(Doc::ID).asc())
+        .all()
+        .execute(&mut tx)
         .await
         .unwrap();
     assert_eq!(
@@ -298,14 +294,12 @@ async fn native_row_level_security() {
         .begin_with_security(TxOptions::default(), tenant(2))
         .await
         .unwrap();
-    let rows = tx
-        .run(
-            select::<Comment>()
-                .join::<Doc>()
-                .left()
-                .order_by(|(c, _)| c.col(Comment::ID).asc())
-                .all(),
-        )
+    let rows = select::<Comment>()
+        .join::<Doc>()
+        .left()
+        .order_by(|(c, _)| c.col(Comment::ID).asc())
+        .all()
+        .execute(&mut tx)
         .await
         .unwrap();
     let got: Vec<_> = rows

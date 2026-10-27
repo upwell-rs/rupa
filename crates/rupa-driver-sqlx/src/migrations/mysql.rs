@@ -34,6 +34,6 @@ impl Engine<sqlx::MySql> for State {
 
         executor.migration.user_statement(&rendered.sql)?;
 
-        executor.run(statement, expect).await
+        executor.dispatch(statement, expect).await
     }
 }

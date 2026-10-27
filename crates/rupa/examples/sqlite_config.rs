@@ -3,7 +3,7 @@
 //! Run: `cargo run -p rupa --example sqlite_config --features sqlite,dynamic`
 
 use rupa::prelude::*;
-use rupa::{AsyncExecutor, DbConfig, DynError};
+use rupa::{DbConfig, DynError};
 
 #[derive(Debug, Clone, Entity, Insertable)]
 #[entity(table = "notes")]
@@ -24,21 +24,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let config = DbConfig::new("sqlite::memory:");
         let db = rupa::connect(&config).await?;
         let mut conn = db.get().await?;
-        conn.run(
-            raw()
-                .sql("CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
-                .execute::<u64>(),
-        )
-        .await?;
-        conn.run(
-            insert::<Note>()
-                .value(&Note {
-                    id: 1,
-                    title: "pooled".into(),
-                })
-                .affected(),
-        )
-        .await?;
+        raw()
+            .sql("CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
+            .execute::<u64>()
+            .execute(&mut conn)
+            .await?;
+        insert::<Note>()
+            .value(&Note {
+                id: 1,
+                title: "pooled".into(),
+            })
+            .affected()
+            .execute(&mut conn)
+            .await?;
         drop(conn);
 
         let notes = NotesView::new(&db);

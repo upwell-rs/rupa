@@ -5,9 +5,9 @@ pub use ::std::future::Future;
 pub use ::std::marker::Send;
 pub use ::std::pin::Pin;
 pub use rupa_core::__macro_support::*;
-#[cfg(feature = "async")]
-pub use rupa_core::exec::AsyncExecutor;
 pub use rupa_core::exec::Executor;
+#[cfg(feature = "async")]
+pub use rupa_core::exec::{AsyncExecutor, complete_unboxed};
 pub use rupa_core::repo::{
     Acquire, Context, ContextMut, ExclusiveSyncMode, Repo, RepoMut, RepoView, Repository, SyncMode,
 };

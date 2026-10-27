@@ -273,7 +273,11 @@ impl<DB: Backend> SqlxExecutor<DB> {
 
     /// Rendered SQL is cached by statement shape; sqlx caches prepared
     /// statements by SQL text: a repeated query skips both.
-    async fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqlxError> {
+    async fn dispatch(
+        &mut self,
+        statement: &Statement,
+        expect: Expect,
+    ) -> Result<Outcome, SqlxError> {
         self.clean().await?;
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let args = arguments::<DB>(&rendered.params)?;
@@ -357,7 +361,7 @@ impl<DB: Backend> AsyncExecutor for SqlxExecutor<DB> {
             .await;
         }
 
-        self.run(statement, expect).await
+        self.dispatch(statement, expect).await
     }
 }
 

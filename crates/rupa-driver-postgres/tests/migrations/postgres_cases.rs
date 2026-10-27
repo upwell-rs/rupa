@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use rupa::core::exec::Executor;
 use rupa::migrate::sync::{Apply, Session};
 use rupa::migrate::{
     Catalog, Engine, Error, MigrationInfo, RunError, StateError, Target, VersionScheme,
@@ -170,7 +169,10 @@ fn lost_advisory_lock_poisons_instead_of_committing(pg: &mut Pg) {
         "opaque bodies pass the grammar, the lock check refuses completion"
     );
     assert!(matches!(
-        Executor::run(&mut session, rupa::raw().sql("SELECT 1").execute::<u64>()),
+        rupa::raw()
+            .sql("SELECT 1")
+            .execute::<u64>()
+            .execute(&mut session),
         Err(PgError::Migration(StateError::Poisoned))
     ));
     assert!(!pg.table_exists("marker"));
@@ -279,11 +281,11 @@ fn an_abandoned_pooled_session_is_discarded(pg: &mut Pg) {
 
     assert!(interrupted.is_err());
     assert!(
-        Executor::run(
-            &mut *replacement,
-            rupa::raw().sql("SELECT 1").execute::<u64>()
-        )
-        .is_ok(),
+        rupa::raw()
+            .sql("SELECT 1")
+            .execute::<u64>()
+            .execute(&mut *replacement)
+            .is_ok(),
         "the pool replaced the abandoned connection"
     );
 }

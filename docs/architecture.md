@@ -94,7 +94,7 @@ So the method body is roughly:
 ```rust
 let __query = select::<User>().filter(User::EMAIL.eq(email)).optional();
 let mut __conn = Acquire::acquire(self.source()).map_err(ExecError::into_dyn_error)?;
-Ok(Executor::run(&mut __conn, __query).map_err(ExecError::into_dyn_error)?)
+Ok(__query.execute(&mut __conn).map_err(ExecError::into_dyn_error)?)
 ```
 
 ### 2. Building: a `Query<R>` value, no IO
@@ -119,9 +119,11 @@ connection to the pool when dropped.
 
 ### 4. Executing: render (cached), prepare (cached), run
 
-`Executor::run` (`rupa-core/src/exec/mod.rs`) calls the driver's
-`execute(statement, expect)` and decodes the `Outcome`.
-`SqliteExecutor::run` (`rupa-driver-rusqlite/src/lib.rs`):
+`Query::execute` (`rupa-core/src/exec/engine.rs`) hands the query to the
+engine's `Completion`, which calls the driver's `execute(statement, expect)`
+and decodes the `Outcome`. Async repository methods use the unboxed
+`complete_unboxed` instead, so their futures stay unboxed.
+`SqliteExecutor::dispatch` (`rupa-driver-rusqlite/src/lib.rs`):
 
 1. `clean()`: sends a rollback still owed by a transaction dropped earlier
    (see "Transactions").

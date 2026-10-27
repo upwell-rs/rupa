@@ -1,14 +1,15 @@
 //! Executor traits. Building a query never does IO; an executor takes a built
-//! [`Query<R>`] and produces `R`.
+//! [`Query<R>`](crate::query::Query) and produces `R`.
 //!
 //! Drivers implement one method, `execute`, which runs a statement and
-//! returns an [`Outcome`]. The provided `run` decodes the outcome into `R`.
-//! An executor that also names its [`Engine::Completion`] runs queries through
-//! [`Query::execute`] as well: `query.execute(&mut conn)?` on a sync engine,
+//! returns an [`Outcome`], and name their [`Engine::Completion`]. Queries run
+//! with [`Query::execute`](crate::query::Query::execute), which decodes the
+//! outcome into `R`:
+//! `query.execute(&mut conn)?` on a sync engine,
 //! `query.execute(&mut conn).await?` on an async one.
 //!
 //! [`Executor`] and the async `AsyncExecutor` are generic-friendly but not
-//! dyn-compatible (`run` is generic, and the async methods return `impl Future`).
+//! dyn-compatible (the async methods return `impl Future`).
 //! For executors chosen at run time, see [`crate::erased`].
 
 #[cfg(feature = "async")]
@@ -21,11 +22,11 @@ use std::fmt;
 use crate::dialect::Dialect;
 use crate::error::ResultError;
 use crate::ir::Statement;
-use crate::query::{Expect, Output, Query, QueryResult};
+use crate::query::{Expect, Output, QueryResult};
 use crate::row::RowCursor;
 
 #[cfg(feature = "async")]
-pub use asynchronous::{AsyncExecutor, Awaited, Blocking, BoxFuture};
+pub use asynchronous::{AsyncExecutor, Awaited, Blocking, BoxFuture, complete_unboxed};
 pub use engine::{Completion, Engine, Executed, Immediate};
 
 /// What executing a statement produced, owned so it can cross await points.
@@ -72,11 +73,14 @@ pub trait ExecError: StdError + Send + Sync + 'static + From<ResultError> {
 
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not a synchronous executor",
-    note = "async executors implement `AsyncExecutor`; use `.run(query).await` on those"
+    note = "async executors implement `AsyncExecutor`; `query.execute(&mut engine).await` runs on those"
 )]
 /// A synchronous executor: runs statements on one connection (or
-/// transaction).
-pub trait Executor {
+/// transaction). Queries run on it with [`Query::execute`], which returns
+/// their result.
+///
+/// [`Query::execute`]: crate::query::Query::execute
+pub trait Executor: Engine<Completion = Immediate> {
     /// The SQL dialect statements are rendered in.
     type Dialect: Dialect;
     /// The driver's error type.
@@ -88,10 +92,4 @@ pub trait Executor {
     /// Runs one statement. `expect` says what result shape the caller
     /// wants, so drivers can stop fetching early.
     fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, Self::Error>;
-
-    /// Runs a query and decodes its result.
-    fn run<R: QueryResult>(&mut self, query: Query<R>) -> Result<R, Self::Error> {
-        let outcome = self.execute(query.statement(), query.expect())?;
-        Ok(outcome.decode()?)
-    }
 }

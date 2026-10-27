@@ -158,7 +158,7 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     .join::<Coupon>().left()
 ///     .into::<OrderLine>()
 ///     .all()
-///     .run(&mut db)?;
+///     .execute(&mut db)?;
 /// ```
 ///
 /// Every field says where it comes from; nothing is matched by name. Only

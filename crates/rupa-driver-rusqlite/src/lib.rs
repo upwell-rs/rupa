@@ -129,7 +129,7 @@ impl SqliteExecutor {
 
     /// Rendered SQL is cached by statement shape, prepared statements by
     /// SQL text: a repeated query skips both rendering and parsing.
-    fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqliteError> {
+    fn dispatch(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, SqliteError> {
         self.clean()?;
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let params = rusqlite::params_from_iter(rendered.params.iter().map(Param));
@@ -182,7 +182,7 @@ impl Executor for SqliteExecutor {
             return self.execute_migration_statement(statement, expect);
         }
 
-        self.run(statement, expect)
+        self.dispatch(statement, expect)
     }
 }
 

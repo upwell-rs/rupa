@@ -105,12 +105,8 @@ impl Access {
     }
 
     /// Runs a query through acquisition or an exclusive native executor.
-    fn run(self, ms: &TokenStream) -> TokenStream {
-        let executor = if self.is_async() {
-            quote!(#ms::AsyncExecutor)
-        } else {
-            quote!(#ms::Executor)
-        };
+    /// Async methods complete it unboxed, so their futures stay unboxed.
+    fn execute(self, ms: &TokenStream) -> TokenStream {
         let wait = self.is_async().then(|| quote!(.await));
         let (acquire, connection) = match self {
             Self::SharedSync | Self::SharedAsync => {
@@ -127,12 +123,15 @@ impl Access {
             Self::ExclusiveSync | Self::ExclusiveAsync => (quote!(), quote!(self.source_mut())),
         };
 
+        let execute = if self.is_async() {
+            quote!(#ms::complete_unboxed(#connection, __query).await)
+        } else {
+            quote!(__query.execute(#connection))
+        };
+
         quote! {
             #acquire
-            ::core::result::Result::Ok(
-                #executor::run(#connection, __query) #wait
-                    .map_err(#ms::ExecError::into_dyn_error)?
-            )
+            ::core::result::Result::Ok(#execute.map_err(#ms::ExecError::into_dyn_error)?)
         }
     }
 }
@@ -364,7 +363,7 @@ fn method_impl(
     let mut sig = Signature::from_sig(&m.item.sig)?;
     let (ok, err) = (&m.ok, &m.err);
     let result_ty = quote!(::core::result::Result<#ok, #err>);
-    let run = access.run(ms);
+    let execute = access.execute(ms);
     let emitted = emitted_signature(tr, m);
     let span = m.item.sig.span();
 
@@ -372,9 +371,10 @@ fn method_impl(
 
     let query = query_body(ms, &m.attr, &sig)?;
     let body = match (access.is_async(), m.is_async, static_dispatch) {
-        (false, _, _) => quote!({ let __out: #result_ty = (|| { #run })(); __out }),
+        (false, _, _) => quote!({ let __out: #result_ty = (|| { #execute })(); __out }),
         (true, async_method, static_dispatch) => {
-            let fut = quote!(async move { let __out: #result_ty = (async { #run }).await; __out });
+            let fut =
+                quote!(async move { let __out: #result_ty = (async { #execute }).await; __out });
 
             match (async_method, static_dispatch) {
                 (false, _) => quote!(#ms::block_in_place(#fut)),

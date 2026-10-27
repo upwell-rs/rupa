@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use rupa::core::exec::{AsyncExecutor, Blocking, Executor};
+use rupa::core::exec::{AsyncExecutor, Blocking};
 use rupa::core::tx::Transactional;
 use rupa::prelude::*;
 use rupa::{Database, DynError, Shared};
@@ -51,7 +51,10 @@ pub trait UserRepository: Send + Sync {
 fn async_db() -> AsyncMemoryDb {
     let mut db = MemoryDb::new();
     db.register::<User>();
-    db.run(insert::<User>().values(&users()).affected())
+    insert::<User>()
+        .values(&users())
+        .affected()
+        .execute(&mut db)
         .unwrap();
     db.into_async()
 }
@@ -121,7 +124,10 @@ pub trait UserFlags {
 fn sync_repository_over_shared_executor() {
     let mut db = MemoryDb::new();
     db.register::<User>();
-    db.run(insert::<User>().values(&users()).affected())
+    insert::<User>()
+        .values(&users())
+        .affected()
+        .execute(&mut db)
         .unwrap();
     let source = Shared::new(db);
     let repo = SyncUsersView::new(&source);
@@ -151,7 +157,10 @@ fn repository_view_inside_a_transaction() {
     let mut db = MemoryDb::new();
     db.register::<User>();
     let mut tx = db.begin().unwrap();
-    tx.run(insert::<User>().values(&users()).affected())
+    insert::<User>()
+        .values(&users())
+        .affected()
+        .execute(&mut tx)
         .unwrap();
     {
         let session = rupa::TxSession::new(tx);
@@ -377,12 +386,11 @@ pub trait OneConnection {
 #[test]
 fn blocking_wraps_one_sync_executor() {
     let mut db = note_db();
-    db.run(
-        insert::<Note>()
-            .value(&NewNote { title: "a".into() })
-            .affected(),
-    )
-    .unwrap();
+    insert::<Note>()
+        .value(&NewNote { title: "a".into() })
+        .affected()
+        .execute(&mut db)
+        .unwrap();
     let tx = db.begin().unwrap();
     let mut repo = OneConnectionRepo::new(Blocking(tx));
     assert!(pollster::block_on(repo.get(1)).unwrap().is_some());
@@ -423,7 +431,10 @@ pub trait PostRepository: Send + Sync {
 fn joins_in_a_repository() {
     let mut db = MemoryDb::new();
     db.register::<User>().register::<Post>();
-    db.run(insert::<User>().values(&users()).affected())
+    insert::<User>()
+        .values(&users())
+        .affected()
+        .execute(&mut db)
         .unwrap();
     let posts =
         [(10, 1, "hello"), (11, 1, "again"), (12, 2, "hi")].map(|(id, user_id, title)| Post {
@@ -431,7 +442,11 @@ fn joins_in_a_repository() {
             user_id,
             title: title.into(),
         });
-    db.run(insert::<Post>().values(&posts).affected()).unwrap();
+    insert::<Post>()
+        .values(&posts)
+        .affected()
+        .execute(&mut db)
+        .unwrap();
     let repo: Arc<dyn PostRepository> = Arc::new(PostRepositoryRepo::shared(db.into_async()));
 
     let rows = pollster::block_on(repo.with_posts(true)).unwrap();

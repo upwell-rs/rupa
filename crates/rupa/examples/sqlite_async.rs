@@ -7,7 +7,7 @@ mod task;
 
 use rupa::drivers::sqlx::sqlite::SqlitePool;
 use rupa::prelude::*;
-use rupa::{AsyncExecutor, AsyncPool, DbConfig};
+use rupa::{AsyncPool, DbConfig};
 use task::{NewTask, Task, TaskPatch};
 
 #[repository]
@@ -23,7 +23,11 @@ trait Tasks {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = SqlitePool::connect(&DbConfig::new("sqlite::memory:")).await?;
     let mut conn = pool.get().await?;
-    conn.run(raw().sql(task::SCHEMA).execute::<u64>()).await?;
+    raw()
+        .sql(task::SCHEMA)
+        .execute::<u64>()
+        .execute(&mut conn)
+        .await?;
     let mut repository = TasksRepo::new(conn);
     let mut tx = repository.begin().await?;
     let mut tasks = TasksView::new(&mut tx);

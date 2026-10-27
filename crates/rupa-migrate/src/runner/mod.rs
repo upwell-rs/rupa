@@ -91,21 +91,48 @@ pub(crate) fn prepare_script<E: std::error::Error>(
 /// inside the mode module, whose `Session`, `Migration` and `Context` it uses.
 macro_rules! mode {
     (sync) => {
-        mode!(@emit [] [] [] []);
+        mode!(@emit [] [] [] [] [Immediate] [context query]
+            [Result<R, crate::Error<S::Error>>]
+            [query.execute(&mut *context.session).map_err(crate::Error::Database)]);
     };
     (async) => {
-        mode!(@emit [async] [.await] [+ Send + Sync] [+ Send]);
+        mode!(@emit [async] [.await] [+ Send + Sync] [+ Send] [Awaited] [context query]
+            [rupa_core::exec::BoxFuture<'e, Result<R, crate::Error<S::Error>>>]
+            [Box::pin(async move {
+                rupa_core::exec::complete_unboxed(&mut *context.session, query)
+                    .await
+                    .map_err(crate::Error::Database)
+            })]);
     };
-    (@emit [$($async:tt)*] [$($await:tt)*] [$($bound:tt)*] [$($send:tt)*]) => {
-        impl<S: Session> Context<'_, S> {
-            /// Runs a typed query on the runner-owned transaction.
-            pub $($async)* fn run<R: rupa_core::query::QueryResult $($send)*>(
-                &mut self,
-                query: rupa_core::query::Query<R>,
-            ) -> Result<R, crate::Error<S::Error>> {
-                self.session.run(query) $($await)* .map_err(crate::Error::Database)
-            }
+    (@emit [$($async:tt)*] [$($await:tt)*] [$($bound:tt)*] [$($send:tt)*]
+        [$completion:ident] [$context:ident $query:ident] [$($output:tt)*] [$($complete:tt)*]) => {
+        /// Typed queries run on the runner-owned transaction with
+        /// `query.execute(context)`; failures are [`Error::Database`](crate::Error::Database).
+        impl<S: Session> rupa_core::exec::Engine for Context<'_, S> {
+            type Completion = rupa_core::exec::$completion;
+        }
 
+        impl<'c, S: Session, R: rupa_core::query::QueryResult $($send)*>
+            rupa_core::exec::Completion<Context<'c, S>, R> for rupa_core::exec::$completion
+        {
+            type Output<'e>
+                = $($output)*
+            where
+                Context<'c, S>: 'e,
+                R: 'e;
+
+            fn complete<'e>(
+                $context: &'e mut Context<'c, S>,
+                $query: rupa_core::query::Query<R>,
+            ) -> Self::Output<'e>
+            where
+                R: 'e,
+            {
+                $($complete)*
+            }
+        }
+
+        impl<S: Session> Context<'_, S> {
             /// Runs a script using the driver's native parser and migration authorization.
             pub $($async)* fn script(&mut self, sql: &str) -> Result<(), crate::Error<S::Error>> {
                 let sql = crate::runner::prepare_script(sql, rupa_core::dialect::Dialect::id(self.session.dialect()))?;

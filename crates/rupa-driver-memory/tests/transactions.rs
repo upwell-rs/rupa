@@ -13,18 +13,17 @@ fn db() -> MemoryDb {
 }
 
 fn add<E: Executor>(e: &mut E, title: &str) -> Result<u64, E::Error> {
-    e.run(
-        insert::<Note>()
-            .value(&NewNote {
-                title: title.into(),
-                pinned: false,
-            })
-            .affected(),
-    )
+    insert::<Note>()
+        .value(&NewNote {
+            title: title.into(),
+            pinned: false,
+        })
+        .affected()
+        .execute(e)
 }
 
 fn count(db: &mut MemoryDb) -> usize {
-    db.run(select::<Note>().all()).unwrap().len()
+    select::<Note>().all().execute(db).unwrap().len()
 }
 
 #[test]
@@ -54,8 +53,9 @@ fn nested_closures_use_savepoints() {
         Ok::<_, MemoryError>(())
     })
     .unwrap();
-    let titles: Vec<_> = db
-        .run(select::<Note>().all())
+    let titles: Vec<_> = select::<Note>()
+        .all()
+        .execute(&mut db)
         .unwrap()
         .into_iter()
         .map(|n| n.title)

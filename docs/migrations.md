@@ -754,7 +754,9 @@ are then an author responsibility, not transitive Rust dependency analysis. The
 shared migration conformance fixtures (`rupa-conformance`) keep such an explicit
 catalog.
 
-`Context::run` accepts ordinary typed Rupa queries. `Context::script` runs SQL on
+A body's `Context` is an engine: `query.execute(context)` runs ordinary typed
+Rupa queries on the runner's transaction (`.await` it in async bodies), failing
+with `Error::Database`. `Context::script` runs SQL on
 the same transaction, and `Context::schema` a rendered schema operation. Neither exposes transaction control, connection extraction
 or pool access. SQLite authorization denies transaction/savepoint control,
 ATTACH/DETACH, PRAGMAs and framework metadata access, with one policy for every

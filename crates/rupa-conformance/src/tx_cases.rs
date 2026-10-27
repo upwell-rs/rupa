@@ -10,15 +10,20 @@ fn note(title: &str) -> NewNote {
 }
 
 async fn titles<E: AsyncExecutor>(e: &mut E) -> Vec<String> {
-    let notes = e
-        .run(select::<Note>().order_by(Note::ID.asc()).all())
+    let notes = select::<Note>()
+        .order_by(Note::ID.asc())
+        .all()
+        .execute(e)
         .await
         .expect("select");
     notes.into_iter().map(|n| n.title).collect()
 }
 
 async fn add<E: AsyncExecutor>(e: &mut E, title: &str) {
-    e.run(insert::<Note>().value(&note(title)).affected())
+    insert::<Note>()
+        .value(&note(title))
+        .affected()
+        .execute(e)
         .await
         .expect("insert");
 }
@@ -71,7 +76,7 @@ pub async fn tx_drop_rolls_back<E: AsyncTransactional>(e: &mut E) {
 pub async fn tx_is_an_executor<E: AsyncTransactional>(e: &mut E) {
     /// Generic over any async executor: works on a connection or a tx.
     async fn count<X: AsyncExecutor>(x: &mut X) -> usize {
-        x.run(select::<Note>().all()).await.unwrap().len()
+        select::<Note>().all().execute(x).await.unwrap().len()
     }
     let mut tx = e.begin().await.unwrap();
     add(&mut tx, "a").await;
@@ -123,8 +128,10 @@ pub async fn tx_nested_commit_outer_rollback<E: AsyncTransactional>(e: &mut E) {
 pub async fn tx_closure_commits_or_rolls_back<E: AsyncTransactional>(e: &mut E) {
     let ok: Result<u64, Abort<E::Error>> = e
         .transaction(async |tx: &mut E::Tx<'_>| {
-            Ok(tx
-                .run(insert::<Note>().value(&note("ok")).affected())
+            Ok(insert::<Note>()
+                .value(&note("ok"))
+                .affected()
+                .execute(tx)
                 .await?)
         })
         .await;
@@ -132,7 +139,10 @@ pub async fn tx_closure_commits_or_rolls_back<E: AsyncTransactional>(e: &mut E) 
 
     let aborted: Result<(), Abort<E::Error>> = e
         .transaction(async |tx: &mut E::Tx<'_>| {
-            tx.run(insert::<Note>().value(&note("aborted")).affected())
+            insert::<Note>()
+                .value(&note("aborted"))
+                .affected()
+                .execute(tx)
                 .await?;
             Err(Abort::Explicit)
         })
@@ -159,7 +169,11 @@ pub async fn tx_read_only_rejects_writes<E: AsyncTransactional>(e: &mut E) {
         .await
         .unwrap();
     assert_eq!(titles(&mut tx).await, ["a"], "reads work");
-    let write = tx.run(insert::<Note>().value(&note("b")).affected()).await;
+    let write = insert::<Note>()
+        .value(&note("b"))
+        .affected()
+        .execute(&mut tx)
+        .await;
     assert!(
         write.is_err(),
         "writes in a read-only transaction must fail"

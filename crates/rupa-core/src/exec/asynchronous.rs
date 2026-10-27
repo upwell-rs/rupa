@@ -17,8 +17,9 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
     note = "synchronous executors implement `Executor`"
 )]
 /// An asynchronous executor: runs statements on one connection (or
-/// transaction).
-pub trait AsyncExecutor: Send {
+/// transaction). Queries run on it with [`Query::execute`], which returns a
+/// future of their result.
+pub trait AsyncExecutor: Send + Engine<Completion = Awaited> {
     /// The SQL dialect statements are rendered in.
     type Dialect: Dialect;
     /// The driver's error type.
@@ -34,17 +35,19 @@ pub trait AsyncExecutor: Send {
         statement: &Statement,
         expect: Expect,
     ) -> impl Future<Output = Result<Outcome, Self::Error>> + Send;
+}
 
-    /// Runs a query and decodes its result.
-    fn run<R: QueryResult + Send>(
-        &mut self,
-        query: Query<R>,
-    ) -> impl Future<Output = Result<R, Self::Error>> + Send {
-        async move {
-            let outcome = self.execute(query.statement(), query.expect()).await?;
-            Ok(outcome.decode()?)
-        }
-    }
+/// Runs `query` on `engine` without boxing, for generated repository
+/// methods, whose futures stay unboxed. Not public API: use
+/// [`Query::execute`].
+#[doc(hidden)]
+pub async fn complete_unboxed<E: AsyncExecutor, R: QueryResult>(
+    engine: &mut E,
+    query: Query<R>,
+) -> Result<R, E::Error> {
+    let outcome = engine.execute(query.statement(), query.expect()).await?;
+
+    Ok(outcome.decode()?)
 }
 
 /// Completes queries through a future: `execute` returns a boxed future of
@@ -60,11 +63,11 @@ impl<E: AsyncExecutor, R: QueryResult + Send> Completion<E, R> for Awaited {
         E: 'e,
         R: 'e;
 
-    fn run<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
+    fn complete<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
     where
         R: 'e,
     {
-        Box::pin(engine.run(query))
+        Box::pin(complete_unboxed(engine, query))
     }
 }
 

@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use rupa::prelude::*;
-use rupa::{AsyncExecutor as _, Database, DbConfig};
+use rupa::{Database, DbConfig};
 use rupa_bench::{
     MYSQL_DDL, NewUser, POSTGRES_DDL, Prefs, SQLITE_DDL, User, Users, UsersRepo, new_users,
 };
@@ -83,12 +83,18 @@ async fn connect(url: &str, driver: &str) -> Database {
 async fn seed(db: &Database, ddl: &'static str) {
     let mut conn = db.get().await.unwrap();
     for statement in ddl.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-        conn.run(raw().sql(statement).execute::<u64>())
+        raw()
+            .sql(statement)
+            .execute::<u64>()
+            .execute(&mut conn)
             .await
             .unwrap();
     }
 
-    conn.run(insert::<User>().values(&new_users(ROWS)).affected())
+    insert::<User>()
+        .values(&new_users(ROWS))
+        .affected()
+        .execute(&mut conn)
         .await
         .unwrap();
 }
@@ -211,7 +217,10 @@ async fn active_100(users: &dyn Users) {
 
 async fn insert_rollback(db: &Database, i: u64) {
     let mut tx = db.begin().await.unwrap();
-    tx.run(insert::<User>().value(&new_user(i)).affected())
+    insert::<User>()
+        .value(&new_user(i))
+        .affected()
+        .execute(&mut tx)
         .await
         .unwrap();
     tx.rollback().await.unwrap();

@@ -20,7 +20,10 @@ use crate::{Harness, NewNote, Note};
 /// Runs DDL scripts statement by statement through a boxed executor.
 pub async fn run_script<E: AsyncExecutor>(e: &mut E, script: &'static str) {
     for statement in script.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-        e.run(raw().sql(statement).execute::<u64>())
+        raw()
+            .sql(statement)
+            .execute::<u64>()
+            .execute(e)
             .await
             .unwrap_or_else(|err| panic!("DDL `{statement}` failed: {err}"));
     }
@@ -103,7 +106,7 @@ pub async fn run_pool_cases(mut fresh: impl AsyncFnMut() -> Database) {
 }
 
 async fn add<E: AsyncExecutor>(e: &mut E, note: &NewNote) {
-    let n = e.run(insert::<Note>().value(note).affected()).await;
+    let n = insert::<Note>().value(note).affected().execute(e).await;
     assert_eq!(n.unwrap(), 1);
 }
 
