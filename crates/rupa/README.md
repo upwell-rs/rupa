@@ -47,5 +47,7 @@ paths macro output refers to.
 | `sqlx-postgres`, `sqlx-mysql`, `sqlx-sqlite`, `sqlx-sqlite-unbundled` | async drivers on sqlx + deadpool (imply `async`) |
 | `tls-rustls` | TLS on rustls (ring) for every enabled networked driver |
 | `migrations` | explicit SQL/Rust migrations, applied on every enabled SQLite, PostgreSQL and MySQL driver, native or sqlx ([guide](../../docs/migrations.md)) |
+| `migration-commands` | `migrations` plus operator commands (`rupa::migrate::commands`): typed commands, human/JSON reports, exit statuses, redaction ([guide](../../docs/migrations.md#operator-commands)) |
+| `migration-cli` | `migration-commands` plus the embeddable clap command line (`rupa::migrate::commands::cli`) |
 | `full` | every driver, plus `dynamic` and `migrations` |
 | `upwell` | the Upwell DI integration (in development) |

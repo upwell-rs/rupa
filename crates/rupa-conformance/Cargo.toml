@@ -10,7 +10,13 @@ description = "Shared behavioural test suite run against every RUPA driver"
 
 [features]
 # The shared migration cases in both modes (`migrations::{sync, asynchronous}::run`).
-migrations = ["rupa/migrations", "rupa/sync", "rupa/async", "dep:pollster"]
+migrations = [
+    "rupa/migrations",
+    "rupa/migration-commands",
+    "rupa/sync",
+    "rupa/async",
+    "dep:pollster",
+]
 
 [dependencies]
 rupa = { path = "../rupa", features = ["dynamic"] }

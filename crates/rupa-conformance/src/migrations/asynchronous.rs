@@ -1,10 +1,13 @@
 //! The same cases against `rupa::migrate::asynchronous`, from the same source.
 
+use std::convert::Infallible;
 use std::future::Future;
 
 use rupa::core::asynchronous::Connection;
 use rupa::core::exec::Blocking;
-use rupa::migrate::asynchronous::{Adopt, Apply, Inspect, Recover, Revert, Session};
+use rupa::migrate::Catalog;
+use rupa::migrate::asynchronous::{Adopt, Apply, Inspect, Migration, Recover, Revert, Session};
+use rupa::migrate::commands::{self, Command, Outcome};
 
 pub use super::Target;
 use super::{catalog, versions};
@@ -77,6 +80,9 @@ mod support {
 mod adoption {
     include!("cases/adoption.rs");
 }
+mod commands_cases {
+    include!("cases/commands.rs");
+}
 mod control {
     include!("cases/control.rs");
 }
@@ -106,6 +112,31 @@ mod schema {
 }
 mod snapshots {
     include!("cases/snapshots.rs");
+}
+
+/// Runs `command` through the operator commands on a connection to `h`,
+/// opened first: a harness may block on its own executor to connect.
+fn operate<'c, H: Harness, M: Migration<H::Session> + Send + Sync>(
+    h: &H,
+    catalog: &'c Catalog<'_, M>,
+    command: &Command<'_>,
+) -> Outcome<'c> {
+    let session = h.connect();
+
+    h.block_on(commands::asynchronous::run(catalog, command, || {
+        std::future::ready(Ok::<_, Infallible>(session))
+    }))
+}
+
+/// Runs `command` through the operator commands against a target that
+/// refuses connections.
+fn unreachable<'c, H: Harness, M: Migration<H::Session> + Send + Sync>(
+    catalog: &'c Catalog<'_, M>,
+    command: &Command<'_>,
+) -> Outcome<'c> {
+    pollster::block_on(commands::asynchronous::run(catalog, command, || async {
+        Err::<H::Session, _>(std::io::Error::other("connection refused"))
+    }))
 }
 
 /// Runs every case through the async contracts.

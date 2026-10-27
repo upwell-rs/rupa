@@ -15,6 +15,12 @@ async = ["rupa-core/async"]
 # The engine session protocols driver crates implement sessions on, in each
 # enabled mode (alone: only `protocol::SqlState`); not public API.
 protocol = []
+# Operator commands over the same engine (`rupa_migrate::commands`): typed
+# commands, human and JSON reports, exit statuses and secret redaction, in
+# each enabled mode (alone: nothing).
+commands = []
+# The clap command line for those commands (`commands::cli`).
+cli = ["commands", "dep:clap"]
 
 [dependencies]
 rupa-core.workspace = true
@@ -23,3 +29,4 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
+clap = { workspace = true, optional = true }
