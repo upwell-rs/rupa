@@ -77,6 +77,12 @@ macro_rules! all_cases {
                 case_adoption_needs_an_unmanaged_target_a_reason_and_coverage,
                 case_an_adopted_boundary_refuses_uncovered_work_and_deeper_reverts,
             ],
+            commands_cases: [
+                case_inspection_commands_never_write_or_run_bodies,
+                case_commands_apply_and_revert_through_the_library_engine,
+                case_assertion_commands_keep_their_audit_and_refuse_without_writing,
+                case_offline_commands_never_connect,
+            ],
             schema: [
                 case_planned_schema_creates_entity_tables,
                 case_changed_plan_is_reported_as_changed_history,

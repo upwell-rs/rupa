@@ -12,6 +12,8 @@ mod adoption;
 #[cfg(feature = "async")]
 pub mod asynchronous;
 mod catalog;
+#[cfg(all(feature = "commands", any(feature = "sync", feature = "async")))]
+pub mod commands;
 mod coverage;
 mod error;
 mod macros;

@@ -16,6 +16,11 @@ migrations = [
     "rupa-driver-mysql?/migrations",
     "rupa-driver-sqlx?/migrations",
 ]
+# Operator commands over the migration engine (`rupa::migrate::commands`):
+# typed commands, human and JSON reports, exit statuses and redaction.
+migration-commands = ["migrations", "rupa-migrate/commands"]
+# The clap command line for them (`rupa::migrate::commands::cli`).
+migration-cli = ["migration-commands", "rupa-migrate/cli"]
 default = ["chrono", "uuid"]
 
 # Column types. Each is forwarded to every enabled driver.

@@ -1,7 +1,11 @@
 //! The cases against `rupa::migrate::sync`.
 
+use std::convert::Infallible;
+
 use rupa::core::sync::Connection;
-use rupa::migrate::sync::{Adopt, Apply, Inspect, Recover, Revert, Session};
+use rupa::migrate::Catalog;
+use rupa::migrate::commands::{self, Command, Outcome};
+use rupa::migrate::sync::{Adopt, Apply, Inspect, Migration, Recover, Revert, Session};
 
 pub use super::Target;
 use super::{catalog, versions};
@@ -28,6 +32,8 @@ macro_rules! wait {
 mod support;
 #[path = "cases/adoption.rs"]
 mod adoption;
+#[path = "cases/commands.rs"]
+mod commands_cases;
 #[path = "cases/control.rs"]
 mod control;
 #[path = "cases/exclusion.rs"]
@@ -48,6 +54,26 @@ mod reversal;
 mod schema;
 #[path = "cases/snapshots.rs"]
 mod snapshots;
+
+/// Runs `command` through the operator commands, connecting to `h`.
+fn operate<'c, H: Harness, M: Migration<H::Session>>(
+    h: &H,
+    catalog: &'c Catalog<'_, M>,
+    command: &Command<'_>,
+) -> Outcome<'c> {
+    commands::sync::run(catalog, command, || Ok::<_, Infallible>(h.connect()))
+}
+
+/// Runs `command` through the operator commands against a target that
+/// refuses connections.
+fn unreachable<'c, H: Harness, M: Migration<H::Session>>(
+    catalog: &'c Catalog<'_, M>,
+    command: &Command<'_>,
+) -> Outcome<'c> {
+    commands::sync::run(catalog, command, || {
+        Err::<H::Session, _>(std::io::Error::other("connection refused"))
+    })
+}
 
 /// Runs every case through the sync contracts.
 pub fn run<H: Harness + Sync>(h: &mut H) {

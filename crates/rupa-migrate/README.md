@@ -118,6 +118,8 @@ Dynamic adapters remain a subsequent implementation slice.
 |---|---|
 | `sync` | `sync::{Session, Migration, Context, Apply, Inspect, Recover, Revert, Adopt}` |
 | `async` | `asynchronous::{Session, Migration, Context, Apply, Inspect, Recover, Revert, Adopt}` (unboxed `Send` futures); with `sync`, `Blocking<S>` sessions |
+| `commands` | `commands::{Command, Outcome, Report, Failure, Exit, Redactor}` and `commands::{sync, asynchronous}::run` in each enabled mode: operator commands with human/JSON reports, stable exit statuses and secret redaction |
+| `cli` | `commands` plus `commands::cli`: the clap `Migrate` command line and `cli::{sync, asynchronous}::{execute, main}` |
 | `protocol` | the engine session protocols (`protocol::{postgres, mysql, sqlite}`) and their per-mode `Io` traits, for driver crates; not public API |
 
 Neither is default. With exactly one enabled, all eight of its names are

@@ -248,7 +248,17 @@ impl<'a, M: MigrationInfo> Catalog<'a, M> {
     }
 }
 
-impl<M> Catalog<'_, M> {
+impl<'a, M> Catalog<'a, M> {
+    /// The catalog's stream.
+    pub fn stream(&self) -> &'a str {
+        self.stream
+    }
+
+    /// The catalog's version scheme.
+    pub fn scheme(&self) -> VersionScheme {
+        self.scheme
+    }
+
     /// The incremental entries, in version order.
     pub(crate) fn incrementals(&self) -> impl DoubleEndedIterator<Item = &CatalogEntry> {
         self.entries.iter().filter(|e| !snapshot(e))
