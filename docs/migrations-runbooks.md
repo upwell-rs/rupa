@@ -14,8 +14,11 @@ its own name. Every command supports `--format json` for scripts, and its
   `app primary plan --url "$STAGING_DATABASE_URL"` (or set `DATABASE_URL` to
   that target). Every command that touches a target needs one: without it,
   the example application opens an empty in-memory database. Exit `0` means
-  `apply` would run exactly the listed steps. Exit `3` means something blocks
-  it, and `blockers` says what, with the version or attempt involved. Planned
+  the listed steps were eligible when the plan read the target. Exit `3`
+  means something blocked them, and `blockers` says what, with the version or
+  attempt involved. A plan is a snapshot: another runner can change the
+  target afterwards, and `apply` checks everything again under exclusion, so
+  its report is what actually ran. Planned
   steps show their SQL. Rust bodies are opaque until they run.
 - `status` and `plan` take no lock and write nothing, so they are safe while
   the application runs.
@@ -87,8 +90,10 @@ statements may have run. Nothing else runs until an operator settles it.
      attempt, the installation it undoes becomes inactive.
    - Undo the partial effects by hand, then record the attempt as restored:
      `app primary recover restored 7 --reason "dropped the partial index"`.
-     The next `apply` runs the artifact again. You may fix the artifact first,
-     because a restored attempt does not pin its checksum.
+     For an `up` attempt, the next `apply` runs the artifact again; you may
+     fix the artifact first, because a restored attempt does not pin its
+     checksum. For a `down` attempt, the installation stays active, and only
+     a new `revert` undoes it.
 5. Rerun the interrupted operation: `apply`, or `revert` for a `down`
    attempt.
 
