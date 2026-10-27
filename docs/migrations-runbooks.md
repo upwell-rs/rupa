@@ -77,11 +77,12 @@ attempt.
 A `nontransactional` body was interrupted or failed, and some of its
 statements may have run. Nothing else runs until an operator settles it.
 
-1. Run `app primary status`. Note the unresolved attempt's id, version and
-   direction (`up`, or `down` undoing an installation). An `up` attempt's
-   version is still pending, and the pending list names its source file. For
-   a `down` attempt, its down body is in the migration directory under that
-   version.
+1. Run `app primary status`. Note the unresolved attempt's id, version,
+   kind and direction (`up`, or `down` undoing an installation). For an
+   incremental `up` attempt, the pending list names its source file. For a
+   snapshot attempt, the source is the snapshot of that version, in
+   `snapshots/` or a `.snapshot.sql` or `.snapshot.rs` file. For a `down`
+   attempt, the down body is in the migration directory under that version.
 2. Confirm the runner that started it has stopped.
 3. Compare the database with what that body does. For example, check whether
    the index exists and is valid, or whether the column was added.
