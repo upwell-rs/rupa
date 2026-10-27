@@ -336,9 +336,11 @@ catalog.apply_with(connect()?, &replay)?;   // runs 1, 2, 3 and 4
 
 A target is initialized once its journal records a completed installation
 or a coverage claim (`Status::initialized`). A journal of failed or
-rolled-back attempts only is not, so a failed first snapshot runs again;
-reverting every installation does not make a target uninitialized, so it
-replays. A snapshot never runs on an initialized target, even if it is newer
+rolled-back attempts only is not, so a failed first snapshot runs again on
+the next `apply`. An interrupted one is first recorded rolled back by an
+`apply` that stops with `Error::Reconciled`; the `apply` after it runs the
+snapshot. Reverting every installation does not make a target
+uninitialized, so it replays. A snapshot never runs on an initialized target, even if it is newer
 than everything installed: it describes how to create a database, not how to
 change one. Covered incrementals are not installations. History lists only
 what ran, and `status` reports the claim as `Status::coverage`: its boundary,
