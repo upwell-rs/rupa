@@ -62,6 +62,11 @@ pub struct Records {
     pub history: Vec<HistoryEntry>,
     /// The coverage claim of an executed snapshot or an adoption, if any.
     pub coverage: Option<Coverage>,
+    /// Whether the journal records a completed installation or coverage
+    /// claim, even one since undone. Until it does, apply may initialize the
+    /// target from a snapshot; a journal of failed or rolled-back attempts
+    /// only has not been initialized.
+    pub initialized: bool,
     /// Attempts journaled as running, oldest first: interrupted, unresolved
     /// or, while a runner is live, in progress.
     pub attempts: Vec<Attempt>,
@@ -215,6 +220,11 @@ pub struct Status<'c> {
     pub history: Vec<HistoryEntry>,
     /// The coverage claim of an executed snapshot or an adoption, if any.
     pub coverage: Option<Coverage>,
+    /// Whether the journal records a completed installation or coverage
+    /// claim, even one since undone. A target that was never initialized may
+    /// start from a snapshot; reverting every installation does not make a
+    /// target uninitialized again.
+    pub initialized: bool,
     /// Running attempts, oldest first.
     pub attempts: Vec<Attempt>,
     /// Catalog incrementals neither installed nor covered, in version
@@ -234,6 +244,7 @@ impl<M> Catalog<'_, M> {
             exclusion,
             history: Vec::new(),
             coverage: None,
+            initialized: false,
             attempts: Vec::new(),
             pending: Vec::new(),
             blockers: match exclusion {
@@ -288,6 +299,7 @@ impl<M> Catalog<'_, M> {
 
         status.history = records.history;
         status.coverage = records.coverage;
+        status.initialized = records.initialized;
         status.attempts = records.attempts;
 
         status

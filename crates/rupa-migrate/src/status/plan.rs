@@ -77,7 +77,7 @@ impl<M> Catalog<'_, M> {
         dialect: DialectId,
         options: &ApplyOptions,
     ) -> Result<ApplyPlan<'c>, ValidationError> {
-        let initial = status.history.is_empty() && status.coverage.is_none();
+        let initial = !status.initialized;
         let Schedule {
             snapshot,
             entries,
@@ -106,8 +106,8 @@ impl<M> Catalog<'_, M> {
 
     /// Selects from the `pending` incrementals what an apply with `options`
     /// runs, removing the late blockers it permits or leaves above its
-    /// target version. On an `initial` target, which records no
-    /// installation or coverage, it prefers the newest snapshot at or below
+    /// target version. On an `initial` target, which never recorded a
+    /// completed installation or coverage, it prefers the newest snapshot at or below
     /// the target version whose covered incrementals are all pending, and
     /// runs only the incrementals above it.
     pub(crate) fn schedule<'c>(

@@ -4,6 +4,20 @@
 /// in async mode.
 macro_rules! coverage_steps {
     ([$($async:tt)*] [$($await:tt)*]) => {
+        /// Whether the journal in the owned or current namespace records a
+        /// completed installation or coverage claim, undone ones included.
+        pub $($async)* fn initialized<T: Io<State = State>>(io: &mut T) -> Result<bool, Error<T::Error>> {
+            let namespace = namespace(io) $($await)*?;
+
+            if !has_journal(io, &namespace) $($await)*? {
+                return Ok(false);
+            }
+
+            let count = scalar(io, &sql::initialized(&journal(&namespace)), &[], SqlType::I64) $($await)*?;
+
+            Ok(int(&count).is_some_and(|count| count > 0))
+        }
+
         /// Reads the coverage claim from the owned or current namespace.
         pub $($async)* fn coverage<T: Io<State = State>>(
             io: &mut T,

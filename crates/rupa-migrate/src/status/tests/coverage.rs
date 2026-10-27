@@ -172,6 +172,38 @@ fn a_managed_target_never_runs_a_snapshot() {
 }
 
 #[test]
+fn only_a_journal_that_was_never_initialized_may_start_from_a_snapshot() {
+    let entries = [imperative("1"), imperative("2"), snapshot("2")];
+    let catalog = catalog(&entries);
+    let journal = |initialized| {
+        Journal::Managed(Records {
+            stream: "primary".into(),
+            scheme: "numbered".into(),
+            history: Vec::new(),
+            coverage: None,
+            initialized,
+            attempts: Vec::new(),
+        })
+    };
+    let steps_for = |initialized| {
+        let status = catalog.classify(inspection(Exclusion::Free, journal(initialized)));
+
+        steps(&plan(&catalog, status, &ApplyOptions::DEFAULT)).0
+    };
+
+    assert_eq!(
+        steps_for(false),
+        ["s2"],
+        "a journal of failed attempts only can still start from the snapshot"
+    );
+    assert_eq!(
+        steps_for(true),
+        ["1", "2"],
+        "a target whose installations were all reverted replays instead"
+    );
+}
+
+#[test]
 fn covered_incrementals_count_as_present_and_only_the_tail_is_pending() {
     let entries = [imperative("1"), imperative("2"), imperative("3")];
     let catalog = catalog(&entries);

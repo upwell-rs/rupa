@@ -146,6 +146,16 @@ pub fn coverage(journal: &str) -> String {
     )
 }
 
+/// Completed installations and coverage claims, undone ones included.
+pub fn initialized(journal: &str) -> String {
+    format!(
+        "
+        SELECT count(*)
+        FROM {journal}
+        WHERE (kind IN ('up', 'snapshot') AND status IN ('applied', 'recovered')) OR kind = 'adopt'"
+    )
+}
+
 /// Records a covered incremental: version `$1`, checksum `$2`, covered by
 /// snapshot attempt or adoption event `$3`.
 pub fn insert_covered(journal: &str) -> String {

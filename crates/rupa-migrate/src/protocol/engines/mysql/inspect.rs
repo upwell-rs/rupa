@@ -24,6 +24,7 @@ macro_rules! inspect {
             let stored = query(io, sql::STORED, &[], &[SqlType::Text; 2]) $($await)*?;
             let history = query(io, sql::HISTORY, &[], &HISTORY_COLUMNS) $($await)*?;
             let coverage = query(io, sql::COVERAGE, &[], &COVERAGE_COLUMNS) $($await)*?;
+            let initialized = scalar(io, sql::INITIALIZED, &[], SqlType::I64) $($await)*?;
             let running = query(io, sql::RUNNING, &[], &RUNNING_COLUMNS) $($await)*?;
             let [stream, scheme] = <[Value; 2]>::try_from(single(stored, "journal header")?)
                 .map_err(|_| Error::History("invalid journal header".into()))?;
@@ -35,6 +36,7 @@ macro_rules! inspect {
                     scheme,
                     history,
                     coverage,
+                    initialized,
                     running,
                 })?,
             })

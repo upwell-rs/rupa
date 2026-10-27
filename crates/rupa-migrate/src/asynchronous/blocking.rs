@@ -28,6 +28,10 @@ impl<S: sync::Session + Send> Session for Blocking<S> {
         self.0.coverage()
     }
 
+    async fn initialized(&mut self) -> Result<bool, Error<S::Error>> {
+        self.0.initialized()
+    }
+
     async fn inspect(&mut self) -> Result<Inspection, Error<S::Error>> {
         self.0.inspect()
     }

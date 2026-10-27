@@ -315,7 +315,7 @@ checksum, and makes it part of the snapshot's checksum: editing a covered
 incremental, or adding one at or below the snapshot's version, changes the
 snapshot. Adding one above it does not.
 
-On a target that records no installation and no coverage, `apply` runs the
+On a target that has never been initialized, `apply` runs the
 newest snapshot at or below `ApplyOptions::through` (or the newest of all),
 records its manifest as covered, and then runs only the incrementals above
 it. Without an eligible snapshot it replays the incrementals.
@@ -334,8 +334,12 @@ let replay = ApplyOptions { init: Init::FullReplay, ..ApplyOptions::DEFAULT };
 catalog.apply_with(connect()?, &replay)?;   // runs 1, 2, 3 and 4
 ```
 
-A snapshot never runs on a managed target, even if it is newer than
-everything installed: it describes how to create a database, not how to
+A target is initialized once its journal records a completed installation
+or a coverage claim (`Status::initialized`). A journal of failed or
+rolled-back attempts only is not, so a failed first snapshot runs again;
+reverting every installation does not make a target uninitialized, so it
+replays. A snapshot never runs on an initialized target, even if it is newer
+than everything installed: it describes how to create a database, not how to
 change one. Covered incrementals are not installations. History lists only
 what ran, and `status` reports the claim as `Status::coverage`: its boundary,
 the snapshot's installation rank and checksum, and the covered versions with

@@ -57,7 +57,7 @@ fn snapshot_files_and_the_snapshots_directory_generate_snapshots() {
 
 #[test]
 fn snapshots_without_down_scripts_or_shared_versions_are_required() {
-    let cases: [RejectedCase; 4] = [
+    let cases: [RejectedCase; 5] = [
         (
             &[
                 ("1_create.sql", "SELECT 1;"),
@@ -88,6 +88,16 @@ fn snapshots_without_down_scripts_or_shared_versions_are_required() {
                 ("snapshots/1_create.snapshot.sql", "SELECT 1;"),
             ],
             |e| matches!(e, Error::Name(_)),
+        ),
+        (
+            &[
+                ("1_create.sql", "SELECT 1;"),
+                (
+                    "snapshots/1_seed.rs",
+                    "pub struct Seed;\nimpl<S> Migration<S> for Seed {\n    fn up(&self) {}\n    fn down(&self) {}\n}\n",
+                ),
+            ],
+            |e| matches!(e, Error::SnapshotDown(path) if path.ends_with("snapshots/1_seed.rs")),
         ),
     ];
 
