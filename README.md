@@ -61,7 +61,7 @@ no database server, Docker, or database file.
 
 | Example | What it shows | Run |
 |---|---|---|
-| [SQL/Rust migrations](examples/migrations) | `db` crate with a discovered migration directory, applied by an `app` crate; immutable history, typed Rust data steps | `cargo run -p rupa-example-app` |
+| [SQL/Rust migrations](examples/migrations) | `db` crate with numbered and timestamped migration streams; an `app` crate embedding the operator command line | `cargo run -p rupa-example-app -- primary apply` |
 | [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
 | [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
 | [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |
@@ -92,6 +92,8 @@ is a cargo feature of `rupa`:
 | `tokio` | sync methods of async repositories block with tokio's `block_in_place` |
 | `tls-rustls` | TLS on rustls (ring) for every enabled networked driver |
 | `migrations` | explicit SQL/Rust migrations; native SQLite, and PostgreSQL on sync and tokio-postgres drivers ([guide](docs/migrations.md)) |
+| `migration-commands` | operator commands over the migration engine, with human/JSON reports, exit statuses and redaction ([guide](docs/migrations.md#operator-commands), [runbooks](docs/migrations-runbooks.md)) |
+| `migration-cli` | `migration-commands` plus an embeddable clap command line |
 | `full` | every driver, plus `dynamic` and `migrations` |
 
 Most applications know their database: use its pool directly

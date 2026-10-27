@@ -7,9 +7,11 @@ discovered migration directory.
 
 ## Usage
 
-`build.rs` calls `rupa_build::Migrations::new("primary").compile()`, and
-`src/lib.rs` exposes the generated catalog as `rupa_example_db::migrations`.
-`cargo nextest run -p rupa-example-db` applies it to an in-memory SQLite database.
+`build.rs` compiles two streams: `primary`, numbered, from `migrations/`, and
+`reporting`, versioned by UTC timestamps, from `reporting/`. `src/lib.rs`
+exposes their catalogs as `rupa_example_db::migrations` and
+`rupa_example_db::reporting`. `cargo nextest run -p rupa-example-db` applies
+both to SQLite databases, `reporting` through the operator commands.
 
 ## Internal role
 
@@ -21,6 +23,10 @@ Migrations 1, 3 and 4 are reversible, through a `.down.sql` file, a scripted
 refused before anything runs. `snapshots/0003_notes_with_slugs.sql` creates the
 state migrations 1 to 3 leave, so a fresh database runs it and then only
 migration 4; the tests compare that path with a full replay.
+
+`reporting/` shows the same authoring with timestamp versions: a SQL file
+with a `.down.sql` sibling, and an imperative Rust migration with a `down`
+method, written by the `create` command.
 
 ## Feature flags
 
