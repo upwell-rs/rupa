@@ -15,7 +15,8 @@ use upwell::component;
 /// How often the application built [`Marker`].
 static BUILDS: AtomicUsize = AtomicUsize::new(0);
 
-/// A component the application would build before serving.
+/// A component every build of the application constructs; the build test
+/// in `build.rs` proves it.
 #[component(factory = build_marker)]
 pub struct Marker;
 
@@ -149,19 +150,4 @@ async fn invalid_target_configuration_is_a_usage_error() {
     .await;
 
     assert_eq!(exit_code(status), ExitCode::from(Exit::Usage));
-}
-
-#[tokio::test]
-async fn building_the_application_builds_the_marker() {
-    let prepared = Example::builder()
-        .expect("the generated builder constructs")
-        .prepare()
-        .expect("the application prepares");
-    let _app = prepared.build().await.expect("the application builds");
-
-    assert_eq!(
-        BUILDS.load(Ordering::SeqCst),
-        1,
-        "the marker proves a build"
-    );
 }
