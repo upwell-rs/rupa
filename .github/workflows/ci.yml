@@ -84,7 +84,8 @@ jobs:
         run: cargo nextest run --profile ci --workspace --features rupa/full
       - if: matrix.toolchain == 'nightly'
         run: cargo nextest run --profile ci --workspace --features rupa/full -E 'not test(ui)'
-      - run: cargo run -p rupa-example-app
+      - run: cargo run -p rupa-example-app -- primary apply
+      - run: cargo run -p rupa-example-app -- reporting apply
       # nextest doesn't run doctests.
       - run: cargo test --doc --workspace --features rupa/full
       # trybuild's work dir looks like a nested target dir to rust-cache, whose

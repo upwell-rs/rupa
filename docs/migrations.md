@@ -614,7 +614,7 @@ fields.
 | 3 | `blocked` | refused before changing anything, or a status or plan reports blockers |
 | 4 | `busy` | another runner owns the target, or SQLite's claim is set |
 | 5 | `uncertain` | an unresolved attempt needs [recovery](#recovery) |
-| 6 | `reconciled` | interrupted attempts were rolled back; apply again |
+| 6 | `reconciled` | interrupted attempts were rolled back; rerun the interrupted apply or revert |
 | 7 | `migration` | a migration body failed; earlier commits remain |
 
 Every rendered outcome passes through a `Redactor`. The CLI masks the

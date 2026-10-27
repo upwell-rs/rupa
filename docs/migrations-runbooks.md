@@ -3,14 +3,17 @@
 Runbooks for the [operator commands](migrations.md#operator-commands). The
 examples use the example application's command line
 (`app <stream> <command>`). Your application embeds the same commands under
-its own name. Every command prints `--format json` for scripts, and its
+its own name. Every command supports `--format json` for scripts, and its
 [exit status](migrations.md#reports-and-exit-statuses) says what happened.
 
 ## Checks before a deployment
 
 - In CI, run `app primary validate --engine postgres` for every engine you
   deploy to. It is offline: no database, no credentials.
-- Against staging, then production, run `app primary plan`. Exit `0` means
+- Against staging, then production, run
+  `app primary plan --url "$STAGING_DATABASE_URL"` (or set `DATABASE_URL` to
+  that target). Every command that touches a target needs one: without it,
+  the example application opens an empty in-memory database. Exit `0` means
   `apply` would run exactly the listed steps. Exit `3` means something blocks
   it, and `blockers` says what, with the version or attempt involved. Planned
   steps show their SQL. Rust bodies are opaque until they run.
@@ -54,14 +57,17 @@ and every later run fails with `busy`.
    pod or container has terminated. While it runs, its claim is valid.
 2. Release the claim:
    `app primary recover release-claim --reason "pod web-7 terminated" --evidence "kubectl events"`.
-3. Run `apply`. An interrupted transactional attempt is now recorded as
-   rolled back, and `apply` exits `6` (`reconciled`). Run `apply` again.
+3. Rerun the interrupted command. An interrupted transactional attempt is
+   now recorded as rolled back, and the command exits `6` (`reconciled`).
+   Run it once more.
 
 ## Reconciled attempts (exit 6)
 
 A transactional attempt was interrupted, so its changes and its completion
-never committed. `apply` recorded it as rolled back and ran nothing. Run
-`apply` again: the artifact runs from the start, as a new attempt.
+never committed. The next `apply` or `revert` recorded it as rolled back and
+ran nothing. Rerun the interrupted operation: `apply` after an interrupted
+apply, `revert` after an interrupted revert. It runs from the start, as a new
+attempt.
 
 ## Uncertain attempts (exit 5)
 
@@ -83,7 +89,8 @@ statements may have run. Nothing else runs until an operator settles it.
      `app primary recover restored 7 --reason "dropped the partial index"`.
      The next `apply` runs the artifact again. You may fix the artifact first,
      because a restored attempt does not pin its checksum.
-5. Run `apply`.
+5. Rerun the interrupted operation: `apply`, or `revert` for a `down`
+   attempt.
 
 `recover` refuses an assertion it can check is wrong: an unknown or resolved
 attempt, or a changed or missing artifact for `completed`. Those exit `3`
