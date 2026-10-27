@@ -50,4 +50,5 @@ paths macro output refers to.
 | `migration-commands` | `migrations` plus operator commands (`rupa::migrate::commands`): typed commands, human/JSON reports, exit statuses, redaction ([guide](../../docs/migrations.md#operator-commands)) |
 | `migration-cli` | `migration-commands` plus the embeddable clap command line (`rupa::migrate::commands::cli`) |
 | `full` | every driver, plus `dynamic` and `migrations` |
-| `upwell` | the Upwell DI integration (in development) |
+| `upwell` | the Upwell integration (`rupa::upwell`; in development) |
+| `upwell-migrations` | `upwell` and `migration-cli` plus migration commands in an Upwell application's command line, a plugin per target ([guide](../../docs/migrations.md#upwell-applications)); Upwell is a pinned git dependency until it is released |

@@ -45,12 +45,13 @@ uuid = [
 
 # Sync execution where a mode split exists (so far migrations:
 # `rupa::migrate::sync`). Sync-only drivers enable it; neither mode is default.
-sync = ["rupa-migrate?/sync"]
+sync = ["rupa-migrate?/sync", "rupa-upwell?/sync"]
 # Async executors, transactions, pools and repositories (`async fn` in
 # `#[repository]`). Runtime-agnostic: no runtime is compiled in by this alone.
 async = [
     "rupa-core/async",
     "rupa-migrate?/async",
+    "rupa-upwell?/async",
     "rupa-macros/async",
     "dep:pollster",
     "rupa-driver-memory?/async",
@@ -117,6 +118,10 @@ full = [
 
 # DI integrations. Each is one optional dep + one feature; never default.
 upwell = ["dep:rupa-upwell"]
+# Migration commands in an Upwell application's command line, a plugin per
+# migration target (`rupa::upwell::migrations`). Upwell is pinned to a git
+# commit until it is released, so this cannot be published yet.
+upwell-migrations = ["upwell", "migration-cli", "rupa-upwell/migrations"]
 
 [dependencies]
 rupa-migrate = { workspace = true, optional = true }
