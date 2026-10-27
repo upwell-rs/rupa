@@ -54,4 +54,5 @@ fn run<M: Migration<SqliteExecutor>>(
         Some(path) => SqliteExecutor::open(path),
         None => SqliteExecutor::open_in_memory(),
     })
+    .into()
 }

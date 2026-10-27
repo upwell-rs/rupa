@@ -3,15 +3,13 @@
 //! [`Migrate`] is a complete parser for a program of its own, and an
 //! `Args` to embed in an application's command line, such as a `migrate`
 //! subcommand or one per stream. `sync::execute` or `asynchronous::execute`
-//! runs a parsed one, prints its outcome and returns its [`Exit`](super::Exit) as an
-//! `ExitCode`; `main` also parses the process arguments.
+//! runs a parsed one, prints its outcome and returns its [`Exit`](super::Exit);
+//! `main` also parses the process arguments and returns it as an `ExitCode`.
 
 mod args;
 
+use super::{Exit, Format, Outcome, Redactor};
 use std::io::Write as _;
-use std::process::ExitCode;
-
-use super::{Format, Outcome, Redactor};
 
 pub use args::{
     Action, AdoptArgs, ApplyArgs, Audit, CreateArgs, Migrate, Operation, RecoverArgs, RevertArgs,
@@ -19,20 +17,21 @@ pub use args::{
 
 /// Prints `outcome` in `format`, masking what `redactor` knows: a
 /// successful human outcome to stdout and any other to stderr, JSON always
-/// to stdout. Returns its exit status.
-pub fn print(outcome: &Outcome<'_>, format: Format, redactor: &Redactor) -> ExitCode {
+/// to stdout. Returns its exit status, or [`Exit::Failed`] if it could not
+/// be written.
+pub fn print(outcome: &Outcome<'_>, format: Format, redactor: &Redactor) -> Exit {
     let exit = outcome.exit();
     let text = outcome.render(format, redactor);
     let written = match (format, exit) {
-        (Format::Human, super::Exit::Success) | (Format::Json, _) => {
+        (Format::Human, Exit::Success) | (Format::Json, _) => {
             writeln!(std::io::stdout().lock(), "{}", text.trim_end())
         }
         (Format::Human, _) => writeln!(std::io::stderr().lock(), "{}", text.trim_end()),
     };
 
     match written {
-        Ok(()) => exit.into(),
-        Err(_) => super::Exit::Failed.into(),
+        Ok(()) => exit,
+        Err(_) => Exit::Failed,
     }
 }
 
@@ -51,14 +50,15 @@ macro_rules! entry {
             use crate::Catalog;
             use crate::commands::{Exit, Failure, Outcome, redact_url};
 
-            /// Runs `migrate` against `catalog` and prints its outcome.
-            /// `connect` receives `--url` (or `DATABASE_URL`), and is called
-            /// only by a command that reads or changes the target.
+            /// Runs `migrate` against `catalog`, prints its outcome and
+            /// returns its exit status. `connect` receives `--url` (or
+            /// `DATABASE_URL`), and is called only by a command that reads or
+            /// changes the target.
             pub $($async)* fn execute<M, S, E, $($connect)*>(
                 migrate: &Migrate,
                 catalog: &Catalog<'_, M>,
                 connect: F,
-            ) -> ExitCode
+            ) -> Exit
             where
                 M: Migration<S> $($bound)*,
                 S: Session,
@@ -89,7 +89,7 @@ macro_rules! entry {
                 S: Session,
                 E: std::error::Error + 'static,
             {
-                execute(&Migrate::parse(), catalog, connect) $($await)*
+                execute(&Migrate::parse(), catalog, connect) $($await)*.into()
             }
         }
     };
