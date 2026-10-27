@@ -31,7 +31,7 @@ use std::collections::HashMap;
 
 use rupa_core::column::ColumnMeta;
 use rupa_core::dialect::Memory;
-use rupa_core::exec::{Executor, Outcome};
+use rupa_core::exec::{Engine, Executor, Immediate, Outcome};
 use rupa_core::ir::{
     Delete, FromClause, Insert, JoinKind, Select, Statement, TableRef, TxStatement, Update,
 };
@@ -381,6 +381,10 @@ impl MemoryDb {
         table.rows.retain(|_| it.next().unwrap_or(true));
         Ok((before - table.rows.len()) as u64)
     }
+}
+
+impl Engine for MemoryDb {
+    type Completion = Immediate;
 }
 
 impl Executor for MemoryDb {

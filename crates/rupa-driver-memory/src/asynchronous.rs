@@ -4,7 +4,7 @@ use std::future::Future;
 
 use rupa_core::Entity;
 use rupa_core::dialect::Memory;
-use rupa_core::exec::{AsyncExecutor, Outcome};
+use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
 use rupa_core::tx::{AsyncTx, AsyncTxConnection, TxConnection};
@@ -56,6 +56,10 @@ impl MemoryDb {
     pub fn into_async(self) -> AsyncMemoryDb {
         AsyncMemoryDb(self)
     }
+}
+
+impl Engine for AsyncMemoryDb {
+    type Completion = Awaited;
 }
 
 impl AsyncExecutor for AsyncMemoryDb {

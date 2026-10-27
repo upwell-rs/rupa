@@ -3,6 +3,9 @@
 //!
 //! Drivers implement one method, `execute`, which runs a statement and
 //! returns an [`Outcome`]. The provided `run` decodes the outcome into `R`.
+//! An executor that also names its [`Engine::Completion`] runs queries through
+//! [`Query::execute`] as well: `query.execute(&mut conn)?` on a sync engine,
+//! `query.execute(&mut conn).await?` on an async one.
 //!
 //! [`Executor`] and the async `AsyncExecutor` are generic-friendly but not
 //! dyn-compatible (`run` is generic, and the async methods return `impl Future`).
@@ -10,6 +13,7 @@
 
 #[cfg(feature = "async")]
 mod asynchronous;
+mod engine;
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -21,7 +25,8 @@ use crate::query::{Expect, Output, Query, QueryResult};
 use crate::row::RowCursor;
 
 #[cfg(feature = "async")]
-pub use asynchronous::{AsyncExecutor, Blocking, BoxFuture};
+pub use asynchronous::{AsyncExecutor, Awaited, Blocking, BoxFuture};
+pub use engine::{Completion, Engine, Executed, Immediate};
 
 /// What executing a statement produced, owned so it can cross await points.
 pub enum Outcome {

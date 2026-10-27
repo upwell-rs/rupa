@@ -6,7 +6,7 @@ use std::ops::DerefMut;
 
 use super::{TxConn, TxOptions, finish_statement, open_statement};
 use crate::error::TxError;
-use crate::exec::{AsyncExecutor, Outcome};
+use crate::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use crate::ir::{Statement, TxStatement};
 use crate::query::Expect;
 
@@ -157,6 +157,13 @@ where
             self.conn.defer_rollback(self.depth);
         }
     }
+}
+
+impl<C> Engine for AsyncTx<C>
+where
+    C: DerefMut<Target: AsyncTxConnection> + Send,
+{
+    type Completion = Awaited;
 }
 
 impl<C> AsyncExecutor for AsyncTx<C>

@@ -12,6 +12,15 @@ Applications use it through the `rupa` facade. Driver crates implement its
 traits: `Executor` / `AsyncExecutor` (run one statement), `TxConnection` /
 `AsyncTxConnection` (transaction control), and `Pool` / `AsyncPool`.
 
+Each executor also implements `Engine`, naming its `Completion`:
+`Immediate` for a sync executor and `Awaited` for an async one. That lets
+`query.execute(&mut engine)` return `Result<R, E>` on a sync engine and a
+future of it on an async one. The async future is boxed, because stable Rust
+cannot yet name an `async fn`'s future in an associated type. `engine.run(query)`
+stays unboxed. A third-party executor adds one line,
+`impl Engine for MyExecutor { type Completion = Immediate; }`, to support
+`execute`.
+
 ## Internal role
 
 - `builder`, `expr`, `column`, `join` build `Query<R>` values; `ir` is what

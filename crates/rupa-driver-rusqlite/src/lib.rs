@@ -57,7 +57,7 @@ pub mod pool;
 mod value;
 
 use rupa_core::Sqlite;
-use rupa_core::exec::{Executor, Outcome};
+use rupa_core::exec::{Engine, Executor, Immediate, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
 use rupa_core::tx::{PendingRollback, Tx, TxConnection};
@@ -162,6 +162,10 @@ impl std::fmt::Debug for SqliteExecutor {
             .field("dirty", &self.pending.is_pending())
             .finish_non_exhaustive()
     }
+}
+
+impl Engine for SqliteExecutor {
+    type Completion = Immediate;
 }
 
 impl Executor for SqliteExecutor {

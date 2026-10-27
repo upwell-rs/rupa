@@ -24,7 +24,7 @@ use std::collections::BTreeMap;
 
 use crate::dialect::{Capability, Dialect, Supports, caps};
 use crate::error::TxError;
-use crate::exec::{Executor, Outcome};
+use crate::exec::{Engine, Executor, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
 use crate::tx::{Transaction, Transactional, TxOptions};
@@ -148,6 +148,11 @@ impl<T> SecureTx<T> {
     pub fn inner(&mut self) -> &mut T {
         &mut self.tx
     }
+}
+
+/// A secured transaction runs queries in its transaction's mode.
+impl<T: Engine> Engine for SecureTx<T> {
+    type Completion = T::Completion;
 }
 
 impl<T: Executor> Executor for SecureTx<T> {

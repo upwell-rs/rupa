@@ -5,7 +5,7 @@ use std::future::Future;
 use std::ops::{Deref, DerefMut};
 
 use super::super::{AcquireAsync, AsyncMode, Repo};
-use crate::exec::{AsyncExecutor, Outcome};
+use crate::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
 
@@ -46,6 +46,10 @@ impl<E> DerefMut for SharedAsyncConn<'_, E> {
     fn deref_mut(&mut self) -> &mut E {
         &mut self.0
     }
+}
+
+impl<E: AsyncExecutor> Engine for SharedAsyncConn<'_, E> {
+    type Completion = Awaited;
 }
 
 impl<E: AsyncExecutor> AsyncExecutor for SharedAsyncConn<'_, E> {

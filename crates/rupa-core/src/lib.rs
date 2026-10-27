@@ -86,8 +86,8 @@ pub use erased::{BoxAsyncExecutor, BoxAsyncTx};
 pub use erased::{BoxExecutor, BoxTx};
 pub use error::{ConnectError, DecodeError, DslError, DynError, ResultError, RowError, TxError};
 #[cfg(feature = "async")]
-pub use exec::{AsyncExecutor, Blocking};
-pub use exec::{ExecError, Executor, Outcome};
+pub use exec::{AsyncExecutor, Awaited, Blocking};
+pub use exec::{Completion, Engine, ExecError, Executed, Executor, Immediate, Outcome};
 pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
 pub use join::{
     Admits, At, Fwd, Has, Inner, IntoJoined, JoinBuilder, JoinOnto, JoinPart, JoinTo, Joined, Left,

@@ -3,7 +3,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use super::{ExecError, Executor, Outcome};
+use super::{Completion, Engine, ExecError, Executor, Outcome};
 use crate::dialect::Dialect;
 use crate::ir::{Statement, TxStatement};
 use crate::query::{Expect, Query, QueryResult};
@@ -47,6 +47,27 @@ pub trait AsyncExecutor: Send {
     }
 }
 
+/// Completes queries through a future: `execute` returns a boxed future of
+/// `Result<R, E::Error>`, to `.await`. The future is boxed because an
+/// associated type cannot name the executor's `async` future on stable Rust.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Awaited {}
+
+impl<E: AsyncExecutor, R: QueryResult + Send> Completion<E, R> for Awaited {
+    type Output<'e>
+        = BoxFuture<'e, Result<R, E::Error>>
+    where
+        E: 'e,
+        R: 'e;
+
+    fn run<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
+    where
+        R: 'e,
+    {
+        Box::pin(engine.run(query))
+    }
+}
+
 /// A sync [`Executor`] used as an [`AsyncExecutor`]: each call runs the
 /// statement synchronously and returns a future that is already complete.
 ///
@@ -72,6 +93,10 @@ impl<E: Executor + Send> AsyncExecutor for Blocking<E> {
     ) -> impl Future<Output = Result<Outcome, E::Error>> + Send {
         std::future::ready(self.0.execute(statement, expect))
     }
+}
+
+impl<E: Executor + Send> Engine for Blocking<E> {
+    type Completion = Awaited;
 }
 
 /// A sync connection's transactions, driven from async code. Dropping an open

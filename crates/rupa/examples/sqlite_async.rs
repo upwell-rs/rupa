@@ -42,15 +42,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let task = repository.get(1).await?.expect("committed task");
     let mut conn = repository.into_inner();
     assert_eq!(task.title, "write examples");
-    conn.run(
-        update::<Task>()
-            .one(&TaskPatch {
-                id: task.id,
-                done: Some(true),
-            })
-            .affected(),
-    )
-    .await?;
+    update::<Task>()
+        .one(&TaskPatch {
+            id: task.id,
+            done: Some(true),
+        })
+        .affected()
+        .execute(&mut conn)
+        .await?;
     assert!(
         TasksView::new(&mut conn)
             .get(task.id)
