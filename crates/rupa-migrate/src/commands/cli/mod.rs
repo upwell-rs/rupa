@@ -3,7 +3,7 @@
 //! [`Migrate`] is a complete parser for a program of its own, and an
 //! `Args` to embed in an application's command line, such as a `migrate`
 //! subcommand or one per stream. `sync::execute` or `asynchronous::execute`
-//! runs a parsed one, prints its outcome and returns its [`Exit`](super::Exit);
+//! runs a parsed one, prints its outcome and returns its [`Exit`];
 //! `main` also parses the process arguments and returns it as an `ExitCode`.
 
 mod args;
