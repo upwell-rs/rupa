@@ -51,4 +51,4 @@ paths macro output refers to.
 | `migration-cli` | `migration-commands` plus the embeddable clap command line (`rupa::migrate::commands::cli`) |
 | `full` | every driver, plus `dynamic` and `migrations` |
 | `upwell` | the Upwell integration (`rupa::upwell`; in development) |
-| `upwell-migrations` | `upwell` and `migration-cli` plus migration commands in an Upwell application's command line, a plugin per target ([guide](../../docs/migrations.md#upwell-applications)); Upwell is a pinned git dependency until it is released |
+| `upwell-database` | `upwell` and `migration-cli` plus `rupa::upwell::database!`: configured databases in an Upwell application, gated on their migrations, with `Arc<dyn Repository>` providers and migration commands ([guide](../../docs/migrations.md#upwell-applications)); Upwell is a pinned git dependency until it is released |

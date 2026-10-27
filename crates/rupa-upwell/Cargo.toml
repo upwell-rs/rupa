@@ -5,21 +5,30 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
-description = "Upwell integration for RUPA: migration commands in an Upwell application's command line"
+description = "Upwell integration for RUPA: configured databases, startup migrations, repositories and migration commands"
 
 [features]
-# Migration commands contributed to an Upwell application's command line by a
-# plugin per migration target (`rupa_upwell::migrations`), in each enabled
-# mode (alone: nothing).
-migrations = ["dep:rupa-migrate", "rupa-migrate/cli", "dep:upwell-app", "dep:upwell-config", "dep:serde", "dep:thiserror"]
-# Targets on sync sessions (`migrations::sync`).
+# Databases declared with `database!`: typed configuration, a singleton pool
+# component gated on its migrations, `Arc<dyn Repository>` providers and the
+# migration commands, for pools of each enabled mode (alone: nothing).
+database = [
+    "dep:rupa-core",
+    "dep:rupa-migrate",
+    "rupa-migrate/cli",
+    "dep:upwell",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:thiserror",
+]
+# Sync pools (rusqlite, postgres, mysql).
 sync = ["rupa-migrate?/sync"]
-# Targets on async sessions (`migrations::asynchronous`).
-async = ["rupa-migrate?/async"]
+# Async pools (tokio-postgres, sqlx).
+async = ["rupa-core?/async", "rupa-migrate?/async"]
 
 [dependencies]
+rupa-core = { workspace = true, optional = true }
 rupa-migrate = { workspace = true, optional = true }
-upwell-app = { workspace = true, optional = true }
-upwell-config = { workspace = true, optional = true }
+upwell = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
