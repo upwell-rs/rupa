@@ -41,6 +41,11 @@ pub trait Session: Connection {
     /// code or creating metadata.
     fn coverage(&mut self) -> Result<Option<Coverage>, Error<Self::Error>>;
 
+    /// Whether the journal records a completed installation or coverage
+    /// claim, even one since undone, without executing user code or creating
+    /// metadata. Until it does, apply may initialize the target from a snapshot.
+    fn initialized(&mut self) -> Result<bool, Error<Self::Error>>;
+
     /// Reads the target's journal and whether another runner excludes it,
     /// without acquiring exclusion, writing or executing user code. Only
     /// possible on a session that owns no run.

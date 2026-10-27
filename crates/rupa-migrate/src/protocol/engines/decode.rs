@@ -124,6 +124,8 @@ pub struct Rows {
     pub history: Vec<Vec<Value>>,
     /// Coverage rows.
     pub coverage: Vec<Vec<Value>>,
+    /// The count of completed installations and coverage claims, undone ones included.
+    pub initialized: Value,
     /// Running attempt rows.
     pub running: Vec<Vec<Value>>,
 }
@@ -139,6 +141,7 @@ pub fn records<E: std::error::Error>(rows: Rows) -> Result<Journal, Error<E>> {
         scheme,
         history: decode_history(rows.history)?,
         coverage: decode_coverage(rows.coverage)?,
+        initialized: int(&rows.initialized).is_some_and(|count| count > 0),
         attempts: decode_attempts(rows.running)?,
     }))
 }

@@ -174,6 +174,10 @@ fn load(path: &Path, version: Version, name: String, entry: Entry) -> Result<Art
         Entry::RustFile(_) | Entry::RustDir(_) => rust_kind(&root, file_name, &name)?,
         Entry::Sql(_) | Entry::SqlDown => Kind::default(),
     };
+    if snapshot && kind.down {
+        return Err(Error::SnapshotDown(root));
+    }
+
     let (header, body) = match entry {
         Entry::Sql(_) | Entry::SqlDown => {
             let source = read(path)?;

@@ -175,6 +175,12 @@ macro_rules! __session {
                 $crate::protocol::$engine::$mode::coverage(self) $($await)*
             }
 
+            $($async)* fn initialized(
+                &mut self,
+            ) -> Result<bool, $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
+                $crate::protocol::$engine::$mode::initialized(self) $($await)*
+            }
+
             $($async)* fn inspect(
                 &mut self,
             ) -> Result<$crate::Inspection, $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {

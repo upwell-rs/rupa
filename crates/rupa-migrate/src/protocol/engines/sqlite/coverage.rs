@@ -4,6 +4,18 @@
 /// in async mode.
 macro_rules! coverage_steps {
     ([$($async:tt)*] [$($await:tt)*]) => {
+        /// Whether the journal in `main` records a completed installation or
+        /// coverage claim, undone ones included.
+        pub $($async)* fn initialized<T: SqliteIo<State = State>>(io: &mut T) -> Result<bool, Error<T::Error>> {
+            if !has_journal(io) $($await)*? {
+                return Ok(false);
+            }
+
+            let count = scalar(io, sql::INITIALIZED, &[], SqlType::I64) $($await)*?;
+
+            Ok(int(&count).is_some_and(|count| count > 0))
+        }
+
         /// Reads the coverage claim from `main`.
         pub $($async)* fn coverage<T: SqliteIo<State = State>>(
             io: &mut T,

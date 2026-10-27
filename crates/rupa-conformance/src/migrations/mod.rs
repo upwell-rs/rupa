@@ -65,6 +65,7 @@ macro_rules! all_cases {
                 case_a_fresh_target_runs_the_snapshot_then_the_tail,
                 case_the_target_version_selects_the_snapshot_and_replay_skips_it,
                 case_a_managed_target_never_runs_a_newer_snapshot,
+                case_only_a_never_initialized_journal_starts_from_a_snapshot,
                 case_snapshot_and_replay_reach_the_same_state,
                 case_work_added_at_or_below_a_snapshot_is_uncovered,
                 case_covered_sources_must_stay_unchanged_and_present,

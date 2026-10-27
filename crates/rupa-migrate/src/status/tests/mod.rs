@@ -167,6 +167,7 @@ fn journal(
     Journal::Managed(Records {
         stream: "primary".into(),
         scheme: "numbered".into(),
+        initialized: !history.is_empty() || coverage.is_some(),
         history,
         coverage,
         attempts,
@@ -344,6 +345,7 @@ fn another_stream_is_not_compared() {
         scheme: "numbered".into(),
         history: vec![installed(&catalog, "7", 1)],
         coverage: None,
+        initialized: true,
         attempts: Vec::new(),
     });
 

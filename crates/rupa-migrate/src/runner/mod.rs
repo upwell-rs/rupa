@@ -239,8 +239,10 @@ macro_rules! mode {
         ) -> Result<(), crate::RunError<S::Error, M::Error>> {
             let history = session.history() $($await)* .map_err(crate::RunError::infrastructure)?;
             let coverage = session.coverage() $($await)* .map_err(crate::RunError::infrastructure)?;
-            let schedule = crate::runner::schedule(catalog, &history, coverage.as_ref(), options)
-                .map_err(crate::RunError::infrastructure)?;
+            let initialized = session.initialized() $($await)* .map_err(crate::RunError::infrastructure)?;
+            let schedule =
+                crate::runner::schedule(catalog, &history, coverage.as_ref(), initialized, options)
+                    .map_err(crate::RunError::infrastructure)?;
 
             if let Some(snapshot) = schedule.snapshot {
                 attempt(session, catalog, snapshot, crate::Direction::Up) $($await)*?;

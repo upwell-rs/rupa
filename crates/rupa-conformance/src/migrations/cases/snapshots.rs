@@ -4,7 +4,8 @@ use rupa::migrate::{
 };
 
 use super::support::{
-    ALLOW_LATE, blocked, history, replay, script, snapshot_of, supports, through, undoable, version,
+    ALLOW_LATE, blocked, history, replay, script, snapshot_of, supports, through, transactional,
+    undoable, version,
 };
 use super::{Adopt, Apply, Harness, Inspect, Recover, Revert, catalog, versions};
 use crate::migrations::fixture::{Body, snapshot, with_policy};
@@ -130,6 +131,50 @@ pub(super) fn case_a_managed_target_never_runs_a_newer_snapshot<H: Harness>(h: &
     assert_eq!(versions(&report), ["3"]);
     assert!(status.coverage.is_none());
     assert_eq!(history(h), ["1", "2", "3"]);
+}
+
+pub(super) fn case_only_a_never_initialized_journal_starts_from_a_snapshot<H: Harness>(h: &mut H) {
+    let entries = [
+        undoable::<H>("1", "CREATE TABLE t1 (id INTEGER);", "DROP TABLE t1;"),
+        undoable::<H>("2", "CREATE TABLE t2 (id INTEGER);", "DROP TABLE t2;"),
+        at_two::<H>(),
+    ];
+    let stack = catalog(&entries);
+
+    wait!(h, stack.apply_with(h.connect(), &replay("2"))).expect("replay 1 and 2");
+    wait!(h, stack.revert(h.connect(), RevertTarget::Last(2))).expect("revert both");
+
+    let reapplied = wait!(h, stack.apply(h.connect())).expect("apply again");
+
+    assert!(
+        reapplied.snapshot.is_none(),
+        "a target whose installations were reverted is not fresh"
+    );
+    assert_eq!(versions(&reapplied), ["1", "2"]);
+
+    if !transactional::<H>() {
+        return;
+    }
+
+    let failing = [
+        entries[0],
+        entries[1],
+        snapshot_of::<H>(
+            "2",
+            "CREATE TABLE t1 (id INTEGER); INSERT INTO absent VALUES (1);",
+        ),
+    ];
+
+    h.reset();
+    wait!(h, catalog(&failing).apply(h.connect())).expect_err("the snapshot body fails");
+
+    let retried = wait!(h, stack.apply(h.connect())).expect("apply the corrected snapshot");
+
+    assert_eq!(
+        retried.snapshot,
+        Some(version("2")),
+        "a rolled-back first attempt leaves the journal uninitialized"
+    );
 }
 
 pub(super) fn case_snapshot_and_replay_reach_the_same_state<H: Harness>(h: &mut H) {

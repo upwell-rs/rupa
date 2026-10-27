@@ -96,6 +96,12 @@ pub const COVERAGE: &str = "
     WHERE member.kind = 'covered'
     ORDER BY member.id";
 
+/// Completed installations and coverage claims, undone ones included.
+pub const INITIALIZED: &str = "
+    SELECT COUNT(*)
+    FROM _rupa_migrations
+    WHERE (kind IN ('up', 'snapshot') AND status IN ('applied', 'recovered')) OR kind = 'adopt'";
+
 /// Records a covered incremental: version, checksum, covering snapshot
 /// attempt or adoption event.
 pub const INSERT_COVERED: &str = "

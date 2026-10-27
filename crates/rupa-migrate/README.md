@@ -94,8 +94,9 @@ failure keeps earlier undos, and the `RevertReport` lists the remaining stack.
 
 A snapshot (`MigrationKind::Snapshot`, `sql_migration!`'s `kind: Snapshot`)
 covers every incremental at or below its version; the catalog derives that
-manifest and checksums it with the snapshot. On a target that records no
-installation or coverage, apply runs the newest snapshot at or below
+manifest and checksums it with the snapshot. On a target whose journal never
+recorded a completed installation or coverage (`Session::initialized`),
+apply runs the newest snapshot at or below
 `ApplyOptions::through` and then the tail, unless `Init::FullReplay` asks for
 the incrementals; `ApplyReport` lists the snapshot and what it covered.
 `Adopt::adopt` records an operator's `Adoption` of an unmanaged target through

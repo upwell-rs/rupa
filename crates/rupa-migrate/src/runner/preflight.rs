@@ -10,11 +10,13 @@ use crate::{
 /// `coverage`, after checking them against the catalog with the comparison
 /// status uses: every installed or covered artifact is present, unchanged
 /// and recorded once, nothing pending is uncovered, and nothing pending is
-/// late unless `options` permit it.
+/// late unless `options` permit it. Only a target that was never
+/// `initialized` may start from a snapshot.
 pub(crate) fn schedule<'c, E: std::error::Error, M>(
     catalog: &'c Catalog<'_, M>,
     history: &[HistoryEntry],
     coverage: Option<&Coverage>,
+    initialized: bool,
     options: &ApplyOptions,
 ) -> Result<Schedule<'c>, Error<E>> {
     let mut blockers = Vec::new();
@@ -23,8 +25,7 @@ pub(crate) fn schedule<'c, E: std::error::Error, M>(
         .incrementals()
         .filter(|entry| !installed.contains(&entry.version))
         .collect();
-    let initial = history.is_empty() && coverage.is_none();
-    let schedule = catalog.schedule(&pending, initial, options, &mut blockers);
+    let schedule = catalog.schedule(&pending, !initialized, options, &mut blockers);
 
     if !blockers.is_empty() {
         return Err(Error::Blocked(blockers));

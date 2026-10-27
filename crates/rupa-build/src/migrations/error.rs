@@ -56,8 +56,9 @@ pub enum Error {
     /// body in code.
     #[error("{0}: a Rust migration declares its down body in code, not in a `.down.sql` file")]
     RustDown(PathBuf),
-    /// A down script for a snapshot, which is never undone.
-    #[error("{0}: a snapshot has no down script; it is never undone")]
+    /// A down script for a snapshot, or a scripted snapshot whose impl
+    /// defines `down`. A snapshot is never undone.
+    #[error("{0}: a snapshot has no down body; it is never undone")]
     SnapshotDown(PathBuf),
     /// A `.down.sql` file declares frontmatter; its migration's settings apply.
     #[error("{0}: a down file cannot declare `rupa:` frontmatter; its migration's settings apply")]
