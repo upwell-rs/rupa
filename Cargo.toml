@@ -43,6 +43,12 @@ tokio = { version = "1", features = ["rt", "macros"] }
 hashlink = "0.11"
 thiserror = "2"
 clap = { version = "4", features = ["derive", "env"] }
+# Upwell at a pinned commit (conditional components, upwell-rs/upwell#212)
+# until it is released to crates.io; crates.io rejects git dependencies, so
+# rupa-upwell cannot be published before then.
+upwell-app = { git = "https://github.com/upwell-rs/upwell", rev = "655866dde24373f10bf9ffc6a190737d425ebddc", default-features = false, features = ["cli"] }
+upwell-config = { git = "https://github.com/upwell-rs/upwell", rev = "655866dde24373f10bf9ffc6a190737d425ebddc", default-features = false }
+upwell = { git = "https://github.com/upwell-rs/upwell", rev = "655866dde24373f10bf9ffc6a190737d425ebddc", default-features = false, features = ["cli"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 postgres = { version = "0.19", features = ["with-serde_json-1"] }
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
