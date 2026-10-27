@@ -1,15 +1,15 @@
 //! The `db` crate's migration commands, run through the example Upwell
 //! application's generated command line.
 
-use std::path::PathBuf;
+mod support;
+
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use rupa::drivers::sqlite::SqliteExecutor;
-use rupa::migrate::commands::sync::run;
-use rupa::migrate::commands::{Command, Exit, Report};
-use rupa::upwell::migrations::exit_code;
+use rupa::migrate::commands::Exit;
+use rupa::upwell::exit_code;
 use rupa_example_upwell::Example;
+use support::{Scratch, pending};
 use upwell::component;
 
 /// How often the application built [`Marker`].
@@ -26,65 +26,10 @@ async fn build_marker() -> Marker {
     Marker
 }
 
-/// A scratch directory for one test, removed when dropped.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    /// A leftover directory from an earlier run may not exist, so its
-    /// removal error is ignored.
-    fn new(test: &str) -> Self {
-        let path =
-            std::env::temp_dir().join(format!("rupa-example-upwell-{}-{test}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&path);
-
-        std::fs::create_dir_all(&path).expect("scratch directory is created");
-
-        Self(path)
-    }
-
-    /// A configuration directory whose `primary` target is `database`.
-    fn config(&self, database: &str) -> String {
-        let dir = self.0.join("config");
-        let toml = format!(
-            "[migrations.primary]\nurl = {:?}\n",
-            self.database(database)
-        );
-
-        std::fs::create_dir_all(&dir).expect("config directory is created");
-        std::fs::write(dir.join("application.toml"), toml).expect("config is written");
-
-        dir.to_string_lossy().into_owned()
-    }
-
-    fn database(&self, name: &str) -> String {
-        self.0.join(name).to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Scratch {
-    /// Cleanup is best effort: a failure must not mask the test's own.
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-/// The pending versions of the `primary` stream at `database`.
-fn pending(database: &str) -> usize {
-    let catalog = db::migrations::catalog().expect("generated catalog validates");
-    let outcome = run(&catalog, &Command::Status, || {
-        SqliteExecutor::open(database)
-    });
-
-    match outcome.report {
-        Some(Report::Status(status)) => status.pending.len(),
-        other => panic!("expected a status report, got {other:?}"),
-    }
-}
-
 #[tokio::test]
-async fn the_configured_target_migrates_without_building_the_application() {
+async fn the_configured_database_migrates_without_building_the_application() {
     let scratch = Scratch::new("configured");
-    let config = scratch.config("primary.db");
+    let config = scratch.config_dir(&scratch.toml("check"));
 
     let applied = Example::run_with(["app", "--config", &config, "migrate", "apply"]).await;
 
@@ -96,32 +41,33 @@ async fn the_configured_target_migrates_without_building_the_application() {
 #[tokio::test]
 async fn a_url_on_the_command_line_overrides_the_configured_one() {
     let scratch = Scratch::new("override");
-    let config = scratch.config("configured.db");
+    let config = scratch.config_dir(&scratch.toml("check"));
     let chosen = scratch.database("chosen.db");
+    let url = format!("sqlite://{chosen}");
 
     let applied = Example::run_with([
-        "app", "--config", &config, "migrate", "apply", "--url", &chosen,
+        "app", "--config", &config, "migrate", "apply", "--url", &url,
     ])
     .await;
 
     assert!(applied.is_ok(), "apply succeeds: {applied:?}");
     assert_eq!(pending(&chosen), 0);
-    assert!(!std::path::Path::new(&scratch.database("configured.db")).exists());
+    assert!(!std::path::Path::new(&scratch.database("primary.db")).exists());
 }
 
 #[tokio::test]
 async fn a_refused_command_ends_with_rupas_exit_status() {
     let scratch = Scratch::new("refused");
-    let database = scratch.database("reporting.db");
+    let config = scratch.config_dir(&scratch.toml("check"));
 
     let reverted = Example::run_with([
         "app",
+        "--config",
+        &config,
         "reporting",
         "revert",
         "--last",
         "1",
-        "--url",
-        &database,
     ])
     .await;
 
@@ -129,25 +75,12 @@ async fn a_refused_command_ends_with_rupas_exit_status() {
 }
 
 #[tokio::test]
-async fn invalid_target_configuration_is_a_usage_error() {
+async fn invalid_database_configuration_is_a_usage_error() {
     let scratch = Scratch::new("invalid");
-    let dir = scratch.0.join("config");
+    let config =
+        scratch.config_dir("[database.primary]\ndriver = \"sqlite\"\nfile = \"typo.db\"\n");
 
-    std::fs::create_dir_all(&dir).expect("config directory is created");
-    std::fs::write(
-        dir.join("application.toml"),
-        "[migrations.primary]\nuri = \"typo.db\"\n",
-    )
-    .expect("config is written");
-
-    let status = Example::run_with([
-        "app",
-        "--config",
-        &dir.to_string_lossy(),
-        "migrate",
-        "status",
-    ])
-    .await;
+    let status = Example::run_with(["app", "--config", &config, "migrate", "status"]).await;
 
     assert_eq!(exit_code(status), ExitCode::from(Exit::Usage));
 }

@@ -71,7 +71,7 @@ no database server, Docker, or database file.
 | Example | What it shows | Run |
 |---|---|---|
 | [SQL/Rust migrations](examples/migrations) | `db` crate with numbered and timestamped migration streams; an `app` crate embedding the operator command line | `cargo run -p rupa-example-app -- primary apply` |
-| [Upwell migrations](examples/migrations/upwell) | The same streams as migration commands in an Upwell application's command line, configured per target | `cargo run -p rupa-example-upwell -- --config examples/migrations/upwell/config migrate apply` |
+| [Upwell databases](examples/migrations/upwell) | Two `database!` declarations in an Upwell application: field-by-field and templated configuration, startup apply and check, an injected `Arc<dyn NoteRepository>`, migration commands | `cargo run -p rupa-example-upwell -- --config examples/migrations/upwell/config migrate apply` |
 | [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
 | [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
 | [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |
@@ -194,7 +194,8 @@ milestone in [`docs/design`](docs/design).
   async on sqlx), native
   row-level security, connection pools, configuration-driven drivers, and
   caching of rendered SQL and prepared statements.
-- **In progress:** the Upwell integration (`rupa-upwell`); migration commands
-  in an Upwell application's command line come first.
+- **In progress:** the Upwell integration (`rupa-upwell`). Declared databases
+  with startup migrations, repository providers and migration commands are
+  done. Scope-dependent integration waits for Upwell's scopes epic.
 
 Requires Rust 1.99. Licensed under MIT OR Apache-2.0.

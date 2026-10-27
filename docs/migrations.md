@@ -635,31 +635,28 @@ deployments.
 
 ### Upwell applications
 
-With the facade's `upwell-migrations` feature, an Upwell application's
-generated command line runs the same commands. Implement
-`rupa::upwell::migrations::sync::Target`, or `asynchronous::Target` for async
-sessions, once per stream. Then register its `Migrations<T>` plugin in
-`app!`:
+With the facade's `upwell-database` feature, `rupa::upwell::database!`
+declares a database of an Upwell application: its driver pool, configuration
+path, migration catalog, optional migration command and the repositories it
+provides. Like `#[component]`, it registers itself at link time. Only the
+migration commands need the `Migrations` plugin, registered once, because Upwell
+discovers components, providers and configuration but not plugins:
 
 ```rust,ignore
-use rupa::upwell::migrations::sync::{Migrations, Target};
-use rupa::upwell::migrations::exit_code;
+#[repository]
+pub trait NoteRepository: Send + Sync {
+    #[query(order_by = id)]
+    fn all(&self) -> Result<Vec<Note>, DynError>;
+}
 
-impl Target for Primary {
-    type Migration = db::migrations::Migrations;
-    type Session = SqliteExecutor;
-    type Error = SqliteError;
-
-    const PLUGIN: PluginId = namespaced_id!(PluginId, "app/migrations");
-    const COMMAND: &'static str = "migrate";
-    const CONFIG: &'static str = "migrations.primary";
-
-    fn catalog() -> Result<Catalog<'static, Self::Migration>, ValidationError> {
-        db::migrations::catalog()
-    }
-
-    fn connect(url: Option<&str>) -> Result<Self::Session, Self::Error> {
-        SqliteExecutor::open(url.unwrap_or("app.db"))
+rupa::upwell::database! {
+    /// Notes and tags.
+    pub Primary {
+        pool: SqlitePool,
+        config: "database.primary",
+        migrations: db::migrations,     // the module include_migrations! generated
+        command: "migrate",
+        repositories: [dyn NoteRepository],
     }
 }
 
@@ -667,41 +664,69 @@ app! {
     pub app App {
         name: "app",
         protocol: Rpc,
-        plugins: [Migrations<Primary>],
+        plugins: [rupa::upwell::Migrations],   // once: every database's command
     }
 }
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    exit_code(App::run().await)
+    rupa::upwell::exit_code(App::run().await)
 }
 ```
 
-`app migrate apply` and the other commands keep the arguments, reports, exit
-statuses and redaction described above. They run at Upwell's Setup phase. The
-configuration is loaded, but no component is constructed and no service,
-listener or job starts. A sync target runs on the command's thread, which
-nothing else uses at Setup.
-
-The URL comes from `--url` or `DATABASE_URL`, and otherwise from `url` at the
-target's `CONFIG` path:
+The configuration describes the connection field by field. SQLite takes `path`
+(or `":memory:"`) instead of the server fields. `url` replaces the fields with
+a complete URL. Upwell templates it like any value, so it can reference the
+fields or the environment:
 
 ```toml
-[migrations.primary]
-url = "postgres://migrator:secret@db/app"
+[database.primary]
+driver   = "postgres"           # also postgres-sync, mysql, sqlite, sqlx-*, memory
+host     = "db.internal"
+port     = 5432
+user     = "app"
+password = "${DB_PASSWORD}"
+name     = "app"
+params   = { sslmode = "require" }
+options  = { statement_cache_size = 128 }    # the driver's DbConfig options
+# url    = "postgres://${database.primary.user}:${DB_PASSWORD}@${database.primary.host}/app"
+
+[database.primary.pool]
+max_size = 16
+
+[database.primary.migrations]
+startup  = "apply"              # off | check (default) | apply
+user     = "migrator"           # optional: credentials for migrations only
+password = "${MIGRATOR_PASSWORD}"
+# url    = "..."                # or a complete migration URL
 ```
 
-Point it at the migration role, not at the credentials the running application
-uses for its repositories. Upwell's `run()` returns its own `CliError`.
-`exit_code` turns it into rupa's exit status, so scripts see `3` for a blocked
-apply, as with the standalone command line. Upwell is a git dependency pinned to
-a commit until it is released, so this feature cannot be published yet.
-Example: [`examples/migrations/upwell`](../examples/migrations/upwell/src/lib.rs).
+The settings declare their schema, so Upwell's tooling lists every field.
 
-Not yet available: checking or applying migrations at startup, before
-schema-dependent components are constructed. At the pinned Upwell commit, only
-Setup-phase code can read the loaded configuration, so that gate follows in a
-later slice of #10.
+- **Startup.** `Database<Primary>` is a singleton component holding the pool.
+  - Before its factory opens the pool, it applies or checks the migrations on a
+    connection opened with the migration credentials.
+  - Everything that injects `Arc<Database<Primary>>` or a provided repository
+    is therefore built afterwards.
+  - `check` fails startup, with the status report, while migrations are pending
+    or blocked. Nothing that needs the database is built, and no service starts.
+  - `apply` applies once per target and process. A database rebuilt by a
+    configuration reload only checks, so a speculative reload never migrates.
+  - Sync pools run the gate on the startup task.
+- **Repositories.** Each listed `#[repository]` trait is provided as
+  `Arc<dyn Trait>` over the pool, so services inject it directly.
+  `#[repository(static_dispatch)]` traits aren't dyn-compatible, so they aren't
+  provided; build their `Repo` from the injected `Database`.
+- **Commands.** `app migrate apply` and the other commands run at Upwell's Setup
+  phase: the configuration is loaded, and nothing is built or started.
+  - They connect with the migration settings. `--url` or `DATABASE_URL`
+    replaces the configured URL.
+  - Reports, exit statuses and redaction are the same as on the standalone
+    command line, and `exit_code` turns Upwell's `CliError` into those statuses.
+
+Upwell is a git dependency pinned to a commit until it is released, so this
+feature cannot be published yet. Example:
+[`examples/migrations/upwell`](../examples/migrations/upwell/src/lib.rs).
 
 ## Authoring
 

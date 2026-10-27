@@ -2,32 +2,38 @@
 
 ## Role
 
-Example Upwell application that runs the `db` crate's migration commands from
-its generated command line: `migrate` for the numbered `primary` stream and
-`reporting` for the timestamped one.
+Example Upwell application with two `database!` declarations over the `db`
+crate's migration streams.
 
 ## Usage
 
 ```sh
 cargo run -p rupa-example-upwell -- --config examples/migrations/upwell/config migrate apply
 cargo run -p rupa-example-upwell -- --config examples/migrations/upwell/config migrate status --format json
-cargo run -p rupa-example-upwell -- reporting plan --url reporting.db
+cargo run -p rupa-example-upwell -- --config examples/migrations/upwell/config reporting plan
 cargo run -p rupa-example-upwell -- migrate --help
 ```
 
-[`config/application.toml`](config/application.toml) configures both targets
-under `migrations.<stream>.url`, relative to the working directory. `--url` or
-`DATABASE_URL` overrides it. Without either, a command runs on an in-memory
-database.
+[`config/application.toml`](config/application.toml) configures each database:
+
+- `primary` field by field, with `startup = "apply"`;
+- `reporting` with a templated `url`, `sqlite://${REPORTING_DATABASE:reporting.db}`.
+
+`--url` or `DATABASE_URL` overrides the configured URL for a command.
 
 ## Internal role
 
-Implements `rupa::upwell::migrations::sync::Target` once per stream and
-registers each target's `Migrations` plugin in `app!`. The commands run at
-Upwell's Setup phase. The tests prove the generated command line migrates
-without building a component that a normal build constructs, that `--url`
-overrides the configuration, and that rupa's exit statuses reach `main`.
+- `Primary` and `Reporting` are `database!` declarations on rusqlite pools.
+  `Primary` provides `Arc<dyn NoteRepository>`, which the `Notes` component
+  injects.
+- The tests prove:
+  - startup applies before `Notes` is built, and `check` refuses a pending
+    schema;
+  - an async database on sqlx SQLite works the same way;
+  - the commands build nothing, `--url` overrides the configuration, and rupa's
+    exit statuses reach `main`;
+  - each binding declares its configuration schema.
 
 ## Feature flags
 
-None; it enables `rupa/upwell-migrations` and `rupa/sqlite`.
+None; it enables `rupa/upwell-database`, `rupa/sqlite` and `rupa/sqlx-sqlite`.

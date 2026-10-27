@@ -9,7 +9,7 @@ description = "Example Upwell application running the db crate's migration comma
 
 [dependencies]
 db = { package = "rupa-example-db", path = "../db" }
-rupa = { path = "../../../crates/rupa", default-features = false, features = ["upwell-migrations", "sqlite"] }
+rupa = { path = "../../../crates/rupa", default-features = false, features = ["upwell-database", "sqlite", "sqlx-sqlite"] }
 upwell.workspace = true
 # Upwell's generated command line names `::clap`.
 clap.workspace = true

@@ -2,9 +2,12 @@
 //! constructs a component like their `Marker`. A separate test binary, so its
 //! counter is not shared with theirs.
 
+mod support;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use rupa_example_upwell::Example;
+use support::{Scratch, source};
 use upwell::component;
 
 /// How often the application built [`Marker`].
@@ -22,11 +25,16 @@ async fn build_marker() -> Marker {
 
 #[tokio::test]
 async fn building_the_application_builds_the_marker() {
-    let prepared = Example::builder()
+    let scratch = Scratch::new("build");
+
+    let _app = Example::builder()
         .expect("the generated builder constructs")
+        .config_source(source(&scratch.toml("apply")))
         .prepare()
-        .expect("the application prepares");
-    let _app = prepared.build().await.expect("the application builds");
+        .expect("the application prepares")
+        .build()
+        .await
+        .expect("the application builds");
 
     assert_eq!(
         BUILDS.load(Ordering::SeqCst),

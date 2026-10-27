@@ -7,7 +7,7 @@
 
 use std::process::ExitCode;
 
-use rupa::upwell::migrations::exit_code;
+use rupa::upwell::exit_code;
 use rupa_example_upwell::Example;
 
 #[tokio::main(flavor = "current_thread")]
