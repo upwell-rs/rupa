@@ -28,8 +28,9 @@ use rupa_core::Sqlite;
 use rupa_core::config::{DbConfig, PoolConfig, SqliteOptions};
 pub use rupa_core::config::{OpenMode, SqliteTarget};
 use rupa_core::error::{ConnectError, DynError};
+use rupa_core::exec::Immediate;
 use rupa_core::pool::r2d2 as glue;
-use rupa_core::pool::{OwnedTx, Pooled};
+use rupa_core::pool::{Connect, OwnedTx, Pooled, SyncConnect};
 use rupa_core::tx::TxConnection;
 
 use rusqlite::OpenFlags;
@@ -212,10 +213,32 @@ impl SqlitePool {
 
     /// Builds a pool for a `sqlite:` URL with the config's [`SqliteOptions`].
     pub fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
-        let target = SqliteTarget::parse(&config.url).map_err(ConnectError::InvalidUrl)?;
-        let manager = SqliteManager::with_options(target, config.driver.sqlite()?);
-        Self::new(manager, &config.pool).map_err(|e| ConnectError::Connect(DynError::new(e)))
+        Self::new(manager(config)?, &config.pool)
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
     }
+}
+
+impl Connect for SqlitePool {
+    type Completion = Immediate;
+    type Connection = SqliteExecutor;
+}
+
+impl SyncConnect for SqlitePool {
+    fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
+        Self::connect(config)
+    }
+
+    fn connect_one(config: &DbConfig) -> Result<SqliteExecutor, ConnectError> {
+        r2d2::ManageConnection::connect(&manager(config)?)
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
+    }
+}
+
+/// The connection manager `config` describes.
+fn manager(config: &DbConfig) -> Result<SqliteManager, ConnectError> {
+    let target = SqliteTarget::parse(&config.url).map_err(ConnectError::InvalidUrl)?;
+
+    Ok(SqliteManager::with_options(target, config.driver.sqlite()?))
 }
 
 /// Whether a migration run left state on `conn`, so the pool must discard it

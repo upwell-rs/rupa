@@ -28,8 +28,9 @@ use std::time::Duration;
 use deadpool::managed::{self, Metrics, RecycleError, RecycleResult};
 use rupa_core::config::{DbConfig, PoolConfig};
 use rupa_core::error::{ConnectError, DynError};
+use rupa_core::exec::Awaited;
 use rupa_core::pool::deadpool::{self as glue, Expiry};
-use rupa_core::pool::{AsyncPool, OwnedAsyncTx, PoolStatus, Pooled};
+use rupa_core::pool::{AsyncConnect, AsyncPool, Connect, OwnedAsyncTx, PoolStatus, Pooled};
 use rupa_core::tx::AsyncTxConnection;
 use sqlx::ConnectOptions as _;
 
@@ -237,6 +238,24 @@ impl<DB: PoolBackend> SqlxPool<DB> {
         let manager = SqlxManager::from_config(config)?;
 
         Self::new(manager, &config.pool)
+            .await
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
+    }
+}
+
+impl<DB: PoolBackend> Connect for SqlxPool<DB> {
+    type Completion = Awaited;
+    type Connection = SqlxExecutor<DB>;
+}
+
+impl<DB: PoolBackend> AsyncConnect for SqlxPool<DB> {
+    async fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
+        Self::connect(config).await
+    }
+
+    async fn connect_one(config: &DbConfig) -> Result<SqlxExecutor<DB>, ConnectError> {
+        SqlxManager::<DB>::from_config(config)?
+            .connect()
             .await
             .map_err(|e| ConnectError::Connect(DynError::new(e)))
     }

@@ -95,8 +95,8 @@ pub use join::{
     source_col,
 };
 #[cfg(feature = "async")]
-pub use pool::{AsyncPool, OwnedAsyncTx, SingleConnection};
-pub use pool::{OwnedTx, Pool, PoolStatus, Pooled};
+pub use pool::{AsyncConnect, AsyncPool, OwnedAsyncTx, SingleConnection};
+pub use pool::{Connect, OwnedTx, Pool, PoolStatus, Pooled, SyncConnect};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 #[cfg(all(feature = "dynamic", feature = "async"))]
 pub use registry::{Database, Driver, Registry};

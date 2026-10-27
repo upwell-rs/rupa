@@ -30,6 +30,7 @@
 
 #[cfg(feature = "async")]
 mod asynchronous;
+mod connect;
 #[cfg(all(feature = "deadpool", feature = "async"))]
 pub mod deadpool;
 #[cfg(feature = "r2d2")]
@@ -48,6 +49,9 @@ use crate::tx::{Tx, TxConnection, TxOptions};
 
 #[cfg(feature = "async")]
 pub use asynchronous::{AsyncPool, OwnedAsyncTx, SingleConnection};
+#[cfg(feature = "async")]
+pub use connect::AsyncConnect;
+pub use connect::{Connect, SyncConnect};
 
 /// A snapshot of a pool's occupancy.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

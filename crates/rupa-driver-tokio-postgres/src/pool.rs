@@ -28,9 +28,10 @@ use deadpool::managed::{self, Metrics, RecycleError, RecycleResult};
 use rupa_core::Postgres;
 use rupa_core::config::{DbConfig, PoolConfig};
 use rupa_core::error::{ConnectError, DynError};
+use rupa_core::exec::Awaited;
 use rupa_core::exec::BoxFuture;
 use rupa_core::pool::deadpool::{self as glue, Expiry};
-use rupa_core::pool::{AsyncPool, OwnedAsyncTx, PoolStatus, Pooled};
+use rupa_core::pool::{AsyncConnect, AsyncPool, Connect, OwnedAsyncTx, PoolStatus, Pooled};
 use rupa_core::tx::AsyncTxConnection;
 use tokio_postgres::tls::{MakeTlsConnect, TlsConnect};
 use tokio_postgres::{NoTls, Socket};
@@ -184,14 +185,7 @@ impl PgPool {
     /// [`PostgresOptions`](rupa_core::config::PostgresOptions). Uses rustls when
     /// `tls-rustls` is on (the URL's `sslmode` decides), and no TLS otherwise.
     pub async fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
-        let (pg, statement_cache_size) = crate::shared::pg_config(config)?;
-        #[cfg(feature = "tls-rustls")]
-        let manager = PgManager::with_tls(pg, crate::shared::rustls()?);
-        #[cfg(not(feature = "tls-rustls"))]
-        let manager = PgManager::new(pg);
-        let manager = manager.statement_cache_size(statement_cache_size);
-
-        Self::new(manager, &config.pool)
+        Self::new(manager(config)?, &config.pool)
             .await
             .map_err(|e| ConnectError::Connect(DynError::new(e)))
     }
@@ -248,4 +242,32 @@ fn holds_migration_state(conn: &PgExecutor) -> bool {
     };
 
     active
+}
+
+impl Connect for PgPool {
+    type Completion = Awaited;
+    type Connection = PgExecutor;
+}
+
+impl AsyncConnect for PgPool {
+    async fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
+        Self::connect(config).await
+    }
+
+    async fn connect_one(config: &DbConfig) -> Result<PgExecutor, ConnectError> {
+        managed::Manager::create(&manager(config)?)
+            .await
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
+    }
+}
+
+/// The connection manager `config` describes.
+fn manager(config: &DbConfig) -> Result<PgManager, ConnectError> {
+    let (pg, statement_cache_size) = crate::shared::pg_config(config)?;
+    #[cfg(feature = "tls-rustls")]
+    let manager = PgManager::with_tls(pg, crate::shared::rustls()?);
+    #[cfg(not(feature = "tls-rustls"))]
+    let manager = PgManager::new(pg);
+
+    Ok(manager.statement_cache_size(statement_cache_size))
 }
