@@ -79,7 +79,7 @@ fn passwords(url: &str) -> Vec<&str> {
         }
     }
 
-    for parameter in url.split(['?', '&', ';', ' ']) {
+    for parameter in parameters(url) {
         let value = PASSWORD_KEYS
             .iter()
             .find_map(|key| parameter.strip_prefix(key))
@@ -89,6 +89,34 @@ fn passwords(url: &str) -> Vec<&str> {
     }
 
     found
+}
+
+/// The `?`, `&`, `;` or space separated parameters of `url`. A quoted
+/// keyword value, such as `password='two words'`, stays one parameter,
+/// including backslash-escaped quotes.
+fn parameters(url: &str) -> Vec<&str> {
+    let mut parameters = Vec::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut start = 0;
+
+    for (index, c) in url.char_indices() {
+        match (quote, c) {
+            (Some(_), _) if escaped => escaped = false,
+            (Some(_), '\\') => escaped = true,
+            (Some(open), _) if c == open => quote = None,
+            (None, '\'' | '"') => quote = Some(c),
+            (None, '?' | '&' | ';' | ' ') => {
+                parameters.push(&url[start..index]);
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+
+    parameters.push(&url[start..]);
+
+    parameters
 }
 
 /// `text` with `%XX` escapes decoded, or as written if they are not UTF-8.

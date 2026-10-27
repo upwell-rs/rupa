@@ -27,7 +27,7 @@ pub enum Exit {
     /// it before anything runs. `5`.
     Uncertain,
     /// Interrupted transactional attempts were recorded as rolled back and
-    /// nothing ran: apply again. `6`.
+    /// nothing ran: rerun the interrupted apply or revert. `6`.
     Reconciled,
     /// A migration body failed. Earlier commits of the run remain. `7`.
     Migration,
