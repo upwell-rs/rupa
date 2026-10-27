@@ -1,5 +1,4 @@
 use mysql::prelude::Queryable;
-use rupa::core::exec::Executor;
 use rupa::migrate::sync::{Context, Migration, Session};
 use rupa::migrate::{
     ArtifactInput, Catalog, Engine, Error, Metadata, MigrationInfo, MigrationKind, Policy,
@@ -207,7 +206,7 @@ fn lost_named_lock_poisons_instead_of_completing(my: &mut My) {
         "string-literal dynamic SQL passes the grammar, the lock check refuses completion"
     );
     assert!(matches!(
-        Executor::run(&mut session, raw().sql("SELECT 1").execute::<u64>()),
+        raw().sql("SELECT 1").execute::<u64>().execute(&mut session),
         Err(MySqlError::Migration(StateError::Poisoned))
     ));
     assert!(my.table_exists("marker"), "autocommit effects persist");
@@ -248,13 +247,12 @@ impl<S: Session> Migration<S> for SeedNotes {
         context.script("CREATE TABLE notes (title VARCHAR(64) NOT NULL)")?;
 
         for title in ["it's", "semi;colon"] {
-            context.run(
-                raw()
-                    .sql("INSERT INTO notes (title) VALUES (")
-                    .bind(title.to_uppercase())
-                    .sql(")")
-                    .execute::<u64>(),
-            )?;
+            raw()
+                .sql("INSERT INTO notes (title) VALUES (")
+                .bind(title.to_uppercase())
+                .sql(")")
+                .execute::<u64>()
+                .execute(context)?;
         }
 
         Ok(())

@@ -103,9 +103,7 @@ async fn pooled_connections(url: &str) {
     for n in 1..=4i64 {
         let ids: Vec<i64> = (0..n).collect();
         let q = rupa::core::select::<Note>().filter(Note::ID.in_(ids)).all();
-        rupa::core::exec::AsyncExecutor::run(&mut conn, q)
-            .await
-            .unwrap();
+        q.execute(&mut conn).await.unwrap();
     }
 
     assert_eq!(conn.cached_statements(), 2, "least recently used dropped");

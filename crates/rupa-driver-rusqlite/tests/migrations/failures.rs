@@ -45,10 +45,10 @@ fn failed_commit_releases_sqlite_writer_lock_before_returning() {
     );
     assert!(
         matches!(
-            rupa::core::exec::Executor::run(
-                &mut connection,
-                rupa::raw().sql("SELECT 1").execute::<u64>()
-            ),
+            rupa::raw()
+                .sql("SELECT 1")
+                .execute::<u64>()
+                .execute(&mut connection),
             Err(SqliteError::Migration(StateError::Poisoned))
         ),
         "a poisoned migration connection refuses statements with a typed state error"
@@ -88,10 +88,10 @@ fn a_panicking_run_poisons_a_retained_session() {
     assert!(interrupted.is_err());
     assert!(
         matches!(
-            rupa::core::exec::Executor::run(
-                &mut session,
-                rupa::raw().sql("SELECT 1").execute::<u64>()
-            ),
+            rupa::raw()
+                .sql("SELECT 1")
+                .execute::<u64>()
+                .execute(&mut session),
             Err(SqliteError::Migration(StateError::Poisoned))
         ),
         "a retained session refuses use after a run unwound"

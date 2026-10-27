@@ -8,9 +8,7 @@ use rupa::core::exec::{Blocking, Executor};
 use rupa::core::tx::TxConnection;
 use rupa::core::{Dialect, DialectId};
 use rupa::prelude::*;
-use rupa::{
-    AsyncExecutor as _, Database, DbConfig, DriverConfig, Pool, PoolConfig, Registry, SqliteOptions,
-};
+use rupa::{Database, DbConfig, DriverConfig, Pool, PoolConfig, Registry, SqliteOptions};
 use rupa_conformance::{NewNote, Note, SQLITE_ATTACH, SQLITE_DDL};
 use rupa_driver_rusqlite::SqliteError;
 use rupa_driver_rusqlite::{SqliteDriver, SqliteManager, SqlitePool, SqliteTarget};
@@ -294,15 +292,19 @@ fn add(conn: &mut impl Executor, title: &str) {
         pinned: false,
     };
     assert_eq!(
-        conn.run(insert::<Note>().value(&note).affected()).unwrap(),
+        insert::<Note>()
+            .value(&note)
+            .affected()
+            .execute(conn)
+            .unwrap(),
         1
     );
 }
 
 fn count(pool: &SqlitePool) -> usize {
-    pool.get()
-        .unwrap()
-        .run(select::<Note>().all())
+    select::<Note>()
+        .all()
+        .execute(&mut pool.get().unwrap())
         .unwrap()
         .len()
 }
@@ -386,7 +388,13 @@ fn registry_builds_a_pool_from_config() {
     assert_eq!(db.dialect().id(), DialectId::Sqlite);
 
     let mut conn = pollster::block_on(db.get()).unwrap();
-    pollster::block_on(conn.run(raw().sql("CREATE TABLE t (x INTEGER)").execute::<u64>())).unwrap();
+    pollster::block_on(
+        raw()
+            .sql("CREATE TABLE t (x INTEGER)")
+            .execute::<u64>()
+            .execute(&mut conn),
+    )
+    .unwrap();
     let wal = PathBuf::from(format!("{}-wal", file.main.display()));
     assert!(wal.exists(), "journal_mode = wal was applied");
 }
@@ -446,7 +454,10 @@ fn statement_cache_size_is_configurable() {
     let mut conn = pool.get().unwrap();
     conn.connection().execute_batch(NOTES_DDL_MAIN).unwrap();
     assert_eq!(
-        conn.run(raw().sql("SELECT 1 FROM notes").rows::<Vec<Note>>())
+        raw()
+            .sql("SELECT 1 FROM notes")
+            .rows::<Vec<Note>>()
+            .execute(&mut conn)
             .unwrap(),
         []
     );

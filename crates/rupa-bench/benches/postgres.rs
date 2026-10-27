@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use rupa::prelude::*;
-use rupa::{AsyncExecutor as _, AsyncPool as _, Database, DbConfig};
+use rupa::{AsyncPool as _, Database, DbConfig};
 use rupa_bench::{POSTGRES_DDL, User, Users, UsersRepo, new_users};
 use rupa_driver_tokio_postgres::PgPool;
 
@@ -30,7 +30,10 @@ fn postgres(c: &mut Criterion) {
             .expect("connect");
         let mut conn = pool.get().await.unwrap();
         conn.client().batch_execute(POSTGRES_DDL).await.unwrap();
-        conn.run(insert::<User>().values(&new_users(1_000)).affected())
+        insert::<User>()
+            .values(&new_users(1_000))
+            .affected()
+            .execute(&mut conn)
             .await
             .unwrap();
         pool
@@ -39,7 +42,11 @@ fn postgres(c: &mut Criterion) {
     let mut g = c.benchmark_group("postgres");
     let mut conn = rt.block_on(pool.get()).unwrap();
     g.bench_function("get_by_id/executor", |b| {
-        b.iter(|| rt.block_on(conn.run(get::<User>(&42))).unwrap().unwrap())
+        b.iter(|| {
+            rt.block_on(get::<User>(&42).execute(&mut conn))
+                .unwrap()
+                .unwrap()
+        })
     });
     let raw = rt
         .block_on(

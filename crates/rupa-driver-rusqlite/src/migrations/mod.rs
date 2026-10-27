@@ -112,7 +112,7 @@ impl SqliteExecutor {
     ) -> Result<Outcome, SqliteError> {
         sqlite::sync::user_begin(self)?;
 
-        let result = self.run(statement, expect);
+        let result = self.dispatch(statement, expect);
         let ended = sqlite::sync::user_end(self);
 
         result.and_then(|outcome| ended.map(|()| outcome))

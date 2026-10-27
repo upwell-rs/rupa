@@ -21,19 +21,18 @@ impl<S: Session> Migration<S> for NormalizeTitles {
     type Error = Error<S::Error>;
 
     fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
-        let notes = context.run(select::<Note>().all())?;
+        let notes = select::<Note>().all().execute(context)?;
 
         for note in notes {
             let title = note.title.trim().to_uppercase();
 
-            context.run(
-                raw()
-                    .sql("UPDATE notes SET title = ")
-                    .bind(title)
-                    .sql(" WHERE id = ")
-                    .bind(note.id)
-                    .execute::<u64>(),
-            )?;
+            raw()
+                .sql("UPDATE notes SET title = ")
+                .bind(title)
+                .sql(" WHERE id = ")
+                .bind(note.id)
+                .execute::<u64>()
+                .execute(context)?;
         }
 
         Ok(())

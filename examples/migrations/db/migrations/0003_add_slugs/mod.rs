@@ -25,17 +25,16 @@ impl<S: Session> Migration<S> for AddSlugs {
     fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
         context.script("ALTER TABLE notes ADD COLUMN slug TEXT;")?;
 
-        let notes = context.run(select::<Note>().all())?;
+        let notes = select::<Note>().all().execute(context)?;
 
         for note in notes {
-            context.run(
-                raw()
-                    .sql("UPDATE notes SET slug = ")
-                    .bind(slug::slugify(&note.title))
-                    .sql(" WHERE id = ")
-                    .bind(note.id)
-                    .execute::<u64>(),
-            )?;
+            raw()
+                .sql("UPDATE notes SET slug = ")
+                .bind(slug::slugify(&note.title))
+                .sql(" WHERE id = ")
+                .bind(note.id)
+                .execute::<u64>()
+                .execute(context)?;
         }
 
         Ok(())

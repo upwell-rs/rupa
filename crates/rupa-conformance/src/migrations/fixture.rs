@@ -311,19 +311,18 @@ macro_rules! bodies {
             type Error = Error<S::Error>;
 
             $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
-                let notes = context.run(select::<Note>().all()) $($await)*?;
+                let notes = select::<Note>().all().execute(context) $($await)*?;
 
                 for note in notes {
                     let title = note.title.trim().to_uppercase();
 
-                    context.run(
-                        raw()
-                            .sql("UPDATE notes SET title = ")
-                            .bind(title)
-                            .sql(" WHERE id = ")
-                            .bind(note.id)
-                            .execute::<u64>(),
-                    ) $($await)*?;
+                    raw()
+                        .sql("UPDATE notes SET title = ")
+                        .bind(title)
+                        .sql(" WHERE id = ")
+                        .bind(note.id)
+                        .execute::<u64>()
+                        .execute(context) $($await)*?;
                 }
 
                 Ok(())
@@ -343,7 +342,7 @@ macro_rules! bodies {
 
             $($async)* fn up(&self, context: &mut Context<'_, S>) -> Result<(), Self::Error> {
                 context.script("CREATE TABLE marker(id INTEGER)") $($await)*?;
-                context.run(raw().sql("COMMIT").execute::<u64>()) $($await)*?;
+                raw().sql("COMMIT").execute::<u64>().execute(context) $($await)*?;
 
                 Ok(())
             }

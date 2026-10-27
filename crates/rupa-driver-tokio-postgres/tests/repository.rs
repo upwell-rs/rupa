@@ -49,12 +49,14 @@ async fn dyn_repository_on_postgres() {
 
     let mut exec = PgExecutor::new(client);
     {
-        use rupa::core::exec::AsyncExecutor;
         let notes = [("alpha", true), ("beta", false), ("alphabet", true)].map(|(t, p)| NewNote {
             title: t.into(),
             pinned: p,
         });
-        exec.run(insert::<Note>().values(&notes).affected())
+        insert::<Note>()
+            .values(&notes)
+            .affected()
+            .execute(&mut exec)
             .await
             .unwrap();
     }

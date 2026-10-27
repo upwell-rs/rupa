@@ -4,8 +4,10 @@ use super::*;
 
 pub async fn case_insert_and_select<E: AsyncExecutor>(e: &mut E) {
     seed(e).await;
-    let all = e
-        .run(select::<Item>().order_by(Item::ID.asc()).all())
+    let all = select::<Item>()
+        .order_by(Item::ID.asc())
+        .all()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(all, items(), "rows must round-trip exactly");
@@ -13,30 +15,44 @@ pub async fn case_insert_and_select<E: AsyncExecutor>(e: &mut E) {
 
 pub async fn case_single_row_shapes<E: AsyncExecutor>(e: &mut E) {
     seed(e).await;
-    let one = e
-        .run(select::<Item>().filter(Item::ID.eq(2)).one())
+    let one = select::<Item>()
+        .filter(Item::ID.eq(2))
+        .one()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(one.name, "banana");
-    let none = e
-        .run(select::<Item>().filter(Item::ID.eq(99)).optional())
+    let none = select::<Item>()
+        .filter(Item::ID.eq(99))
+        .optional()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(none, None);
-    let some = e
-        .run(select::<Item>().filter(Item::ID.eq(3)).optional())
+    let some = select::<Item>()
+        .filter(Item::ID.eq(3))
+        .optional()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(some.map(|i| i.id), Some(3));
 
-    let r = e.run(select::<Item>().filter(Item::ID.eq(99)).one()).await;
+    let r = select::<Item>()
+        .filter(Item::ID.eq(99))
+        .one()
+        .execute(e)
+        .await;
     assert_eq!(result_error(r), ResultError::NotFound);
-    let r = e
-        .run(select::<Item>().filter(Item::ACTIVE.eq(true)).one())
+    let r = select::<Item>()
+        .filter(Item::ACTIVE.eq(true))
+        .one()
+        .execute(e)
         .await;
     assert_eq!(result_error(r), ResultError::TooManyRows);
-    let r = e
-        .run(select::<Item>().filter(Item::ACTIVE.eq(true)).optional())
+    let r = select::<Item>()
+        .filter(Item::ACTIVE.eq(true))
+        .optional()
+        .execute(e)
         .await;
     assert_eq!(result_error(r), ResultError::TooManyRows);
 }
@@ -107,13 +123,11 @@ pub async fn case_like_patterns<E: AsyncExecutor>(e: &mut E) {
 
 pub async fn case_order_with_nulls<E: AsyncExecutor>(e: &mut E) {
     seed(e).await;
-    let asc = e
-        .run(
-            select::<Item>()
-                .order_by(Item::LABEL.asc())
-                .order_by(Item::ID.asc())
-                .all(),
-        )
+    let asc = select::<Item>()
+        .order_by(Item::LABEL.asc())
+        .order_by(Item::ID.asc())
+        .all()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(
@@ -121,13 +135,11 @@ pub async fn case_order_with_nulls<E: AsyncExecutor>(e: &mut E) {
         [3, 1, 2, 4],
         "NULLS LAST ascending"
     );
-    let desc = e
-        .run(
-            select::<Item>()
-                .order_by(Item::LABEL.desc())
-                .order_by(Item::ID.desc())
-                .all(),
-        )
+    let desc = select::<Item>()
+        .order_by(Item::LABEL.desc())
+        .order_by(Item::ID.desc())
+        .all()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(
@@ -139,39 +151,46 @@ pub async fn case_order_with_nulls<E: AsyncExecutor>(e: &mut E) {
 
 pub async fn case_limit_offset<E: AsyncExecutor>(e: &mut E) {
     seed(e).await;
-    let page = e
-        .run(
-            select::<Item>()
-                .order_by(Item::ID.asc())
-                .limit(2)
-                .offset(1)
-                .all(),
-        )
+    let page = select::<Item>()
+        .order_by(Item::ID.asc())
+        .limit(2)
+        .offset(1)
+        .all()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(page.iter().map(|i| i.id).collect::<Vec<_>>(), [2, 3]);
-    let past_end = e
-        .run(select::<Item>().order_by(Item::ID.asc()).offset(10).all())
+    let past_end = select::<Item>()
+        .order_by(Item::ID.asc())
+        .offset(10)
+        .all()
+        .execute(e)
         .await
         .unwrap();
     assert!(past_end.is_empty());
-    let zero = e.run(select::<Item>().limit(0).all()).await.unwrap();
+    let zero = select::<Item>().limit(0).all().execute(e).await.unwrap();
     assert!(zero.is_empty());
 }
 
 pub async fn case_exists<E: AsyncExecutor>(e: &mut E) {
     assert!(
-        !e.run(select::<Item>().exists()).await.unwrap(),
+        !select::<Item>().exists().execute(e).await.unwrap(),
         "empty table"
     );
     seed(e).await;
     assert!(
-        e.run(select::<Item>().filter(Item::NAME.eq("cherry")).exists())
+        select::<Item>()
+            .filter(Item::NAME.eq("cherry"))
+            .exists()
+            .execute(e)
             .await
             .unwrap()
     );
     assert!(
-        !e.run(select::<Item>().filter(Item::NAME.eq("fig")).exists())
+        !select::<Item>()
+            .filter(Item::NAME.eq("fig"))
+            .exists()
+            .execute(e)
             .await
             .unwrap()
     );
@@ -228,14 +247,13 @@ pub async fn case_nullable_json<E: AsyncExecutor>(e: &mut E) {
         ids(e, Item::EXTRA.path("score").cast::<i64>().eq(1)).await,
         [2]
     );
-    e.run(
-        update::<Item>()
-            .set(Item::EXTRA, &None)
-            .filter(Item::ID.eq(2))
-            .affected(),
-    )
-    .await
-    .unwrap();
+    update::<Item>()
+        .set(Item::EXTRA, &None)
+        .filter(Item::ID.eq(2))
+        .affected()
+        .execute(e)
+        .await
+        .unwrap();
     assert_eq!(ids(e, Item::EXTRA.is_not_null()).await, Vec::<i64>::new());
 }
 
@@ -243,13 +261,11 @@ pub async fn case_timestamps<E: AsyncExecutor>(e: &mut E) {
     seed(e).await;
     let cutoff = items()[1].created_at;
     assert_eq!(ids(e, Item::CREATED_AT.gt(cutoff)).await, [3, 4]);
-    let latest = e
-        .run(
-            select::<Item>()
-                .order_by(Item::CREATED_AT.desc())
-                .limit(1)
-                .one(),
-        )
+    let latest = select::<Item>()
+        .order_by(Item::CREATED_AT.desc())
+        .limit(1)
+        .one()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(latest.created_at, items()[3].created_at);

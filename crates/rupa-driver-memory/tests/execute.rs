@@ -4,7 +4,7 @@
 use rupa::prelude::*;
 use rupa_conformance::{Item, items};
 use rupa_core::erased::{BoxAsyncExecutor, BoxExecutor};
-use rupa_core::exec::{Blocking, ExecError, Executor};
+use rupa_core::exec::{Blocking, ExecError};
 use rupa_core::{AsyncPool, ResultError, SingleConnection};
 use rupa_driver_memory::MemoryDb;
 
@@ -12,7 +12,11 @@ fn seeded() -> MemoryDb {
     let mut db = MemoryDb::new();
 
     db.register::<Item>();
-    Executor::run(&mut db, insert::<Item>().values(&items()).affected()).expect("items are seeded");
+    insert::<Item>()
+        .values(&items())
+        .affected()
+        .execute(&mut db)
+        .expect("items are seeded");
 
     db
 }

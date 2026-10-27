@@ -36,7 +36,7 @@ impl Engine<sqlx::Sqlite> for State {
     ) -> Result<Outcome, SqlxError> {
         sqlite::asynchronous::user_begin(executor).await?;
 
-        let result = executor.run(statement, expect).await;
+        let result = executor.dispatch(statement, expect).await;
         let ended = sqlite::asynchronous::user_end(executor).await;
 
         result.and_then(|outcome| ended.map(|()| outcome))

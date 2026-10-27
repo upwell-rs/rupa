@@ -5,12 +5,13 @@
 use super::Executor;
 use crate::query::{Query, QueryResult};
 
-/// An executor that runs queries through [`Query::execute`].
+/// Something queries run on through [`Query::execute`].
 ///
 /// It names its [`Completion`]: [`Immediate`] for an [`Executor`], whose
 /// `execute` returns the result, or `Awaited` for an `AsyncExecutor`, whose
 /// `execute` returns a future to `.await`. Both decode the engine's raw
 /// [`Outcome`](super::Outcome) into the query's result type the same way.
+/// Every executor is an engine; a migration body's context is one too.
 pub trait Engine {
     /// How this engine completes a query.
     type Completion;
@@ -25,7 +26,7 @@ pub trait Completion<E, R> {
         R: 'e;
 
     /// Runs `query` on `engine`.
-    fn run<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
+    fn complete<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
     where
         R: 'e;
 }
@@ -41,11 +42,13 @@ impl<E: Executor, R: QueryResult> Completion<E, R> for Immediate {
         E: 'e,
         R: 'e;
 
-    fn run<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
+    fn complete<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
     where
         R: 'e,
     {
-        engine.run(query)
+        let outcome = engine.execute(query.statement(), query.expect())?;
+
+        Ok(outcome.decode()?)
     }
 }
 
@@ -66,6 +69,6 @@ impl<R> Query<R> {
         E::Completion: Completion<E, R>,
         R: 'e,
     {
-        <E::Completion as Completion<E, R>>::run(engine, self)
+        <E::Completion as Completion<E, R>>::complete(engine, self)
     }
 }

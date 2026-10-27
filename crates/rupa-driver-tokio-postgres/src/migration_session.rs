@@ -81,6 +81,6 @@ impl PgExecutor {
 
         self.migration.user_statement(&rendered.sql)?;
 
-        self.run(statement, expect).await
+        self.dispatch(statement, expect).await
     }
 }

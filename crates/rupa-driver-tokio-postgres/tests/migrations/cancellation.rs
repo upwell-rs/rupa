@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use rupa::DbConfig;
-use rupa::core::exec::AsyncExecutor;
 use rupa::core::pool::AsyncPool;
 use rupa::migrate::asynchronous::{Apply, Session};
 use rupa::migrate::{Catalog, Error, MigrationInfo, RunError, StateError, VersionScheme};
@@ -82,7 +81,12 @@ fn a_dropped_apply_poisons_a_retained_session(pg: &mut Pg) {
     let mut session = pg.connect();
     let abandoned =
         pg.block_on(async { tokio::time::timeout(GIVE_UP, session.apply(&catalog)).await });
-    let reused = pg.block_on(session.run(rupa::raw().sql("SELECT 1").execute::<u64>()));
+    let reused = pg.block_on(
+        rupa::raw()
+            .sql("SELECT 1")
+            .execute::<u64>()
+            .execute(&mut session),
+    );
 
     assert!(abandoned.is_err(), "the caller gave up mid-body");
     assert!(
@@ -112,7 +116,11 @@ fn an_abandoned_pooled_session_is_discarded(pg: &mut Pg) {
     let reused = pg.block_on(async {
         let mut conn = pool.get().await.expect("replacement connection");
 
-        conn.run(rupa::raw().sql("SELECT 1").execute::<u64>()).await
+        rupa::raw()
+            .sql("SELECT 1")
+            .execute::<u64>()
+            .execute(&mut conn)
+            .await
     });
 
     assert!(abandoned.is_err(), "the caller gave up mid-body");
