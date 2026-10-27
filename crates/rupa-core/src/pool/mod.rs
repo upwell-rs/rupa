@@ -39,7 +39,7 @@ use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use crate::dialect::{Supports, caps};
-use crate::exec::{Executor, Outcome};
+use crate::exec::{Engine, Executor, Outcome};
 use crate::ir::{Statement, TxStatement};
 use crate::query::Expect;
 use crate::repo::Acquire;
@@ -162,6 +162,11 @@ impl<G: Deref<Target: fmt::Debug>> fmt::Debug for Pooled<G> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Pooled").field(&&*self.0).finish()
     }
+}
+
+/// A pooled connection runs queries in its connection's mode.
+impl<G: DerefMut<Target: Engine>> Engine for Pooled<G> {
+    type Completion = <G::Target as Engine>::Completion;
 }
 
 impl<G: DerefMut<Target: Executor>> Executor for Pooled<G> {

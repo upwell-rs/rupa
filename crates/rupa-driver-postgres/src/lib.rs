@@ -40,7 +40,7 @@ use postgres::types::ToSql;
 use std::sync::Arc;
 
 use rupa_core::Postgres;
-use rupa_core::exec::{Executor, Outcome};
+use rupa_core::exec::{Engine, Executor, Immediate, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
 use rupa_core::tx::{PendingRollback, Tx, TxConnection};
@@ -163,6 +163,10 @@ impl std::fmt::Debug for PgExecutor {
             .field("cached_statements", &self.statements.len())
             .finish_non_exhaustive()
     }
+}
+
+impl Engine for PgExecutor {
+    type Completion = Immediate;
 }
 
 impl Executor for PgExecutor {

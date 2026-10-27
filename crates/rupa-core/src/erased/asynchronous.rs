@@ -5,7 +5,7 @@ use std::future::Future;
 
 use crate::dialect::{Dialect, DialectId, DynDialect};
 use crate::error::DynError;
-use crate::exec::{AsyncExecutor, BoxFuture, Outcome};
+use crate::exec::{AsyncExecutor, Awaited, BoxFuture, Engine, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
 use crate::tx::{AsyncTransaction, AsyncTransactional, TxOptions};
@@ -92,6 +92,10 @@ impl fmt::Debug for BoxAsyncExecutor {
     }
 }
 
+impl Engine for BoxAsyncExecutor {
+    type Completion = Awaited;
+}
+
 impl AsyncExecutor for BoxAsyncExecutor {
     type Dialect = DynDialect;
     type Error = DynError;
@@ -145,6 +149,10 @@ impl fmt::Debug for BoxAsyncTx<'_> {
             .field("dialect", &self.dialect)
             .finish_non_exhaustive()
     }
+}
+
+impl Engine for BoxAsyncTx<'_> {
+    type Completion = Awaited;
 }
 
 impl AsyncExecutor for BoxAsyncTx<'_> {

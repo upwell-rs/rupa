@@ -29,7 +29,7 @@ use std::fmt;
 
 use crate::dialect::{Dialect, DialectId, DynDialect};
 use crate::error::DynError;
-use crate::exec::{Executor, Outcome};
+use crate::exec::{Engine, Executor, Immediate, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
 use crate::tx::{Transaction, Transactional, TxOptions};
@@ -107,6 +107,10 @@ impl fmt::Debug for BoxExecutor {
     }
 }
 
+impl Engine for BoxExecutor {
+    type Completion = Immediate;
+}
+
 impl Executor for BoxExecutor {
     type Dialect = DynDialect;
     type Error = DynError;
@@ -150,6 +154,10 @@ impl fmt::Debug for BoxTx<'_> {
             .field("dialect", &self.dialect)
             .finish_non_exhaustive()
     }
+}
+
+impl Engine for BoxTx<'_> {
+    type Completion = Immediate;
 }
 
 impl Executor for BoxTx<'_> {

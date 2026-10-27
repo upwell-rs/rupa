@@ -70,7 +70,7 @@ pub mod sqlite;
 use std::fmt;
 use std::sync::Arc;
 
-use rupa_core::exec::{AsyncExecutor, Outcome};
+use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
 use rupa_core::tx::{AsyncTx, AsyncTxConnection, PendingRollback};
@@ -330,6 +330,10 @@ impl<DB: Backend> fmt::Debug for SqlxExecutor<DB> {
             .field("cached_statements", &self.cached_statements())
             .finish_non_exhaustive()
     }
+}
+
+impl<DB: Backend> Engine for SqlxExecutor<DB> {
+    type Completion = Awaited;
 }
 
 impl<DB: Backend> AsyncExecutor for SqlxExecutor<DB> {

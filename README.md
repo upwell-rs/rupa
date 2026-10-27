@@ -47,6 +47,14 @@ let db = PgPool::connect(&DbConfig::new("postgres://app@localhost/app")).await?;
 let users = UserRepositoryView::new(&db);
 ```
 
+Queries run on an engine with `execute`. The engine decides whether to
+`.await`:
+
+```rust
+let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&mut conn)?;       // sync
+let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&mut pg).await?;   // async
+```
+
 Async repository futures are unboxed by default. Use
 `#[repository(dynamic_dispatch)]` when a trait must support `dyn Trait`.
 Repositories open native transactions with `begin` and `begin_with_security`;

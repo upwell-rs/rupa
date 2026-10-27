@@ -13,7 +13,7 @@ mod shared;
 mod transactions;
 
 use crate::dialect::Dialect;
-use crate::exec::{ExecError, Executor, Outcome};
+use crate::exec::{Engine, ExecError, Executor, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
 
@@ -45,6 +45,10 @@ pub trait Acquire: Send + Sync {
 
     /// Checks a connection out.
     fn acquire(&self) -> Result<Self::Conn<'_>, Self::Error>;
+}
+
+impl<E: Engine + ?Sized> Engine for &mut E {
+    type Completion = E::Completion;
 }
 
 impl<E: Executor + ?Sized> Executor for &mut E {

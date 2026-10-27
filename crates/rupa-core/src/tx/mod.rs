@@ -41,7 +41,7 @@ mod tests;
 use std::ops::DerefMut;
 
 use crate::error::TxError;
-use crate::exec::{Executor, Outcome};
+use crate::exec::{Engine, Executor, Immediate, Outcome};
 pub use crate::ir::{IsolationLevel, TxOptions};
 use crate::ir::{Statement, TxStatement};
 use crate::query::Expect;
@@ -263,6 +263,13 @@ where
             self.conn.defer_rollback(self.depth);
         }
     }
+}
+
+impl<C> Engine for Tx<C>
+where
+    C: DerefMut<Target: TxConnection>,
+{
+    type Completion = Immediate;
 }
 
 impl<C> Executor for Tx<C>

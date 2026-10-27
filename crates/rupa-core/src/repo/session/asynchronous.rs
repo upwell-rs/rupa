@@ -4,7 +4,7 @@ use std::future::Future;
 
 use super::super::AcquireAsync;
 use crate::error::TxError;
-use crate::exec::{AsyncExecutor, Outcome};
+use crate::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
 use crate::tx::AsyncTransaction;
@@ -57,6 +57,10 @@ impl<T: AsyncTransaction> AsyncTxSession<T> {
 pub struct AsyncTxSessionConn<'a, T: AsyncTransaction>(
     futures_util::lock::MutexGuard<'a, Option<T>>,
 );
+
+impl<T: AsyncTransaction> Engine for AsyncTxSessionConn<'_, T> {
+    type Completion = Awaited;
+}
 
 impl<T: AsyncTransaction> AsyncExecutor for AsyncTxSessionConn<'_, T> {
     type Dialect = T::Dialect;

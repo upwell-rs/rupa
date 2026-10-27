@@ -46,7 +46,7 @@ use postgres_types::ToSql;
 use std::sync::Arc;
 
 use rupa_core::Postgres;
-use rupa_core::exec::{AsyncExecutor, Outcome};
+use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
 use rupa_core::tx::{AsyncTx, AsyncTxConnection, PendingRollback};
@@ -172,6 +172,10 @@ impl std::fmt::Debug for PgExecutor {
             .field("cached_statements", &self.statements.len())
             .finish_non_exhaustive()
     }
+}
+
+impl Engine for PgExecutor {
+    type Completion = Awaited;
 }
 
 impl AsyncExecutor for PgExecutor {

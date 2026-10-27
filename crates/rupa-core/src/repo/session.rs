@@ -10,7 +10,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use super::Acquire;
 use crate::error::TxError;
-use crate::exec::{Executor, Outcome};
+use crate::exec::{Engine, Executor, Immediate, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
 use crate::tx::Transaction;
@@ -61,6 +61,10 @@ impl<T: Transaction> TxSession<T> {
 
 /// A serialized query on a [`TxSession`].
 pub struct TxSessionConn<'a, T: Transaction>(MutexGuard<'a, Option<T>>);
+
+impl<T: Transaction> Engine for TxSessionConn<'_, T> {
+    type Completion = Immediate;
+}
 
 impl<T: Transaction> Executor for TxSessionConn<'_, T> {
     type Dialect = T::Dialect;

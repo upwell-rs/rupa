@@ -7,7 +7,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use super::{Acquire, Repo, SyncMode};
-use crate::exec::{Executor, Outcome};
+use crate::exec::{Engine, Executor, Immediate, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
 
@@ -51,6 +51,10 @@ impl<E> DerefMut for SharedConn<'_, E> {
     fn deref_mut(&mut self) -> &mut E {
         &mut self.0
     }
+}
+
+impl<E: Executor> Engine for SharedConn<'_, E> {
+    type Completion = Immediate;
 }
 
 impl<E: Executor> Executor for SharedConn<'_, E> {
