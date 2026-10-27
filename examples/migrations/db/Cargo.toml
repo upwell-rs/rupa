@@ -14,4 +14,5 @@ rupa = { path = "../../../crates/rupa", default-features = false, features = ["m
 rupa-build.workspace = true
 
 [dev-dependencies]
-rupa = { path = "../../../crates/rupa", default-features = false, features = ["migrations", "sqlite"] }
+rupa = { path = "../../../crates/rupa", default-features = false, features = ["migration-commands", "sqlite"] }
+serde_json.workspace = true

@@ -1,3 +1,9 @@
+use rupa_build::{Migrations, VersionScheme};
+
 fn main() -> Result<(), rupa_build::Error> {
-    rupa_build::Migrations::new("primary").compile()
+    Migrations::new("primary").compile()?;
+    Migrations::new("reporting")
+        .dir("reporting")
+        .scheme(VersionScheme::UtcTimestamp)
+        .compile()
 }

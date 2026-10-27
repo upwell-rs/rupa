@@ -52,16 +52,18 @@ written for; implementing both is the same body with `.await` added.
 no added locking, for async applications on sync-only drivers.
 
 ```sh
-cargo run -p rupa-example-app
-cargo run -p rupa-example-app -- app.db
+cargo run -p rupa-example-app -- primary apply
+cargo run -p rupa-example-app -- primary apply --url app.db
 ```
 
 The example in [`examples/migrations`](../examples/migrations) is split like an
-application: `db` owns entities and a `migrations/` directory, and `app`
-applies the generated catalog on startup. The directory holds a SQL file, a
-single-file Rust migration that normalizes titles through typed queries, a
-directory migration with a private helper, and a planned migration that creates
-a table from a shared entity. Passing a file makes history persist; a second
+application: `db` owns entities and two migration directories, and `app` runs
+the generated catalogs through the [operator commands](#operator-commands).
+The numbered `migrations/` directory holds a SQL file, a single-file Rust
+migration that normalizes titles through typed queries, a directory migration
+with a private helper, and a planned migration that creates a table from a
+shared entity. The timestamped `reporting/` stream holds a SQL file and an
+imperative Rust migration. Passing a file makes history persist; a second
 invocation skips installed work.
 
 ## Discovering a directory
@@ -498,6 +500,134 @@ connection's `busy_timeout`, while a writer holds its exclusive lock to
 commit, and fails if the timeout runs out. WAL readers never wait. A status
 is a snapshot, and a runner may start right after it was read. `apply`
 re-checks everything under exclusion.
+
+## Operator commands
+
+The `migration-commands` feature turns every operation above into a command
+an operator, a deployment script or CI can run. The commands call the same
+engine as the library examples in this guide, and Upwell will use it the same
+way. `migration-cli` adds a clap command line for them. Rupa ships no binary:
+your application's own `main`, or a command line it already has, runs them.
+
+| command | CLI | target access | library call |
+|---|---|---|---|
+| `Create` | `create <name>` | none: writes source files | — |
+| `Validate(engine)` | `validate --engine <engine>` | none | `Catalog::validate` |
+| `Status` | `status` | read only | `Inspect::status` |
+| `Plan(options)` | `plan [--through V] [--allow-late] [--full-replay]` | read only | `Inspect::plan_with` |
+| `RevertPlan(target)` | `revert (--to V \| --last N) --dry-run` | read only | `Inspect::revert_plan` |
+| `Apply(options)` | `apply [--through V] [--allow-late] [--full-replay]` | exclusive | `Apply::apply_with` |
+| `Revert(target)` | `revert (--to V \| --last N)` | exclusive | `Revert::revert` |
+| `Adopt(adoption)` | `adopt --through V --reason R [--evidence E]` | exclusive | `Adopt::adopt` |
+| `Recover(recovery)` | `recover (completed <id> \| restored <id> \| release-claim) --reason R [--evidence E]` | exclusive | `Recover::recover` |
+
+Embed `Migrate` once per stream; each stream needs its own database:
+
+```rust,ignore
+use clap::{Parser, Subcommand};
+use rupa::migrate::commands::cli::{Migrate, sync::execute};
+
+#[derive(Parser)]
+struct App {
+    #[command(subcommand)]
+    stream: Stream,
+}
+
+#[derive(Subcommand)]
+enum Stream {
+    Primary(Migrate),
+    Reporting(Migrate),
+}
+
+fn main() -> std::process::ExitCode {
+    let connect = |url: Option<&str>| SqliteExecutor::open(url.unwrap_or("app.db"));
+
+    match App::parse().stream {
+        Stream::Primary(migrate) => {
+            execute(&migrate, &db::migrations::catalog().expect("valid catalog"), connect)
+        }
+        Stream::Reporting(migrate) => {
+            execute(&migrate, &db::reporting::catalog().expect("valid catalog"), connect)
+        }
+    }
+}
+```
+
+`cli::sync::main(&catalog, connect)` parses the process arguments itself, for
+a program that only runs migrations. Async sessions use `cli::asynchronous`,
+whose `connect` returns a future. Without clap, build a `Command` and call
+`commands::sync::run(&catalog, &command, connect)`, which returns an `Outcome`.
+The CLI passes `--url` (or `DATABASE_URL`) to `connect`, and calls it only for
+commands that touch the target. `create` and `validate` never connect.
+Examples: [`examples/migrations`](../examples/migrations/app/src/main.rs).
+
+`create` never reads the target. A numbered incremental gets the newest
+version in the catalog or the directory plus one, padded like the existing
+file names. A timestamped incremental gets the current UTC second. A snapshot
+(`--snapshot`) gets the newest incremental's version, in `snapshots/`.
+`--as sql|planned|sync|async` picks a `.sql` script, a `PlannedMigration`, or
+an imperative `Migration` in either mode. `--down` adds a `.down.sql` sibling
+or a `down` method. It refuses a name rupa-build would reject and a version
+that is already taken, and it never overwrites a file. Two branches can still
+create the same version. The build then fails on the duplicate, and one
+branch renames its file before merging.
+
+### Reports and exit statuses
+
+`--format human` (the default) prints lines for people: a successful outcome
+to stdout, any other to stderr. `--format json` prints one JSON document to
+stdout, tagged `"format": "rupa-migrate-report/1"`:
+
+```json
+{
+  "format": "rupa-migrate-report/1",
+  "command": "apply",
+  "stream": "primary",
+  "scheme": "numbered",
+  "target": "postgres://app:***@db/app",
+  "exit": { "code": 7, "status": "migration" },
+  "report": { "snapshot": null, "covered": [], "applied": ["4"], "late": [] },
+  "failure": {
+    "status": "migration",
+    "message": "migration 5 failed: …",
+    "causes": ["…"],
+    "migration": "5",
+    "source": "0005_backfill.rs",
+    "blockers": [],
+    "cleanup": []
+  }
+}
+```
+
+`report` holds what the command found or committed. A failed `apply` or
+`revert` still reports what it committed before the failure. `failure` holds
+the error, its source chain, the failed migration with its source file, and
+every blocker, each with a `kind`, its identity and a readable `message`.
+Status entries carry their `source` file too. Version 1 only ever gains
+fields.
+
+| exit | status | meaning |
+|---|---|---|
+| 0 | `success` | done; a status or plan found nothing blocking |
+| 1 | `failed` | the database or filesystem failed, or the target was unreachable |
+| 2 | `usage` | invalid arguments, such as a version the stream's scheme rejects |
+| 3 | `blocked` | refused before changing anything, or a status or plan reports blockers |
+| 4 | `busy` | another runner owns the target, or SQLite's claim is set |
+| 5 | `uncertain` | an unresolved attempt needs [recovery](#recovery) |
+| 6 | `reconciled` | interrupted attempts were rolled back; apply again |
+| 7 | `migration` | a migration body failed; earlier commits remain |
+
+Every rendered outcome passes through a `Redactor`. The CLI masks the
+password of `--url` (the userinfo password, and any `password`, `pass` or
+`sslpassword` parameter) as written, percent-decoded and JSON-escaped, so a
+driver error that echoes the connection string shows `***`. With `run`, pass
+your own: `outcome.render(Format::Json, &Redactor::new().url(&url).secret(&token))`.
+
+`adopt` and `recover` reports state the assertion they recorded and that
+nothing verified it (`"verified": false`). The journal keeps the reason and
+evidence. [Operating migrations](migrations-runbooks.md) has runbooks for
+recovery, stale SQLite claims, adoption, rollback limits and rolling
+deployments.
 
 ## Authoring
 

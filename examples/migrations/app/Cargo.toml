@@ -5,8 +5,9 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish = false
-description = "Example application applying the db crate's migrations on startup"
+description = "Example application running the db crate's migration commands"
 
 [dependencies]
 db = { package = "rupa-example-db", path = "../db" }
-rupa = { path = "../../../crates/rupa", default-features = false, features = ["migrations", "sqlite"] }
+rupa = { path = "../../../crates/rupa", default-features = false, features = ["migration-cli", "sqlite"] }
+clap.workspace = true

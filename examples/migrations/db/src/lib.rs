@@ -34,7 +34,14 @@ pub struct Tag {
     pub label: String,
 }
 
-/// The catalog generated from `migrations/` by this crate's build script.
+/// The catalog generated from `migrations/` by this crate's build script:
+/// the numbered `primary` stream.
 pub mod migrations {
     rupa::migrate::include_migrations!("primary");
+}
+
+/// The catalog generated from `reporting/`: the `reporting` stream, versioned
+/// by UTC timestamps, which a separate database holds.
+pub mod reporting {
+    rupa::migrate::include_migrations!("reporting");
 }
