@@ -12,8 +12,9 @@ use std::fmt;
 use rupa_core::MySql;
 use rupa_core::config::{DbConfig, MySqlOptions, PoolConfig};
 use rupa_core::error::{ConnectError, DynError};
+use rupa_core::exec::Immediate;
 use rupa_core::pool::r2d2 as glue;
-use rupa_core::pool::{OwnedTx, Pooled};
+use rupa_core::pool::{Connect, OwnedTx, Pooled, SyncConnect};
 use rupa_core::tx::TxConnection;
 
 use crate::{MySqlError, MySqlExecutor, found_rows};
@@ -103,11 +104,33 @@ impl MySqlPool {
 
     /// Builds a pool for a `mysql:` URL with the config's [`MySqlOptions`].
     pub fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
-        let opts = mysql::Opts::from_url(&config.url)
-            .map_err(|e| ConnectError::InvalidUrl(e.to_string()))?;
-        let manager = MySqlManager::with_options(opts, config.driver.mysql()?);
-        Self::new(manager, &config.pool).map_err(|e| ConnectError::Connect(DynError::new(e)))
+        Self::new(manager(config)?, &config.pool)
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
     }
+}
+
+impl Connect for MySqlPool {
+    type Completion = Immediate;
+    type Connection = MySqlExecutor;
+}
+
+impl SyncConnect for MySqlPool {
+    fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
+        Self::connect(config)
+    }
+
+    fn connect_one(config: &DbConfig) -> Result<MySqlExecutor, ConnectError> {
+        r2d2::ManageConnection::connect(&manager(config)?)
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
+    }
+}
+
+/// The connection manager `config` describes.
+fn manager(config: &DbConfig) -> Result<MySqlManager, ConnectError> {
+    let opts =
+        mysql::Opts::from_url(&config.url).map_err(|e| ConnectError::InvalidUrl(e.to_string()))?;
+
+    Ok(MySqlManager::with_options(opts, config.driver.mysql()?))
 }
 
 /// Whether a migration run left state on `conn`, so the pool must discard it

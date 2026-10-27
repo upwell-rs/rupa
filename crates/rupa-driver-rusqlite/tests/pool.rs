@@ -464,3 +464,23 @@ fn statement_cache_size_is_configurable() {
 }
 
 const NOTES_DDL_MAIN: &str = "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT, pinned INTEGER NOT NULL)";
+
+#[test]
+fn connect_one_opens_a_connection_outside_the_pool() {
+    let config = DbConfig::new("sqlite::memory:");
+
+    let mut one = <SqlitePool as rupa::core::pool::SyncConnect>::connect_one(&config)
+        .expect("a single connection opens");
+
+    one.connection()
+        .execute_batch(NOTES_DDL_MAIN)
+        .expect("the schema applies");
+
+    let notes = raw()
+        .sql("SELECT * FROM notes")
+        .rows::<Vec<Note>>()
+        .execute(&mut one)
+        .expect("the query runs on the single connection");
+
+    assert_eq!(notes, []);
+}
