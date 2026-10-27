@@ -550,8 +550,12 @@ fn main() -> std::process::ExitCode {
             execute(&migrate, &db::reporting::catalog().expect("valid catalog"), connect)
         }
     }
+    .into()
 }
 ```
+
+`execute` prints the outcome and returns its `Exit`, which converts into an
+`ExitCode`.
 
 `cli::sync::main(&catalog, connect)` parses the process arguments itself, for
 a program that only runs migrations. Async sessions use `cli::asynchronous`,
@@ -628,6 +632,76 @@ nothing verified it (`"verified": false`). The journal keeps the reason and
 evidence. [Operating migrations](migrations-runbooks.md) has runbooks for
 recovery, stale SQLite claims, adoption, rollback limits and rolling
 deployments.
+
+### Upwell applications
+
+With the facade's `upwell-migrations` feature, an Upwell application's
+generated command line runs the same commands. Implement
+`rupa::upwell::migrations::sync::Target`, or `asynchronous::Target` for async
+sessions, once per stream. Then register its `Migrations<T>` plugin in
+`app!`:
+
+```rust,ignore
+use rupa::upwell::migrations::sync::{Migrations, Target};
+use rupa::upwell::migrations::exit_code;
+
+impl Target for Primary {
+    type Migration = db::migrations::Migrations;
+    type Session = SqliteExecutor;
+    type Error = SqliteError;
+
+    const PLUGIN: PluginId = namespaced_id!(PluginId, "app/migrations");
+    const COMMAND: &'static str = "migrate";
+    const CONFIG: &'static str = "migrations.primary";
+
+    fn catalog() -> Result<Catalog<'static, Self::Migration>, ValidationError> {
+        db::migrations::catalog()
+    }
+
+    fn connect(url: Option<&str>) -> Result<Self::Session, Self::Error> {
+        SqliteExecutor::open(url.unwrap_or("app.db"))
+    }
+}
+
+app! {
+    pub app App {
+        name: "app",
+        protocol: Rpc,
+        plugins: [Migrations<Primary>],
+    }
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    exit_code(App::run().await)
+}
+```
+
+`app migrate apply` and the other commands keep the arguments, reports, exit
+statuses and redaction described above. They run at Upwell's Setup phase. The
+configuration is loaded, but no component is constructed and no service,
+listener or job starts. A sync target runs on the command's thread, which
+nothing else uses at Setup.
+
+The URL comes from `--url` or `DATABASE_URL`, and otherwise from `url` at the
+target's `CONFIG` path:
+
+```toml
+[migrations.primary]
+url = "postgres://migrator:secret@db/app"
+```
+
+Point it at the migration role, not at the credentials the running application
+uses for its repositories. Upwell's `run()` returns its own `CliError`.
+`exit_code` turns it into rupa's exit status, so scripts see `3` for a blocked
+apply, as with the standalone command line. Upwell is a git dependency pinned to
+a commit until it is released, so this feature cannot be published yet.
+Example: [`examples/migrations/upwell`](../examples/migrations/upwell/src/lib.rs).
+
+Not yet available: checking or applying migrations at startup, before
+schema-dependent components are constructed. At the pinned Upwell commit, only
+Setup-phase code can read the loaded configuration, so that gate follows in a
+later slice of #10.
 
 ## Authoring
 
