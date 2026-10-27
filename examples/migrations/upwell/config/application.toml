@@ -1,0 +1,6 @@
+# Migration credentials, apart from those the running application uses.
+[migrations.primary]
+url = "primary.db"
+
+[migrations.reporting]
+url = "reporting.db"

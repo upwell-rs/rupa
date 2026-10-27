@@ -86,6 +86,7 @@ jobs:
         run: cargo nextest run --profile ci --workspace --features rupa/full -E 'not test(ui)'
       - run: cargo run -p rupa-example-app -- primary apply
       - run: cargo run -p rupa-example-app -- reporting apply
+      - run: cargo run -p rupa-example-upwell -- migrate apply
       # nextest doesn't run doctests.
       - run: cargo test --doc --workspace --features rupa/full
       # trybuild's work dir looks like a nested target dir to rust-cache, whose
@@ -104,6 +105,9 @@ jobs:
           toolchain: "1.99"
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p rupa --features upwell
+      # The migration plugin builds against Upwell pinned to a git commit.
+      - run: cargo test -p rupa-upwell --features migrations,sync,async
+      - run: cargo test -p rupa-example-upwell
 
   bench:
     name: benchmarks
