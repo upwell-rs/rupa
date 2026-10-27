@@ -9,7 +9,8 @@ pub use rupa_core::exec::Executor;
 #[cfg(feature = "async")]
 pub use rupa_core::exec::{AsyncExecutor, complete_unboxed};
 pub use rupa_core::repo::{
-    Acquire, Context, ContextMut, ExclusiveSyncMode, Repo, RepoMut, RepoView, Repository, SyncMode,
+    Acquire, Context, ContextMut, DynRepository, ExclusiveSyncMode, Repo, RepoMut, RepoView,
+    Repository, SyncMode,
 };
 #[cfg(feature = "async")]
 pub use rupa_core::repo::{AcquireAsync, AsyncMode, ExclusiveAsyncMode};

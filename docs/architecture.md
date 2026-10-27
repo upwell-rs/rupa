@@ -73,8 +73,8 @@ use `begin`, `begin_with`, and `begin_with_security` without method suffixes.
 These return native transactions directly. `&mut self` query methods borrow an
 executor or transaction exclusively; `&self` methods acquire from a pool or an
 explicitly shared session. `Blocking` is the explicit adapter for a sync driver
-used through async traits; the adapter itself adds no locks. Async futures are unboxed by default; `#[repository(dynamic_dispatch)]`
-opts into boxing for dyn-compatible traits. Dynamic `Database`
+used through async traits; the adapter itself adds no locks. Repository traits are dyn-compatible by default, with boxed async futures;
+`#[repository(static_dispatch)]` opts into unboxed futures. Dynamic `Database`
 implements the same transaction-source contract as native pools.
 
 For each method:
@@ -121,8 +121,9 @@ connection to the pool when dropped.
 
 `Query::execute` (`rupa-core/src/exec/engine.rs`) hands the query to the
 engine's `Completion`, which calls the driver's `execute(statement, expect)`
-and decodes the `Outcome`. Async repository methods use the unboxed
-`complete_unboxed` instead, so their futures stay unboxed.
+and decodes the `Outcome`. Generated async repository methods use the
+unboxed `complete_unboxed` instead: a `static_dispatch` method's future stays
+unboxed, and a dyn method boxes only its own future.
 `SqliteExecutor::dispatch` (`rupa-driver-rusqlite/src/lib.rs`):
 
 1. `clean()`: sends a rollback still owed by a transaction dropped earlier

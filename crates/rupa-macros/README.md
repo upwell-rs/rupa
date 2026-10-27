@@ -24,8 +24,10 @@ a constant (`__RUPA_<FIELD>_ENCODING`). `Uuid` and the chrono types therefore
 need rupa's `uuid`/`chrono` features (on by default); without them, such a
 field fails as "not a scalar column type" unless marked `#[column(json)]`.
 
-Repositories use native, unboxed futures by default. Use
-`#[repository(dynamic_dispatch)]` when the trait must support `dyn Trait`.
+Repositories are dyn-compatible by default: async methods return boxed
+futures, so the trait works as `Arc<dyn Trait>`, which DI frameworks inject.
+`#[repository(static_dispatch)]` opts into native, unboxed futures for a trait
+used only through its generated `Repo`/`View` types.
 `&mut self` query methods borrow a connection or transaction directly;
 `&self` methods acquire from a pool or an explicitly shared context.
 

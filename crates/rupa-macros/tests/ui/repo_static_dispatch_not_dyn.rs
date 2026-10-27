@@ -5,7 +5,7 @@ use rupa::DynError;
 #[entity(table = "t")]
 pub struct User { #[id] id: i64, email: String }
 
-#[repository]
+#[repository(static_dispatch)]
 pub trait R {
     #[query(filter = id == $id)]
     async fn a(&self, id: i64) -> Result<Option<User>, DynError>;

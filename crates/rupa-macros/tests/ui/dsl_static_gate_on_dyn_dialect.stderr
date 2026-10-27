@@ -30,8 +30,8 @@ help: the following other types implement trait `Supports<C>`
 note: required for `Repository<rupa::rupa_core::repo::Owned<SharedAsync<BoxAsyncExecutor>>, UsersKey, rupa::rupa_core::repo::AsyncMode>` to implement `Users`
   --> tests/ui/dsl_static_gate_on_dyn_dialect.rs:10:1
    |
-10 | #[repository(dynamic_dispatch)]
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+10 | #[repository]
+   | ^^^^^^^^^^^^^
 11 | pub trait Users: Send + Sync {
    |           ^^^^^
    = note: required for the cast from `Arc<Repository<rupa::rupa_core::repo::Owned<SharedAsync<BoxAsyncExecutor>>, UsersKey, rupa::rupa_core::repo::AsyncMode>>` to `Arc<(dyn Users + 'static)>`

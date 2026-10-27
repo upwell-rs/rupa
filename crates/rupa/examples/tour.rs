@@ -66,7 +66,7 @@ struct UserPatch {
 /// A repository: declared queries, implemented for its own view and owned type. `async` and
 /// receivers are the author's choice; this one is dyn-compatible (the
 /// default), so it can be shared as `Arc<dyn UserRepository>`.
-#[repository(dynamic_dispatch)]
+#[repository]
 trait UserRepository: Send + Sync {
     #[query(filter = email == $email)]
     async fn by_email(&self, email: &str) -> Result<Option<User>, rupa::DynError>;

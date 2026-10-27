@@ -31,7 +31,7 @@ fn users() -> Vec<User> {
 // Explicit dynamic dispatch: dyn-compatible, `&self`, async (one method blocks in place).
 // ---------------------------------------------------------------------------
 
-#[repository(dynamic_dispatch)]
+#[repository]
 pub trait UserRepository: Send + Sync {
     #[query(filter = email == $email)]
     async fn by_email(&self, email: &str) -> Result<Option<User>, DynError>;
@@ -77,8 +77,19 @@ fn dyn_repository_behind_arc() {
 }
 
 #[test]
+fn dyn_repository_is_built_over_a_source_without_naming_its_types() {
+    let source = rupa::SharedAsync::new(async_db());
+    let repo: Arc<dyn UserRepository> =
+        <dyn UserRepository as rupa::DynRepository<_>>::over(source);
+
+    let ada = pollster::block_on(repo.by_email("ada@x")).expect("by_email runs");
+
+    assert_eq!(ada.map(|u| u.id), Some(1));
+}
+
+#[test]
 fn dyn_repository_errors_keep_their_kind() {
-    #[repository(dynamic_dispatch)]
+    #[repository]
     pub trait Strict: Send + Sync {
         #[query(filter = active == $active)]
         async fn exactly_one(&self, active: bool) -> Result<User, DynError>;
@@ -180,17 +191,17 @@ fn repository_view_inside_a_transaction() {
 }
 
 // ---------------------------------------------------------------------------
-// The default: unboxed futures.
+// The opt-in: unboxed futures.
 // ---------------------------------------------------------------------------
 
-#[repository]
+#[repository(static_dispatch)]
 pub trait FastUsers {
     #[query(filter = active == $active, order_by = id desc, limit = 1)]
     async fn newest_active(&self, active: bool) -> Result<Option<User>, AppError>;
 }
 
 #[test]
-fn default_repository_uses_unboxed_futures() {
+fn static_dispatch_repository_uses_unboxed_futures() {
     let db = rupa::SharedAsync::new(async_db());
     let repo = FastUsersView::new(&db);
     let newest = pollster::block_on(repo.newest_active(true)).unwrap();
@@ -275,7 +286,7 @@ pub struct NotePatch {
     body: Option<Option<String>>,
 }
 
-#[repository(dynamic_dispatch)]
+#[repository]
 pub trait NoteRepository: Send + Sync {
     #[query(get)]
     async fn get(&self, id: i64) -> Result<Option<Note>, DynError>;
@@ -418,7 +429,7 @@ pub struct Byline {
     author: String,
 }
 
-#[repository(dynamic_dispatch)]
+#[repository]
 pub trait PostRepository: Send + Sync {
     #[query(left_join = Post, filter = User::active == $active, order_by = User::id, order_by = Post::id)]
     async fn with_posts(&self, active: bool) -> Result<Vec<(User, Option<Post>)>, DynError>;

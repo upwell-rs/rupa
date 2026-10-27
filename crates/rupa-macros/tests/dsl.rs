@@ -38,7 +38,7 @@ fn eval_longer_than(args: &[Value]) -> Result<Value, DslError> {
     }
 }
 
-#[repository(dynamic_dispatch)]
+#[repository]
 pub trait Users: Send + Sync {
     #[query(filter = dsl::ilike(email, $pattern) && longer_than(email, $n), order_by = id)]
     async fn search(&self, pattern: &str, n: i64) -> Result<Vec<User>, DynError>;
@@ -116,7 +116,7 @@ fn dsl_functions_render_for_postgres() {
 /// statically gated ones would not compile here (see `ui/dsl_static_gate_on_dyn_dialect.rs`).
 #[test]
 fn runtime_checked_functions_work_with_a_dynamic_dialect() {
-    #[repository(dynamic_dispatch)]
+    #[repository]
     pub trait Search: Send + Sync {
         #[query(filter = dsl::ilike(email, $pattern), order_by = id)]
         async fn search(&self, pattern: &str) -> Result<Vec<User>, DynError>;
