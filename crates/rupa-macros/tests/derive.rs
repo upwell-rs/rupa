@@ -137,16 +137,16 @@ fn entity_metadata() {
 
 #[test]
 fn companion_insert_returns_generated_values() {
-    let mut db = db();
+    let db = db();
     let ada: User = insert::<User>()
         .value(&new_user("ada@x"))
         .returning_one()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap();
     let both: Vec<User> = insert::<User>()
         .values(&[new_user("b@x"), new_user("c@x")])
         .returning_all()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap();
     assert_eq!(ada.id, 1);
     assert_eq!(
@@ -159,7 +159,7 @@ fn companion_insert_returns_generated_values() {
 
 #[test]
 fn one_model_insert_skips_generated_columns() {
-    let mut db = db();
+    let db = db();
     let draft = User {
         id: 0, // ignored: generated
         email: "e@x".into(),
@@ -175,7 +175,7 @@ fn one_model_insert_skips_generated_columns() {
     let saved = insert::<User>()
         .value(&draft)
         .returning_one()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap();
     assert_eq!(
         saved,
@@ -189,36 +189,29 @@ fn one_model_insert_skips_generated_columns() {
 
 #[test]
 fn get_update_and_delete() {
-    let mut db = db();
+    let db = db();
     let mut user = insert::<User>()
         .value(&new_user("ada@x"))
         .returning_one()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap();
     insert::<User>()
         .value(&new_user("bob@x"))
         .affected()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap();
 
-    assert_eq!(
-        get::<User>(&1).execute(&mut db).unwrap().as_ref(),
-        Some(&user)
-    );
-    assert_eq!(get::<User>(&99).execute(&mut db).unwrap(), None);
+    assert_eq!(get::<User>(&1).execute(&db).unwrap().as_ref(), Some(&user));
+    assert_eq!(get::<User>(&99).execute(&db).unwrap(), None);
 
     // Full-entity update by id.
     user.email = "ada@new".into();
     assert_eq!(
-        update::<User>()
-            .one(&user)
-            .affected()
-            .execute(&mut db)
-            .unwrap(),
+        update::<User>().one(&user).affected().execute(&db).unwrap(),
         1
     );
     assert_eq!(
-        get::<User>(&1).execute(&mut db).unwrap().unwrap().email,
+        get::<User>(&1).execute(&db).unwrap().unwrap().email,
         "ada@new"
     );
 
@@ -231,9 +224,9 @@ fn get_update_and_delete() {
     update::<User>()
         .one(&patch)
         .affected()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap();
-    let got = get::<User>(&1).execute(&mut db).unwrap().unwrap();
+    let got = get::<User>(&1).execute(&db).unwrap().unwrap();
     assert_eq!(
         (got.nickname.as_deref(), got.prefs.theme.as_str()),
         (Some("ada"), "dark")
@@ -246,26 +239,18 @@ fn get_update_and_delete() {
         })
         .filter(User::ID.gt(0))
         .affected()
-        .execute(&mut db);
+        .execute(&db);
     assert_eq!(n.unwrap(), 2);
 
     assert_eq!(
-        delete::<User>()
-            .one(&got)
-            .affected()
-            .execute(&mut db)
-            .unwrap(),
+        delete::<User>().one(&got).affected().execute(&db).unwrap(),
         1
     );
     assert_eq!(
-        delete::<User>()
-            .by_id(&2)
-            .affected()
-            .execute(&mut db)
-            .unwrap(),
+        delete::<User>().by_id(&2).affected().execute(&db).unwrap(),
         1
     );
-    assert!(!select::<User>().exists().execute(&mut db).unwrap());
+    assert!(!select::<User>().exists().execute(&db).unwrap());
 }
 
 #[test]
@@ -279,7 +264,7 @@ fn update_values_follow_the_patch() {
         patch.update_values(),
         [("nickname", Value::Null(SqlType::Text))]
     );
-    assert_eq!(Updatable::<User>::key(&patch), rupa::core::Keyed(3));
+    assert_eq!(Updatable::<User>::key(&patch), rupa::Keyed(3));
     assert_eq!(Rename { email: None }.update_values(), []);
 }
 
@@ -287,7 +272,7 @@ fn update_values_follow_the_patch() {
 fn entities_without_capabilities_are_readable() {
     let mut db = MemoryDb::new();
     db.register::<Audit>();
-    assert_eq!(select::<Audit>().all().execute(&mut db).unwrap().len(), 0);
+    assert_eq!(select::<Audit>().all().execute(&db).unwrap().len(), 0);
 }
 
 #[test]
@@ -308,7 +293,7 @@ impl rupa::core::ScalarColumn for Slug {
         Value::Text(self.0.clone())
     }
 
-    fn from_value(v: Value) -> Result<Self, rupa::core::DecodeError> {
+    fn from_value(v: Value) -> Result<Self, rupa::DecodeError> {
         String::from_value(v).map(Slug)
     }
 }

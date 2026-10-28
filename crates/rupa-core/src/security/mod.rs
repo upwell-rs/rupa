@@ -145,8 +145,8 @@ impl<T> SecureTx<T> {
     }
 
     /// The transaction, without its context.
-    pub fn inner(&mut self) -> &mut T {
-        &mut self.tx
+    pub fn inner(&self) -> &T {
+        &self.tx
     }
 }
 
@@ -163,7 +163,7 @@ impl<T: Executor> Executor for SecureTx<T> {
         self.tx.dialect()
     }
 
-    fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, T::Error> {
+    fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, T::Error> {
         self.tx.execute(statement, expect)
     }
 }
@@ -184,7 +184,7 @@ impl<T: Transactional> Transactional for SecureTx<T> {
     where
         Self: 's;
 
-    fn begin_with(&mut self, options: TxOptions) -> Result<T::Tx<'_>, T::Error> {
+    fn begin_with(&self, options: TxOptions) -> Result<T::Tx<'_>, T::Error> {
         self.tx.begin_with(options)
     }
 }
@@ -199,7 +199,7 @@ pub trait SecureTransactional: Transactional {
     /// [`try_begin_with_security`](Self::try_begin_with_security) for erased
     /// executors.
     fn begin_with_security(
-        &mut self,
+        &self,
         options: TxOptions,
         context: SecurityContext,
     ) -> Result<SecureTx<Self::Tx<'_>>, Self::Error>
@@ -215,7 +215,7 @@ pub trait SecureTransactional: Transactional {
     /// [`TxError::Unsupported`] unless the dialect has native row-level
     /// security.
     fn try_begin_with_security(
-        &mut self,
+        &self,
         options: TxOptions,
         context: SecurityContext,
     ) -> Result<SecureTx<Self::Tx<'_>>, Self::Error>
@@ -244,10 +244,7 @@ pub fn check_native_rls(dialect: &dyn Dialect) -> Result<(), TxError> {
 
 /// Applies `context` inside the freshly opened `tx`. On failure `tx` is
 /// dropped, which rolls it back.
-pub(crate) fn apply<T: Executor>(
-    mut tx: T,
-    context: SecurityContext,
-) -> Result<SecureTx<T>, T::Error> {
+pub(crate) fn apply<T: Executor>(tx: T, context: SecurityContext) -> Result<SecureTx<T>, T::Error> {
     if !context.is_empty() {
         tx.execute(&Statement::ApplySecurity(context.clone()), Expect::Affected)?;
     }

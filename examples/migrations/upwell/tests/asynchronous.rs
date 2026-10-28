@@ -24,7 +24,7 @@ pub struct Event {
 }
 
 /// Reads events.
-#[repository]
+#[repository(database = Events)]
 pub trait EventRepository: Send + Sync {
     /// Every event, oldest first.
     #[query(order_by = id)]
@@ -66,7 +66,6 @@ rupa::upwell::database! {
         pool: SqlitePool,
         config: "database.events",
         migrations: events,
-        repositories: [dyn EventRepository],
     }
 }
 
@@ -115,16 +114,12 @@ async fn an_async_database_applies_and_provides_its_repositories() {
     assert_eq!(events.len(), 1);
 }
 
-/// Inserts one event through the database's pool.
+/// Inserts one event on the database, which is a connection like its pool.
 async fn insert_event(database: &Database<Events>) {
-    let mut conn = rupa::AsyncPool::get(database.pool())
-        .await
-        .expect("a connection is free");
-
     raw()
         .sql("INSERT INTO events (kind) VALUES ('started')")
         .execute::<u64>()
-        .execute(&mut conn)
+        .execute(database)
         .await
         .expect("the insert runs");
 }

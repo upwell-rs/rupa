@@ -2,7 +2,7 @@
 //! in the parent module.
 
 use std::future::Future;
-use std::ops::DerefMut;
+use std::ops::Deref;
 
 use super::{TxConn, TxOptions, finish_statement, open_statement};
 use crate::error::TxError;
@@ -18,11 +18,13 @@ pub trait AsyncTransaction: AsyncExecutor + Sized {
     fn rollback(self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
-/// An async executor that can open transactions.
+/// An async executor that can open transactions: a connection, a pool or a
+/// transaction (whose transactions are savepoints).
 pub trait AsyncTransactional: AsyncExecutor {
     /// The transaction type.
     type Tx<'t>: AsyncTransaction
         + AsyncTransactional
+        + Sync
         + AsyncExecutor<Dialect = Self::Dialect, Error = Self::Error>
         + 't
     where
@@ -31,12 +33,12 @@ pub trait AsyncTransactional: AsyncExecutor {
     /// Starts a transaction with `options`. On a transaction, options must be
     /// the default (savepoints have none); anything else is an error.
     fn begin_with(
-        &mut self,
+        &self,
         options: TxOptions,
     ) -> impl Future<Output = Result<Self::Tx<'_>, Self::Error>> + Send;
 
     /// Starts a transaction with default options.
-    fn begin(&mut self) -> impl Future<Output = Result<Self::Tx<'_>, Self::Error>> + Send {
+    fn begin(&self) -> impl Future<Output = Result<Self::Tx<'_>, Self::Error>> + Send {
         self.begin_with(TxOptions::default())
     }
 
@@ -46,14 +48,14 @@ pub trait AsyncTransactional: AsyncExecutor {
     /// The returned future is `Send` whenever `f`'s future is; with a concrete
     /// executor type the compiler sees that. Generic code that must spawn the
     /// future can use the guard API (`begin` / `commit`) instead.
-    fn transaction<'a, T, E, F>(&'a mut self, f: F) -> impl Future<Output = Result<T, E>>
+    fn transaction<'a, T, E, F>(&'a self, f: F) -> impl Future<Output = Result<T, E>>
     where
-        F: AsyncFnOnce(&mut Self::Tx<'a>) -> Result<T, E>,
+        F: AsyncFnOnce(&Self::Tx<'a>) -> Result<T, E>,
         E: From<Self::Error>,
     {
         async move {
-            let mut tx = self.begin().await?;
-            match f(&mut tx).await {
+            let tx = self.begin().await?;
+            match f(&tx).await {
                 Ok(value) => {
                     tx.commit().await?;
                     Ok(value)
@@ -76,20 +78,20 @@ pub trait AsyncTransactional: AsyncExecutor {
 pub trait AsyncTxConnection: AsyncExecutor<Error: From<TxError>> {
     /// Runs a transaction-control statement now (after any deferred rollback).
     fn control(
-        &mut self,
+        &self,
         statement: TxStatement,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Records a rollback to `depth` (`0` = the whole transaction) that must
     /// be sent before the next statement.
-    fn defer_rollback(&mut self, depth: u32);
+    fn defer_rollback(&self, depth: u32);
 
     /// Whether a deferred rollback has not been sent yet.
     fn is_dirty(&self) -> bool;
 
     /// Sends the deferred rollback, if any. Pools call this before reusing a
     /// connection.
-    fn clean(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn clean(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 /// An open async transaction (`depth == 0`) or savepoint (`depth > 0`) on
@@ -99,7 +101,7 @@ pub trait AsyncTxConnection: AsyncExecutor<Error: From<TxError>> {
 /// connection (see the [module docs](crate::tx)).
 pub struct AsyncTx<C>
 where
-    C: DerefMut<Target: AsyncTxConnection>,
+    C: Deref<Target: AsyncTxConnection>,
 {
     conn: C,
     depth: u32,
@@ -112,14 +114,14 @@ type AsyncErr<C> = <TxConn<C> as AsyncExecutor>::Error;
 
 impl<C> AsyncTx<C>
 where
-    C: DerefMut<Target: AsyncTxConnection> + Send,
+    C: Deref<Target: AsyncTxConnection> + Send + Sync,
 {
     /// Opens a top-level transaction on `conn`.
     pub async fn begin(conn: C, options: TxOptions) -> Result<Self, AsyncErr<C>> {
         Self::open(conn, 0, options).await
     }
 
-    async fn open(mut conn: C, depth: u32, options: TxOptions) -> Result<Self, AsyncErr<C>> {
+    async fn open(conn: C, depth: u32, options: TxOptions) -> Result<Self, AsyncErr<C>> {
         conn.control(open_statement(depth, options)?).await?;
         Ok(Self {
             conn,
@@ -135,8 +137,8 @@ where
 
     /// The connection the transaction runs on. Statements sent through the
     /// driver's own API bypass the transaction guard; use with care.
-    pub fn connection(&mut self) -> &mut TxConn<C> {
-        &mut self.conn
+    pub fn connection(&self) -> &TxConn<C> {
+        &self.conn
     }
 
     async fn finish(mut self, commit: bool) -> Result<(), AsyncErr<C>> {
@@ -150,7 +152,7 @@ where
 
 impl<C> Drop for AsyncTx<C>
 where
-    C: DerefMut<Target: AsyncTxConnection>,
+    C: Deref<Target: AsyncTxConnection>,
 {
     fn drop(&mut self) {
         if !self.done {
@@ -161,14 +163,14 @@ where
 
 impl<C> Engine for AsyncTx<C>
 where
-    C: DerefMut<Target: AsyncTxConnection> + Send,
+    C: Deref<Target: AsyncTxConnection> + Send + Sync,
 {
     type Completion = Awaited;
 }
 
 impl<C> AsyncExecutor for AsyncTx<C>
 where
-    C: DerefMut<Target: AsyncTxConnection> + Send,
+    C: Deref<Target: AsyncTxConnection> + Send + Sync,
 {
     type Dialect = <TxConn<C> as AsyncExecutor>::Dialect;
     type Error = AsyncErr<C>;
@@ -178,7 +180,7 @@ where
     }
 
     fn execute(
-        &mut self,
+        &self,
         statement: &Statement,
         expect: Expect,
     ) -> impl Future<Output = Result<Outcome, Self::Error>> + Send {
@@ -188,7 +190,7 @@ where
 
 impl<C> AsyncTransaction for AsyncTx<C>
 where
-    C: DerefMut<Target: AsyncTxConnection> + Send,
+    C: Deref<Target: AsyncTxConnection> + Send + Sync,
 {
     fn commit(self) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.finish(true)
@@ -201,31 +203,17 @@ where
 
 impl<C> AsyncTransactional for AsyncTx<C>
 where
-    C: DerefMut<Target: AsyncTxConnection> + Send,
+    C: Deref<Target: AsyncTxConnection + Sync> + Send + Sync,
 {
     type Tx<'s>
-        = AsyncTx<&'s mut TxConn<C>>
+        = AsyncTx<&'s TxConn<C>>
     where
         Self: 's;
 
     fn begin_with(
-        &mut self,
+        &self,
         options: TxOptions,
     ) -> impl Future<Output = Result<Self::Tx<'_>, Self::Error>> + Send {
-        AsyncTx::open(&mut *self.conn, self.depth + 1, options)
-    }
-}
-
-impl<E: AsyncTxConnection> AsyncTransactional for E {
-    type Tx<'t>
-        = AsyncTx<&'t mut E>
-    where
-        Self: 't;
-
-    fn begin_with(
-        &mut self,
-        options: TxOptions,
-    ) -> impl Future<Output = Result<AsyncTx<&mut E>, E::Error>> + Send {
-        AsyncTx::begin(self, options)
+        AsyncTx::open(&*self.conn, self.depth + 1, options)
     }
 }

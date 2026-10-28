@@ -19,7 +19,7 @@ rupa = { version = "0.1", features = ["full"] }              # every driver + ru
 use rupa::prelude::*;
 
 let pool = rupa::drivers::sqlite::SqlitePool::connect(&DbConfig::new("sqlite://app.db"))?;
-let users = UsersView::new(&pool);
+let users = UsersRepo::new(&pool);
 ```
 
 For runnable, server-free examples, start with the [SQLite example guide](../../README.md#examples).

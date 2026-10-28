@@ -93,15 +93,29 @@ macro_rules! mode {
     (sync) => {
         mode!(@emit [] [] [] [] [Immediate] [context query]
             [Result<R, crate::Error<S::Error>>]
-            [query.execute(&mut *context.session).map_err(crate::Error::Database)]);
+            [{
+                let outcome = context
+                    .session
+                    .borrow_mut()
+                    .user_statement(query.statement(), query.expect())
+                    .map_err(crate::Error::Database)?;
+
+                outcome.decode().map_err(|e| crate::Error::Database(e.into()))
+            }]);
     };
     (async) => {
         mode!(@emit [async] [.await] [+ Send + Sync] [+ Send] [Awaited] [context query]
             [rupa_core::exec::BoxFuture<'e, Result<R, crate::Error<S::Error>>>]
             [Box::pin(async move {
-                rupa_core::exec::complete_unboxed(&mut *context.session, query)
+                let outcome = context
+                    .session
+                    .lock()
                     .await
-                    .map_err(crate::Error::Database)
+                    .user_statement(query.statement(), query.expect())
+                    .await
+                    .map_err(crate::Error::Database)?;
+
+                outcome.decode().map_err(|e| crate::Error::Database(e.into()))
             })]);
     };
     (@emit [$($async:tt)*] [$($await:tt)*] [$($bound:tt)*] [$($send:tt)*]
@@ -122,7 +136,7 @@ macro_rules! mode {
                 R: 'e;
 
             fn complete<'e>(
-                $context: &'e mut Context<'c, S>,
+                $context: &'e Context<'c, S>,
                 $query: rupa_core::query::Query<R>,
             ) -> Self::Output<'e>
             where
@@ -132,12 +146,24 @@ macro_rules! mode {
             }
         }
 
+        impl<'c, S: Session> Context<'c, S> {
+            /// A context running statements on `session`.
+            fn new(session: &'c mut S) -> Self {
+                Self {
+                    session: ::core::convert::From::from(session),
+                    plan: None,
+                    missing_down: false,
+                }
+            }
+        }
+
         impl<S: Session> Context<'_, S> {
             /// Runs a script using the driver's native parser and migration authorization.
             pub $($async)* fn script(&mut self, sql: &str) -> Result<(), crate::Error<S::Error>> {
-                let sql = crate::runner::prepare_script(sql, rupa_core::dialect::Dialect::id(self.session.dialect()))?;
+                let session = self.session.get_mut();
+                let sql = crate::runner::prepare_script(sql, rupa_core::dialect::Dialect::id(session.dialect()))?;
 
-                self.session.script(&sql) $($await)*
+                session.script(&sql) $($await)*
             }
 
             /// Runs a schema operation, rendered for the session's dialect.
@@ -145,10 +171,11 @@ macro_rules! mode {
                 &mut self,
                 op: &rupa_core::schema::SchemaOp,
             ) -> Result<(), crate::Error<S::Error>> {
-                let sql = rupa_sql::render_schema(op, self.session.dialect())
+                let session = self.session.get_mut();
+                let sql = rupa_sql::render_schema(op, session.dialect())
                     .map_err(|e| crate::Error::Validation(e.into()))?;
 
-                self.session.script(&sql) $($await)*
+                session.script(&sql) $($await)*
             }
 
             /// Runs the checksummed plan of the running direction: the
@@ -339,11 +366,7 @@ macro_rules! mode {
             }
 
             let migration = &catalog.migrations[entry.index];
-            let mut context = Context {
-                session: &mut *session,
-                plan: None,
-                missing_down: false,
-            };
+            let mut context = Context::new(&mut *session);
             let ran = match direction {
                 crate::Direction::Up => {
                     context.plan = entry.plan.as_ref();

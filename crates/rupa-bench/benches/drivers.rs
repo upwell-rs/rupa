@@ -81,12 +81,12 @@ async fn connect(url: &str, driver: &str) -> Database {
 }
 
 async fn seed(db: &Database, ddl: &'static str) {
-    let mut conn = db.get().await.unwrap();
+    let conn = db.get().await.unwrap();
     for statement in ddl.split(';').map(str::trim).filter(|s| !s.is_empty()) {
         raw()
             .sql(statement)
             .execute::<u64>()
-            .execute(&mut conn)
+            .execute(&conn)
             .await
             .unwrap();
     }
@@ -94,7 +94,7 @@ async fn seed(db: &Database, ddl: &'static str) {
     insert::<User>()
         .values(&new_users(ROWS))
         .affected()
-        .execute(&mut conn)
+        .execute(&conn)
         .await
         .unwrap();
 }
@@ -216,11 +216,11 @@ async fn active_100(users: &dyn Users) {
 }
 
 async fn insert_rollback(db: &Database, i: u64) {
-    let mut tx = db.begin().await.unwrap();
+    let tx = db.begin().await.unwrap();
     insert::<User>()
         .value(&new_user(i))
         .affected()
-        .execute(&mut tx)
+        .execute(&tx)
         .await
         .unwrap();
     tx.rollback().await.unwrap();

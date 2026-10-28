@@ -3,8 +3,8 @@
 use std::convert::Infallible;
 use std::future::Future;
 
-use rupa::core::asynchronous::Connection;
-use rupa::core::exec::Blocking;
+use rupa::AsyncExecutor as Connection;
+use rupa::Blocking;
 use rupa::migrate::Catalog;
 use rupa::migrate::asynchronous::{Adopt, Apply, Inspect, Migration, Recover, Revert, Session};
 use rupa::migrate::commands::{self, Command, Outcome};

@@ -1,4 +1,5 @@
-//! The same Task model and queries as `sqlite_crud`, on an async executor.
+//! The same Task model and queries as `sqlite_crud`, on an async pool: a
+//! repository over the pool, and one over a transaction.
 //!
 //! Run: `cargo run -p rupa --example sqlite_async --features sqlx-sqlite`
 
@@ -13,24 +14,22 @@ use task::{NewTask, Task, TaskPatch};
 #[repository]
 trait Tasks {
     #[query(insert)]
-    async fn add(&mut self, task: &NewTask) -> Result<u64, rupa::DynError>;
+    async fn add(&self, task: &NewTask) -> Result<u64, rupa::DynError>;
 
     #[query(get)]
-    async fn get(&mut self, id: i64) -> Result<Option<Task>, rupa::DynError>;
+    async fn get(&self, id: i64) -> Result<Option<Task>, rupa::DynError>;
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = SqlitePool::connect(&DbConfig::new("sqlite::memory:")).await?;
-    let mut conn = pool.get().await?;
     raw()
         .sql(task::SCHEMA)
         .execute::<u64>()
-        .execute(&mut conn)
+        .execute(&pool)
         .await?;
-    let mut repository = TasksRepo::new(conn);
-    let mut tx = repository.begin().await?;
-    let mut tasks = TasksView::new(&mut tx);
+    let tx = pool.begin().await?;
+    let tasks = TasksRepo::new(&tx);
     tasks
         .add(&NewTask {
             title: "write examples".into(),
@@ -43,8 +42,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     tx.commit().await?;
 
-    let task = repository.get(1).await?.expect("committed task");
-    let mut conn = repository.into_inner();
+    let tasks = TasksRepo::new(&pool);
+    let task = tasks.get(1).await?.expect("committed task");
     assert_eq!(task.title, "write examples");
     update::<Task>()
         .one(&TaskPatch {
@@ -52,16 +51,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             done: Some(true),
         })
         .affected()
-        .execute(&mut conn)
+        .execute(&pool)
         .await?;
-    assert!(
-        TasksView::new(&mut conn)
-            .get(task.id)
-            .await?
-            .expect("task still exists")
-            .done
-    );
+    assert!(tasks.get(task.id).await?.expect("task still exists").done);
+    assert_eq!(pool.status().max_size, 1);
 
-    println!("same Task queries on an async executor passed");
+    println!("same Task queries on an async pool passed");
     Ok(())
 }

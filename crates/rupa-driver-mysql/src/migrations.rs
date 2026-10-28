@@ -59,7 +59,7 @@ impl Io for MySqlExecutor {
         bound: &[Value],
         columns: &[SqlType],
     ) -> Result<Vec<Vec<Value>>, MySqlError> {
-        let rows: Vec<mysql::Row> = self.conn.exec(sql, params(bound)?)?;
+        let rows: Vec<mysql::Row> = self.connection().exec(sql, params(bound)?)?;
 
         rows.into_iter()
             .map(|row| {
@@ -77,13 +77,13 @@ impl Io for MySqlExecutor {
     }
 
     fn execute(&mut self, sql: &str, bound: &[Value]) -> Result<u64, MySqlError> {
-        self.conn.exec_drop(sql, params(bound)?)?;
+        self.connection().exec_drop(sql, params(bound)?)?;
 
-        Ok(self.conn.affected_rows())
+        Ok(self.connection().affected_rows())
     }
 
     fn batch(&mut self, sql: &str) -> Result<(), MySqlError> {
-        Ok(self.conn.query_drop(sql)?)
+        Ok(self.connection().query_drop(sql)?)
     }
 
     fn clean(&mut self) -> Result<(), MySqlError> {

@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub async fn case_insert_and_select<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_insert_and_select<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let all = select::<Item>()
         .order_by(Item::ID.asc())
@@ -13,7 +13,7 @@ pub async fn case_insert_and_select<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(all, items(), "rows must round-trip exactly");
 }
 
-pub async fn case_single_row_shapes<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_single_row_shapes<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let one = select::<Item>()
         .filter(Item::ID.eq(2))
@@ -57,7 +57,7 @@ pub async fn case_single_row_shapes<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(result_error(r), ResultError::TooManyRows);
 }
 
-pub async fn case_comparisons<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_comparisons<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     assert_eq!(ids(e, Item::QTY.eq(7)).await, [3]);
     assert_eq!(ids(e, Item::QTY.ne(7)).await, [1, 2, 4]);
@@ -75,7 +75,7 @@ pub async fn case_comparisons<E: AsyncExecutor>(e: &mut E) {
 /// NULL = 'red' is NULL, and NOT NULL is still NULL: neither keeps rows 2 and 4.
 ///
 /// NULL OR TRUE is TRUE; NULL AND FALSE is FALSE.
-pub async fn case_three_valued_logic<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_three_valued_logic<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     assert_eq!(ids(e, Item::LABEL.eq("red")).await, [1]);
     assert_eq!(ids(e, !Item::LABEL.eq("red")).await, [3]);
@@ -89,7 +89,7 @@ pub async fn case_three_valued_logic<E: AsyncExecutor>(e: &mut E) {
 }
 
 /// x NOT IN (1, NULL) is never TRUE.
-pub async fn case_in_lists<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_in_lists<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     assert_eq!(ids(e, Item::ID.in_([1i64, 3, 99])).await, [1, 3]);
     assert_eq!(ids(e, Item::ID.not_in([1i64, 3])).await, [2, 4]);
@@ -101,8 +101,7 @@ pub async fn case_in_lists<E: AsyncExecutor>(e: &mut E) {
         ids(e, Item::ID.not_in(Vec::<i64>::new())).await,
         [1, 2, 3, 4]
     );
-    let null =
-        Expr::<Option<i64>>::from_node(ExprNode::Param(Value::Null(rupa::core::SqlType::I64)));
+    let null = Expr::<Option<i64>>::from_node(ExprNode::Param(Value::Null(rupa::SqlType::I64)));
     assert_eq!(
         ids(
             e,
@@ -113,7 +112,7 @@ pub async fn case_in_lists<E: AsyncExecutor>(e: &mut E) {
     );
 }
 
-pub async fn case_like_patterns<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_like_patterns<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     assert_eq!(ids(e, Item::NAME.like("%an%")).await, [2]);
     assert_eq!(ids(e, Item::NAME.like("_pple")).await, [1]);
@@ -121,7 +120,7 @@ pub async fn case_like_patterns<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(ids(e, Item::LABEL.like("%")).await, [1, 3]);
 }
 
-pub async fn case_order_with_nulls<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_order_with_nulls<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let asc = select::<Item>()
         .order_by(Item::LABEL.asc())
@@ -149,7 +148,7 @@ pub async fn case_order_with_nulls<E: AsyncExecutor>(e: &mut E) {
     );
 }
 
-pub async fn case_limit_offset<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_limit_offset<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let page = select::<Item>()
         .order_by(Item::ID.asc())
@@ -172,7 +171,7 @@ pub async fn case_limit_offset<E: AsyncExecutor>(e: &mut E) {
     assert!(zero.is_empty());
 }
 
-pub async fn case_exists<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_exists<E: AsyncExecutor>(e: &E) {
     assert!(
         !select::<Item>().exists().execute(e).await.unwrap(),
         "empty table"
@@ -199,7 +198,7 @@ pub async fn case_exists<E: AsyncExecutor>(e: &mut E) {
 /// A missing key and a JSON null are both SQL NULL under ->>.
 ///
 /// ...but under ->, a JSON null is a value, not SQL NULL.
-pub async fn case_json_paths<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_json_paths<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     assert_eq!(
         ids(e, Item::META.path("nested").key("k").text().eq("w")).await,
@@ -236,7 +235,7 @@ pub async fn case_json_paths<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(ids(e, note_json).await, Vec::<i64>::new());
 }
 
-pub async fn case_nullable_json<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_nullable_json<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     assert_eq!(
         ids(e, Item::EXTRA.is_null()).await,
@@ -257,7 +256,7 @@ pub async fn case_nullable_json<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(ids(e, Item::EXTRA.is_not_null()).await, Vec::<i64>::new());
 }
 
-pub async fn case_timestamps<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_timestamps<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let cutoff = items()[1].created_at;
     assert_eq!(ids(e, Item::CREATED_AT.gt(cutoff)).await, [3, 4]);

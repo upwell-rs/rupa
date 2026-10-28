@@ -1,8 +1,8 @@
 //! The conformance suite against a real Postgres in Docker: on one executor,
 //! then through the registry's pooled `Database`.
 
-use rupa::core::tx::{AsyncTransactional, AsyncTxConnection};
 use rupa::{AsyncPool, DbConfig, PoolConfig, Registry};
+use rupa::{AsyncTransactional, AsyncTxConnection};
 use rupa_conformance::{Harness, POSTGRES_DDL};
 use rupa_driver_sqlx::postgres::{PgDriver, PgExecutor, PgPool};
 use testcontainers_modules::postgres::Postgres;
@@ -74,18 +74,18 @@ async fn dropped_tx_marks_the_connection_dirty(exec: &mut PgExecutor) {
 
 /// Dirty connections are cleaned on return; options reach each connection.
 async fn pooled_connections(url: &str) {
-    use rupa::core::ExprOps as _;
+    use rupa::ExprOps as _;
     use rupa_conformance::Note;
 
     let pool = PgPool::connect(&DbConfig::new(url).pool(PoolConfig::default().max_size(1)))
         .await
         .unwrap();
     {
-        let mut conn = pool.get().await.unwrap();
+        let conn = pool.get().await.unwrap();
         drop(conn.begin().await.unwrap());
         assert!(conn.is_dirty());
     }
-    let mut conn = pool.get().await.unwrap();
+    let conn = pool.get().await.unwrap();
     assert!(!conn.is_dirty(), "recycling cleaned it");
     assert!(
         conn.script("SAVEPOINT probe").await.is_err(),
@@ -103,7 +103,7 @@ async fn pooled_connections(url: &str) {
     for n in 1..=4i64 {
         let ids: Vec<i64> = (0..n).collect();
         let q = rupa::core::select::<Note>().filter(Note::ID.in_(ids)).all();
-        q.execute(&mut conn).await.unwrap();
+        q.execute(&conn).await.unwrap();
     }
 
     assert_eq!(conn.cached_statements(), 2, "least recently used dropped");

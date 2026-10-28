@@ -10,7 +10,7 @@ pub use dsl::*;
 pub use select::*;
 pub use write::*;
 
-pub(super) async fn seed<E: AsyncExecutor>(e: &mut E) {
+pub(super) async fn seed<E: AsyncExecutor>(e: &E) {
     let all = items();
     let n = insert::<Item>()
         .values(&all)
@@ -21,7 +21,7 @@ pub(super) async fn seed<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(n, all.len() as u64);
 }
 
-pub(super) async fn ids<E: AsyncExecutor>(e: &mut E, cond: Expr<bool>) -> Vec<i64> {
+pub(super) async fn ids<E: AsyncExecutor>(e: &E, cond: Expr<bool>) -> Vec<i64> {
     let rows = select::<Item>()
         .filter(cond)
         .order_by(Item::ID.asc())
@@ -46,7 +46,7 @@ pub(super) fn returning<E: AsyncExecutor>(e: &E) -> bool {
 }
 
 /// Inserts notes and returns them as stored (with generated ids).
-pub(super) async fn insert_notes<E: AsyncExecutor>(e: &mut E, notes: &[NewNote]) -> Vec<Note> {
+pub(super) async fn insert_notes<E: AsyncExecutor>(e: &E, notes: &[NewNote]) -> Vec<Note> {
     if returning(e) {
         return insert::<Note>()
             .values(notes)

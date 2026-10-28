@@ -1,22 +1,30 @@
 //! `#[repository]`: emits the trait as written (with `#[query]` attributes
-//! removed), a repository key, a borrowed view, and an owned repository type.
+//! removed) and one repository type, `{Trait}Repo<C>`, over any
+//! [`Connection`](rupa_core::connection::Connection) `C`.
 //!
 //! The author decides everything visible:
 //!
-//! - **Receivers.** `&self` acquires from a source; `&mut self` borrows a
-//!   native executor directly, without a synchronization wrapper.
+//! - **The connection.** `{Trait}Repo::new(c)` takes a pool, a connection or
+//!   a transaction, or any `&`, `&mut`, `Box`, `Rc` or `Arc` of one, and runs
+//!   every query on it. Methods take `&self`.
 //! - **Sync or async, per method.** If any query method is `async`, the
-//!   repository runs on an async executor, and its plain `fn` methods block
-//!   in place. Otherwise everything is synchronous.
+//!   repository is async: it runs on every connection, sync ones included,
+//!   and its plain `fn` methods block in place. Otherwise everything is
+//!   synchronous and runs on sync connections.
 //! - **Errors.** Methods return `Result<R, E>`; the implementation requires
 //!   `E: From<rupa::DynError>`.
 //!
 //! Every repository is dyn-compatible by default: async methods return boxed
 //! futures, so the trait works as `Arc<dyn Trait>` (which Upwell injects),
-//! and `dyn Trait` can be built over any matching source through
+//! and `dyn Trait` can be built over any matching connection through
 //! `DynRepository`. `#[repository(static_dispatch)]` opts into unboxed
 //! `impl Future + Send` methods instead; such a trait is used through its
-//! generated `Repo`/`View` types, not as a trait object.
+//! generated repository type, not as a trait object.
+//!
+//! With rupa's `upwell-database` feature, `#[repository(database = Primary)]`
+//! registers the repository as an Upwell provider of `Arc<dyn Trait>` over
+//! the declared database `Primary`, discovered at link time like a
+//! component. `database` may repeat, once per database.
 
 use proc_macro2::TokenStream;
 use quote::{ToTokens, format_ident, quote, quote_spanned};
@@ -33,108 +41,34 @@ struct Method {
     item: TraitItemFn,
     attr: QueryAttr,
     is_async: bool,
-    mut_receiver: bool,
     /// `R` and `E` of `Result<R, E>`.
     ok: Type,
     err: Type,
 }
 
-/// How the implementation reaches an executor: through a connection source
-/// (`&self`), synchronously or asynchronously.
-#[derive(Clone, Copy)]
-enum Access {
-    SharedSync,
-    SharedAsync,
-    ExclusiveSync,
-    ExclusiveAsync,
+/// Whether the repository is sync or async: any `async` method makes the
+/// whole repository async.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Sync,
+    Async,
 }
 
-impl Access {
-    /// The access every method of the trait shares. Any `async` method makes
-    /// the whole repository async.
+impl Mode {
     fn of(methods: &[Method]) -> Self {
-        let is_async = methods.iter().any(|m| m.is_async);
-
-        match (methods[0].mut_receiver, is_async) {
-            (false, false) => Access::SharedSync,
-            (false, true) => Access::SharedAsync,
-            (true, false) => Access::ExclusiveSync,
-            (true, true) => Access::ExclusiveAsync,
+        match methods.iter().any(|m| m.is_async) {
+            true => Self::Async,
+            false => Self::Sync,
         }
     }
 
-    fn is_async(self) -> bool {
-        matches!(self, Access::SharedAsync | Access::ExclusiveAsync)
-    }
-
-    /// The bound on the repository source.
+    /// The bound on the repository's connection: a sync repository runs on
+    /// sync connections, an async one on every connection it can borrow
+    /// across `.await`.
     fn bound(self, ms: &TokenStream) -> TokenStream {
         match self {
-            Access::SharedSync => quote!(#ms::Acquire),
-            Access::SharedAsync => quote!(#ms::AcquireAsync),
-            Access::ExclusiveSync => quote!(#ms::Executor),
-            Access::ExclusiveAsync => quote!(#ms::AsyncExecutor),
-        }
-    }
-
-    fn mode(self, ms: &TokenStream) -> TokenStream {
-        let name = match self {
-            Self::SharedSync => "SyncMode",
-            Self::SharedAsync => "AsyncMode",
-            Self::ExclusiveSync => "ExclusiveSyncMode",
-            Self::ExclusiveAsync => "ExclusiveAsyncMode",
-        };
-
-        let name = format_ident!("{name}");
-
-        quote!(#ms::#name)
-    }
-
-    fn context(self, ms: &TokenStream) -> TokenStream {
-        match self {
-            Self::SharedSync | Self::SharedAsync => {
-                quote!(#ms::Context<Source = __S> + ::core::marker::Send + ::core::marker::Sync)
-            }
-            Self::ExclusiveSync => quote!(#ms::ContextMut<Source = __S>),
-            Self::ExclusiveAsync => quote!(#ms::ContextMut<Source = __S> + ::core::marker::Send),
-        }
-    }
-
-    fn view(self, ms: &TokenStream) -> TokenStream {
-        match self {
-            Self::SharedSync | Self::SharedAsync => quote!(#ms::RepoView),
-            Self::ExclusiveSync | Self::ExclusiveAsync => quote!(#ms::RepoMut),
-        }
-    }
-
-    /// Runs a query through acquisition or an exclusive native executor.
-    /// Async methods complete it unboxed, so their futures stay unboxed.
-    fn execute(self, ms: &TokenStream) -> TokenStream {
-        let wait = self.is_async().then(|| quote!(.await));
-        let (acquire, connection) = match self {
-            Self::SharedSync | Self::SharedAsync => {
-                let source = self.bound(ms);
-
-                (
-                    quote! {
-                        let mut __conn = #source::acquire(self.source()) #wait
-                            .map_err(#ms::ExecError::into_dyn_error)?;
-                    },
-                    quote!(&mut __conn),
-                )
-            }
-            Self::ExclusiveSync | Self::ExclusiveAsync => (quote!(), quote!(self.source_mut())),
-        };
-
-        let execute = if self.is_async() {
-            quote!(#ms::complete_unboxed(#connection, __query).await)
-        } else {
-            quote!(__query.execute(#connection))
-        };
-
-        quote! {
-            #acquire
-            ::core::result::Result::Ok(#execute.map_err(#ms::ExecError::into_dyn_error)?)
+            Self::Sync => quote!(#ms::Connection<Mode = #ms::Immediate>),
+            Self::Async => quote!(#ms::Connection + ::core::marker::Sync),
         }
     }
 }
@@ -162,22 +96,56 @@ fn result_parts(ty: &Type) -> Option<(Type, Type)> {
     }
 }
 
-/// Whether the trait uses native, unboxed futures.
-fn parse_options(args: TokenStream) -> syn::Result<bool> {
-    let mut static_dispatch = false;
-    let parser = syn::meta::parser(|m| {
-        if m.path.is_ident("static_dispatch") {
-            static_dispatch = true;
+/// The options of `#[repository(..)]`.
+#[derive(Default)]
+struct Options {
+    /// Native, unboxed futures instead of a dyn-compatible trait.
+    static_dispatch: bool,
+    /// The Upwell databases the repository is provided over.
+    databases: Vec<syn::Path>,
+}
 
-            return Ok(());
+impl Options {
+    fn parse(args: TokenStream) -> syn::Result<Self> {
+        let mut options = Self::default();
+        let parser = syn::meta::parser(|m| {
+            if m.path.is_ident("static_dispatch") {
+                options.static_dispatch = true;
+
+                return Ok(());
+            }
+
+            if m.path.is_ident("database") {
+                options.databases.push(m.value()?.parse()?);
+
+                return Ok(());
+            }
+
+            Err(m.error(
+                "unknown `repository` option; expected `static_dispatch` or `database = ..`",
+            ))
+        });
+
+        syn::parse::Parser::parse2(parser, args)?;
+
+        if let Some(database) = options.databases.first() {
+            if !cfg!(feature = "upwell") {
+                return Err(syn::Error::new_spanned(
+                    database,
+                    "`database = ..` provides the repository in an Upwell application; enable rupa's `upwell-database` feature",
+                ));
+            }
+
+            if options.static_dispatch {
+                return Err(syn::Error::new_spanned(
+                    database,
+                    "`database = ..` provides `Arc<dyn Trait>`, which a `static_dispatch` repository is not",
+                ));
+            }
         }
 
-        Err(m.error("unknown `repository` option; expected `static_dispatch`"))
-    });
-
-    syn::parse::Parser::parse2(parser, args)?;
-
-    Ok(static_dispatch)
+        Ok(options)
+    }
 }
 
 /// The `#[query]` method `f`, with its attribute removed from the trait.
@@ -202,15 +170,15 @@ fn take_method(f: &mut TraitItemFn) -> syn::Result<Option<Method>> {
         ));
     }
 
-    let mut_receiver = match f.sig.inputs.first() {
-        Some(FnArg::Receiver(r)) if r.reference.is_some() => r.mutability.is_some(),
+    match f.sig.inputs.first() {
+        Some(FnArg::Receiver(r)) if r.reference.is_some() && r.mutability.is_none() => {}
         _ => {
             return Err(syn::Error::new_spanned(
                 &f.sig,
-                "a repository query method takes `&self` for a source or `&mut self` for a native executor",
+                "a repository query method takes `&self`; the repository holds its connection",
             ));
         }
-    };
+    }
     let ReturnType::Type(_, ret) = &f.sig.output else {
         return Err(syn::Error::new_spanned(
             &f.sig,
@@ -226,7 +194,6 @@ fn take_method(f: &mut TraitItemFn) -> syn::Result<Option<Method>> {
 
     Ok(Some(Method {
         is_async: f.sig.asyncness.is_some(),
-        mut_receiver,
         ok,
         err,
         attr,
@@ -249,16 +216,6 @@ fn collect_methods(tr: &mut ItemTrait) -> syn::Result<Vec<Method>> {
 
 /// Rejects async methods without the `async` feature.
 fn check_methods(methods: &[Method]) -> syn::Result<()> {
-    if let Some(method) = methods
-        .iter()
-        .find(|method| method.mut_receiver != methods[0].mut_receiver)
-    {
-        return Err(syn::Error::new_spanned(
-            &method.item.sig,
-            "all repository query methods take the same receiver: `&self` or `&mut self`",
-        ));
-    }
-
     if !cfg!(feature = "async")
         && let Some(asyncness) = methods.iter().find_map(|m| m.item.sig.asyncness)
     {
@@ -326,7 +283,6 @@ fn impl_bounds(
     tr: &ItemTrait,
     methods: &[Method],
     ms: &TokenStream,
-    source_bound: &TokenStream,
     impl_type: &TokenStream,
 ) -> Vec<TokenStream> {
     let errors = distinct(methods.iter().map(|m| &m.err))
@@ -334,7 +290,7 @@ fn impl_bounds(
         .map(|e| quote!(#e: ::core::convert::From<#ms::DynError>));
     let functions = distinct(methods.iter().flat_map(|m| called_functions(&m.attr)))
         .into_iter()
-        .map(|p| quote!(#p: #ms::DslAvailable<<__S as #source_bound>::Dialect>));
+        .map(|p| quote!(#p: #ms::DslAvailable<<__C as #ms::Connection>::Dialect>));
     let supertraits = tr.supertraits.iter().filter_map(|b| match b {
         TypeParamBound::Trait(t) => Some(quote!(#impl_type: #t)),
         _ => None,
@@ -354,41 +310,37 @@ fn emitted_signature<'a>(tr: &'a ItemTrait, m: &Method) -> &'a FnSignature {
         .expect("method is in the trait")
 }
 
-/// The implementation of one method: build the query, then run it. A plain
-/// `fn` in an async repository blocks in place.
+/// The implementation of one method: build the query, then run it on the
+/// repository's connection. A plain `fn` in an async repository blocks in
+/// place.
 fn method_impl(
     tr: &ItemTrait,
     m: &Method,
-    access: Access,
+    mode: Mode,
     ms: &TokenStream,
     static_dispatch: bool,
 ) -> syn::Result<TokenStream> {
     let mut sig = Signature::from_sig(&m.item.sig)?;
-    let (ok, err) = (&m.ok, &m.err);
-    let result_ty = quote!(::core::result::Result<#ok, #err>);
-    let execute = access.execute(ms);
+    let err = &m.err;
     let emitted = emitted_signature(tr, m);
     let span = m.item.sig.span();
+    let complete = quote!(#ms::complete(&self.0, __query));
+    let error = quote!(|e| <#err as ::core::convert::From<#ms::DynError>>::from(#ms::ExecError::into_dyn_error(e)));
 
     sig.result = m.ok.clone();
 
     let query = query_body(ms, &m.attr, &sig)?;
-    let body = match (access.is_async(), m.is_async, static_dispatch) {
-        (false, _, _) => quote!({ let __out: #result_ty = (|| { #execute })(); __out }),
-        (true, async_method, static_dispatch) => {
-            let fut =
-                quote!(async move { let __out: #result_ty = (async { #execute }).await; __out });
-
-            match (async_method, static_dispatch) {
-                (false, _) => quote!(#ms::block_in_place(#fut)),
-                (true, true) => fut,
-                (true, false) => quote!(#ms::Box::pin(#fut)),
-            }
+    let body = match (mode, m.is_async, static_dispatch) {
+        (Mode::Sync, _, _) => quote!(#ms::now(#complete).map_err(#error)),
+        (Mode::Async, false, _) => quote!(#ms::block_in_place(#complete).map_err(#error)),
+        (Mode::Async, true, true) => quote!(async move { #complete.await.map_err(#error) }),
+        (Mode::Async, true, false) => {
+            quote!(#ms::Box::pin(async move { #complete.await.map_err(#error) }))
         }
     };
 
     Ok(quote_spanned! {span=>
-        #[allow(clippy::clone_on_copy, clippy::needless_question_mark)]
+        #[allow(clippy::clone_on_copy)]
         #emitted {
             let __query = { #query };
             #body
@@ -396,10 +348,11 @@ fn method_impl(
     })
 }
 
-/// Expands `#[repository]` into the trait and its distinct bound types.
+/// Expands `#[repository]` into the trait and its repository type.
 pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let ms = quote!(::rupa::__macro_support);
-    let static_dispatch = parse_options(args)?;
+    let options = Options::parse(args)?;
+    let static_dispatch = options.static_dispatch;
     let mut tr: ItemTrait = syn::parse2(item)?;
 
     if !tr.generics.params.is_empty() {
@@ -418,58 +371,97 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
     check_methods(&methods)?;
     rewrite_async_methods(&mut tr, &methods, &ms, static_dispatch);
 
-    let access = Access::of(&methods);
-    let source_bound = access.bound(&ms);
-    let key = format_ident!("{}Key", tr.ident);
-    let view = format_ident!("{}View", tr.ident);
-    let owned = format_ident!("{}Repo", tr.ident);
+    let mode = Mode::of(&methods);
+    let bound = mode.bound(&ms);
+    let repo = format_ident!("{}Repo", tr.ident);
     let visibility = &tr.vis;
-    let mode = access.mode(&ms);
-    let context = access.context(&ms);
-    let view_base = access.view(&ms);
-    let impl_type = quote!(#ms::Repository<__C, #key, #mode>);
-    let bounds = impl_bounds(&tr, &methods, &ms, &source_bound, &impl_type);
+    let trait_ident = &tr.ident;
+    let impl_type = quote!(#repo<__C>);
+    let bounds = impl_bounds(&tr, &methods, &ms, &impl_type);
     let impl_fns = methods
         .iter()
-        .map(|m| method_impl(&tr, m, access, &ms, static_dispatch))
+        .map(|m| method_impl(&tr, m, mode, &ms, static_dispatch))
         .collect::<syn::Result<Vec<_>>>()?;
-    let trait_ident = &tr.ident;
+    let repo_doc = format!(
+        "[`{trait_ident}`] over a connection `C`: a pool, a connection or a transaction, or a reference or smart pointer to one. Generated by `#[repository]`."
+    );
     let dyn_repository = (!static_dispatch).then(|| {
         quote! {
-            impl<__S> #ms::DynRepository<__S> for dyn #trait_ident
+            impl<__C> #ms::DynRepository<__C> for dyn #trait_ident
             where
-                #ms::Repo<__S, #key, #mode>: #trait_ident + 'static,
+                #repo<__C>: #trait_ident + 'static,
             {
-                fn over(source: __S) -> ::std::sync::Arc<Self> {
-                    ::std::sync::Arc::new(#ms::Repo::<__S, #key, #mode>::new(source))
+                fn over(connection: __C) -> #ms::Arc<Self> {
+                    #ms::Arc::new(#repo::new(connection))
                 }
             }
         }
     });
 
+    let providers = options
+        .databases
+        .iter()
+        .map(|database| upwell_provider(trait_ident, database));
+
     Ok(quote! {
         #tr
 
-        #[doc = "Repository identity generated by `#[repository]`. "]
-        #visibility struct #key;
+        #[doc = #repo_doc]
+        #[derive(Debug, Clone, Copy, Default)]
+        #visibility struct #repo<__C>(__C);
 
-        #[doc = "A borrowed view of this repository over one execution context. "]
-        #visibility type #view<'__rupa, __S> = #view_base<'__rupa, #key, __S, #mode>;
+        impl<__C> #repo<__C> {
+            /// Runs this repository's queries on `connection`.
+            #visibility const fn new(connection: __C) -> Self {
+                Self(connection)
+            }
 
-        #[doc = "An owned instance of this repository. "]
-        #visibility type #owned<__S> = #ms::Repo<__S, #key, #mode>;
+            /// The connection this repository runs on.
+            #visibility const fn connection(&self) -> &__C {
+                &self.0
+            }
 
-        impl<__S, __C> #trait_ident for #impl_type
+            /// The connection, giving up the repository.
+            #visibility fn into_connection(self) -> __C {
+                self.0
+            }
+        }
+
+        impl<__C> #trait_ident for #impl_type
         where
-            __C: #context,
-            __S: #source_bound,
+            __C: #bound,
             #(#bounds,)*
         {
             #(#impl_fns)*
         }
 
         #dyn_repository
+
+        #(#providers)*
     })
+}
+
+/// Registers `dyn #trait_ident` as an Upwell provider over the declared
+/// database `database`: built from the injected database component itself.
+fn upwell_provider(trait_ident: &syn::Ident, database: &syn::Path) -> TokenStream {
+    let up = quote!(::rupa::upwell::__private);
+    let name = format!("dyn {trait_ident}");
+
+    quote! {
+        impl #up::ProviderOf<dyn #trait_ident> for ::rupa::upwell::databases::Database<#database> {
+            fn upcast(this: #up::Arc<Self>) -> #up::Arc<dyn #trait_ident> {
+                <dyn #trait_ident as #up::DynRepository<#up::Arc<Self>>>::over(this)
+            }
+        }
+
+        const _: () = {
+            #[#up::linkme::distributed_slice(#up::PROVIDERS)]
+            #[linkme(crate = #up::linkme)]
+            #[allow(unsafe_code)]
+            static PROVIDER: #up::ProviderDescriptor =
+                ::rupa::upwell::databases::provider::<#database, dyn #trait_ident>(#name);
+        };
+    }
 }
 
 /// The trait with `#[query]` attributes removed, emitted alongside an error.

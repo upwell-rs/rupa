@@ -28,22 +28,22 @@ fn postgres(c: &mut Criterion) {
         let pool = PgPool::connect(&DbConfig::new(&url).max_connections(4))
             .await
             .expect("connect");
-        let mut conn = pool.get().await.unwrap();
+        let conn = pool.get().await.unwrap();
         conn.client().batch_execute(POSTGRES_DDL).await.unwrap();
         insert::<User>()
             .values(&new_users(1_000))
             .affected()
-            .execute(&mut conn)
+            .execute(&conn)
             .await
             .unwrap();
         pool
     });
 
     let mut g = c.benchmark_group("postgres");
-    let mut conn = rt.block_on(pool.get()).unwrap();
+    let conn = rt.block_on(pool.get()).unwrap();
     g.bench_function("get_by_id/executor", |b| {
         b.iter(|| {
-            rt.block_on(get::<User>(&42).execute(&mut conn))
+            rt.block_on(get::<User>(&42).execute(&conn))
                 .unwrap()
                 .unwrap()
         })

@@ -7,13 +7,13 @@ use rupa_core::dialect::Memory;
 use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{AsyncTx, AsyncTxConnection, TxConnection};
+use rupa_core::tx::{AsyncTransactional, AsyncTx, AsyncTxConnection, TxConnection, TxOptions};
 
 use crate::{MemoryDb, MemoryError};
 
 /// The memory backend as an [`AsyncExecutor`]. A separate type so that each
-/// backend type implements exactly one executor trait, and `.run` is never
-/// ambiguous with both traits in scope.
+/// backend type implements exactly one executor trait, and `.execute` is
+/// never ambiguous with both traits in scope.
 #[derive(Debug, Clone, Default)]
 pub struct AsyncMemoryDb(MemoryDb);
 
@@ -71,35 +71,46 @@ impl AsyncExecutor for AsyncMemoryDb {
     }
 
     fn execute(
-        &mut self,
+        &self,
         statement: &Statement,
         _expect: Expect,
     ) -> impl Future<Output = Result<Outcome, MemoryError>> + Send {
-        std::future::ready(self.0.run_statement(statement))
+        std::future::ready(self.0.lock().run_statement(statement))
     }
 }
 
 /// A transaction (or, nested, a savepoint) on an [`AsyncMemoryDb`]. Rolled
 /// back when dropped without `commit` (immediately: nothing to await).
-pub type AsyncMemoryTx<'t> = AsyncTx<&'t mut AsyncMemoryDb>;
+pub type AsyncMemoryTx<'t> = AsyncTx<&'t AsyncMemoryDb>;
 
 impl AsyncTxConnection for AsyncMemoryDb {
     fn control(
-        &mut self,
+        &self,
         statement: TxStatement,
     ) -> impl Future<Output = Result<(), MemoryError>> + Send {
-        std::future::ready(TxConnection::control(&mut self.0, statement))
+        std::future::ready(TxConnection::control(&self.0, statement))
     }
 
-    fn defer_rollback(&mut self, depth: u32) {
-        TxConnection::defer_rollback(&mut self.0, depth);
+    fn defer_rollback(&self, depth: u32) {
+        TxConnection::defer_rollback(&self.0, depth);
     }
 
     fn is_dirty(&self) -> bool {
         false
     }
 
-    fn clean(&mut self) -> impl Future<Output = Result<(), MemoryError>> + Send {
+    fn clean(&self) -> impl Future<Output = Result<(), MemoryError>> + Send {
         std::future::ready(Ok(()))
+    }
+}
+
+impl AsyncTransactional for AsyncMemoryDb {
+    type Tx<'t> = AsyncMemoryTx<'t>;
+
+    fn begin_with(
+        &self,
+        options: TxOptions,
+    ) -> impl Future<Output = Result<AsyncMemoryTx<'_>, MemoryError>> + Send {
+        AsyncTx::begin(self, options)
     }
 }

@@ -5,7 +5,6 @@
 #[path = "support/sqlite.rs"]
 mod sqlite;
 
-use rupa::Pool;
 use rupa::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Entity, Insertable)]
@@ -39,8 +38,7 @@ fn books_by(name: &str) -> Vec<BookWithAuthor>;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = sqlite::open("CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")?;
-    let mut conn = pool.get()?;
-    raw().sql("CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER NOT NULL, title TEXT NOT NULL)").execute::<u64>().execute(&mut conn)?;
+    raw().sql("CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER NOT NULL, title TEXT NOT NULL)").execute::<u64>().execute(&pool)?;
     insert::<Author>()
         .values(&[
             Author {
@@ -53,7 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         ])
         .affected()
-        .execute(&mut conn)?;
+        .execute(&pool)?;
     insert::<Book>()
         .value(&Book {
             id: 10,
@@ -61,13 +59,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             title: "Notes".into(),
         })
         .affected()
-        .execute(&mut conn)?;
+        .execute(&pool)?;
 
     let joined = select::<Author>()
         .join::<Book>()
         .left()
         .all()
-        .execute(&mut conn)?;
+        .execute(&pool)?;
     assert_eq!(joined.len(), 2);
     assert_eq!(
         joined[0].1.as_ref().map(|book| book.title.as_str()),
@@ -79,10 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .join::<Author>()
         .inner_via(Book::author())
         .all()
-        .execute(&mut conn)?;
+        .execute(&pool)?;
     assert_eq!(reverse[0].1.name, "Ada");
 
-    let by_ada = books_by("Ada").execute(&mut conn)?;
+    let by_ada = books_by("Ada").execute(&pool)?;
     assert_eq!(
         by_ada,
         [BookWithAuthor {
@@ -91,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }]
     );
 
-    let sql = rupa::sql::render_query(&books_by("Ada"), &rupa::core::Sqlite)?;
+    let sql = rupa::sql::render_query(&books_by("Ada"), &rupa::Sqlite)?;
     assert!(sql.sql.contains("JOIN"));
     assert!(!sql.sql.contains("'Ada'"));
     assert_eq!(sql.params.len(), 1);

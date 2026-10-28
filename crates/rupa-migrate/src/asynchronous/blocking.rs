@@ -1,4 +1,6 @@
-use rupa_core::exec::Blocking;
+use rupa_core::exec::{Blocking, Outcome};
+use rupa_core::ir::Statement;
+use rupa_core::query::Expect;
 
 use super::Session;
 use crate::{
@@ -9,7 +11,7 @@ use crate::{
 /// A sync session driven through the async contracts. Each call runs on the
 /// calling thread and completes when first polled, with no added locking; it
 /// lets async applications apply catalogs on sync-only drivers.
-impl<S: sync::Session + Send> Session for Blocking<S> {
+impl<S: sync::Session + Send + Sync> Session for Blocking<S> {
     const POLICIES: &'static [Policy] = S::POLICIES;
 
     async fn acquire(
@@ -66,6 +68,14 @@ impl<S: sync::Session + Send> Session for Blocking<S> {
 
     async fn script(&mut self, sql: &str) -> Result<(), Error<S::Error>> {
         self.0.script(sql)
+    }
+
+    async fn user_statement(
+        &mut self,
+        statement: &Statement,
+        expect: Expect,
+    ) -> Result<Outcome, S::Error> {
+        self.0.user_statement(statement, expect)
     }
 
     async fn recover(

@@ -119,10 +119,10 @@ full = [
 # DI integrations. Each is one optional dep + one feature; never default.
 upwell = ["dep:rupa-upwell"]
 # Databases in an Upwell application (`rupa::upwell::database!`): typed
-# configuration, a migration-gated pool component, `Arc<dyn Repository>`
-# providers and migration commands. Upwell is pinned to a git commit until it
+# configuration, a migration-gated pool component, migration commands, and
+# repositories that register themselves (`#[repository(database = ..)]`). Upwell is pinned to a git commit until it
 # is released, so this cannot be published yet.
-upwell-database = ["upwell", "migration-cli", "rupa-upwell/database"]
+upwell-database = ["upwell", "migration-cli", "rupa-upwell/database", "rupa-macros/upwell"]
 
 [dependencies]
 rupa-migrate = { workspace = true, optional = true }

@@ -12,33 +12,33 @@ use crate::tx::{AsyncTransaction, AsyncTransactional, TxOptions};
 
 /// Dyn-compatible form of a transactional [`AsyncExecutor`]; implemented for
 /// every one.
-pub trait DynAsyncExecutor: Send {
+pub trait DynAsyncExecutor: Send + Sync {
     /// The executor's dialect.
     fn dialect_id(&self) -> DialectId;
     /// [`AsyncExecutor::execute`].
     fn execute_dyn<'a>(
-        &'a mut self,
+        &'a self,
         statement: &'a Statement,
         expect: Expect,
     ) -> BoxFuture<'a, Result<Outcome, DynError>>;
     /// [`AsyncTransactional::begin_with`].
-    fn begin_dyn(&mut self, options: TxOptions) -> BoxFuture<'_, Result<BoxAsyncTx<'_>, DynError>>;
+    fn begin_dyn(&self, options: TxOptions) -> BoxFuture<'_, Result<BoxAsyncTx<'_>, DynError>>;
 }
 
-impl<E: AsyncTransactional> DynAsyncExecutor for E {
+impl<E: AsyncTransactional + Sync> DynAsyncExecutor for E {
     fn dialect_id(&self) -> DialectId {
         self.dialect().id()
     }
 
     fn execute_dyn<'a>(
-        &'a mut self,
+        &'a self,
         statement: &'a Statement,
         expect: Expect,
     ) -> BoxFuture<'a, Result<Outcome, DynError>> {
         Box::pin(async move { self.execute(statement, expect).await.map_err(DynError::new) })
     }
 
-    fn begin_dyn(&mut self, options: TxOptions) -> BoxFuture<'_, Result<BoxAsyncTx<'_>, DynError>> {
+    fn begin_dyn(&self, options: TxOptions) -> BoxFuture<'_, Result<BoxAsyncTx<'_>, DynError>> {
         Box::pin(async move {
             let tx = self.begin_with(options).await.map_err(DynError::new)?;
             Ok(BoxAsyncTx::new(tx))
@@ -55,7 +55,7 @@ pub trait DynAsyncTransaction<'t>: DynAsyncExecutor + 't {
     fn rollback_dyn(self: Box<Self>) -> BoxFuture<'t, Result<(), DynError>>;
 }
 
-impl<'t, T: AsyncTransaction + AsyncTransactional + 't> DynAsyncTransaction<'t> for T {
+impl<'t, T: AsyncTransaction + AsyncTransactional + Sync + 't> DynAsyncTransaction<'t> for T {
     fn commit_dyn(self: Box<Self>) -> BoxFuture<'t, Result<(), DynError>> {
         Box::pin(async move { (*self).commit().await.map_err(DynError::new) })
     }
@@ -73,7 +73,7 @@ pub struct BoxAsyncExecutor {
 
 impl BoxAsyncExecutor {
     /// Erases `executor`.
-    pub fn new(executor: impl AsyncTransactional + 'static) -> Self {
+    pub fn new(executor: impl AsyncTransactional + Sync + 'static) -> Self {
         Self::from_box(Box::new(executor))
     }
 
@@ -104,11 +104,7 @@ impl AsyncExecutor for BoxAsyncExecutor {
         &self.dialect
     }
 
-    async fn execute(
-        &mut self,
-        statement: &Statement,
-        expect: Expect,
-    ) -> Result<Outcome, DynError> {
+    async fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
         self.inner.execute_dyn(statement, expect).await
     }
 }
@@ -117,7 +113,7 @@ impl AsyncTransactional for BoxAsyncExecutor {
     type Tx<'t> = BoxAsyncTx<'t>;
 
     fn begin_with(
-        &mut self,
+        &self,
         options: TxOptions,
     ) -> impl Future<Output = Result<BoxAsyncTx<'_>, DynError>> + Send {
         self.inner.begin_dyn(options)
@@ -136,7 +132,7 @@ pub struct BoxAsyncTx<'t> {
 
 impl<'t> BoxAsyncTx<'t> {
     /// Erases an open transaction.
-    pub fn new(tx: impl AsyncTransaction + AsyncTransactional + 't) -> Self {
+    pub fn new(tx: impl AsyncTransaction + AsyncTransactional + Sync + 't) -> Self {
         let inner: Box<dyn DynAsyncTransaction<'t> + 't> = Box::new(tx);
         let dialect = DynDialect::new(inner.dialect_id());
         Self { inner, dialect }
@@ -163,11 +159,7 @@ impl AsyncExecutor for BoxAsyncTx<'_> {
         &self.dialect
     }
 
-    async fn execute(
-        &mut self,
-        statement: &Statement,
-        expect: Expect,
-    ) -> Result<Outcome, DynError> {
+    async fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
         self.inner.execute_dyn(statement, expect).await
     }
 }
@@ -189,7 +181,7 @@ impl AsyncTransactional for BoxAsyncTx<'_> {
         Self: 's;
 
     fn begin_with(
-        &mut self,
+        &self,
         options: TxOptions,
     ) -> impl Future<Output = Result<BoxAsyncTx<'_>, DynError>> + Send {
         self.inner.begin_dyn(options)

@@ -65,9 +65,17 @@ impl State {
         self.owner.is_some() || self.attempt.is_some() || self.body || self.poisoned
     }
 
-    /// Whether statements route through [`State::user_statement`].
-    pub fn is_running(&self) -> bool {
-        self.owner.is_some() || self.poisoned
+    /// Refuses a statement sent to the connection around a run rather than
+    /// through its migration context: while a run owns the connection, or
+    /// once a run poisoned it.
+    pub fn outside_run(&self) -> Result<(), StateError> {
+        if self.poisoned {
+            Err(StateError::Poisoned)
+        } else if self.owner.is_some() {
+            Err(StateError::InRun)
+        } else {
+            Ok(())
+        }
     }
 
     /// Refuses to start a run or recovery on a session that owns one or is poisoned.

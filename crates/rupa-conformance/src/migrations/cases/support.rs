@@ -1,7 +1,7 @@
-use rupa::core::dialect::{Dialect, DialectId};
 use rupa::migrate::{
     ApplyOptions, Blocker, Error, Init, Order, Policy, RunError, Version, VersionScheme,
 };
+use rupa::{Dialect, DialectId};
 
 use super::{Connection, Harness, Session};
 use crate::migrations::fixture::{Body, planned_with, reversible, snapshot, with_policy};

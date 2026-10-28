@@ -41,7 +41,7 @@ use crate::{PgError, PgExecutor};
 /// A connection checked out of a [`PgPool`].
 pub type PgConn = Pooled<managed::Object<PgManager>>;
 
-/// A transaction that owns its pooled connection (see [`AsyncPool::begin`]).
+/// A transaction that owns its pooled connection (what `begin` on the pool returns).
 pub type PgPoolTx = OwnedAsyncTx<PgConn>;
 
 type ConnectFn = dyn Fn(
@@ -157,8 +157,9 @@ impl managed::Manager for PgManager {
     }
 }
 
-/// A pool of Postgres connections; an [`AsyncPool`], so repository views run
-/// `&self` repositories and `pool.begin().await?` opens an owned
+/// A pool of Postgres connections. It is a
+/// [`Connection`](rupa_core::connection::Connection): each statement runs on
+/// a connection checked out for it, and `pool.begin().await?` opens an owned
 /// transaction. Cloning shares the pool.
 #[derive(Clone)]
 pub struct PgPool {
@@ -213,12 +214,10 @@ impl fmt::Debug for PgPool {
     }
 }
 
+rupa_core::pool_executor!(async, [] PgPool, |pool| &pool.dialect);
+
 impl AsyncPool for PgPool {
     type Conn = PgConn;
-
-    fn dialect(&self) -> &Postgres {
-        &self.dialect
-    }
 
     async fn get(&self) -> Result<PgConn, PgError> {
         glue::get(&self.pool, PgError::Pool).await

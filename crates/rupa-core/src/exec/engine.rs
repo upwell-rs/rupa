@@ -2,6 +2,10 @@
 //! [`Completion`] decides whether the result comes back directly or as a
 //! future.
 
+use std::future::Future;
+use std::pin::pin;
+use std::task::{Context, Poll, Waker};
+
 use super::Executor;
 use crate::query::{Query, QueryResult};
 
@@ -18,7 +22,7 @@ pub trait Engine {
 }
 
 /// How an engine `E` completes a query yielding `R`.
-pub trait Completion<E, R> {
+pub trait Completion<E: ?Sized, R> {
     /// What [`Query::execute`] returns.
     type Output<'e>
     where
@@ -26,7 +30,7 @@ pub trait Completion<E, R> {
         R: 'e;
 
     /// Runs `query` on `engine`.
-    fn complete<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
+    fn complete<'e>(engine: &'e E, query: Query<R>) -> Self::Output<'e>
     where
         R: 'e;
 }
@@ -35,14 +39,14 @@ pub trait Completion<E, R> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Immediate {}
 
-impl<E: Executor, R: QueryResult> Completion<E, R> for Immediate {
+impl<E: Executor + ?Sized, R: QueryResult> Completion<E, R> for Immediate {
     type Output<'e>
         = Result<R, E::Error>
     where
         E: 'e,
         R: 'e;
 
-    fn complete<'e>(engine: &'e mut E, query: Query<R>) -> Self::Output<'e>
+    fn complete<'e>(engine: &'e E, query: Query<R>) -> Self::Output<'e>
     where
         R: 'e,
     {
@@ -60,15 +64,30 @@ impl<R> Query<R> {
     /// async engine a future of it.
     ///
     /// ```ignore
-    /// let open = select::<Task>().filter(Task::DONE.eq(false)).all().execute(&mut conn)?;
-    /// let open = select::<Task>().filter(Task::DONE.eq(false)).all().execute(&mut pg).await?;
+    /// let open = select::<Task>().filter(Task::DONE.eq(false)).all().execute(&pool)?;
+    /// let open = select::<Task>().filter(Task::DONE.eq(false)).all().execute(&tx).await?;
     /// ```
-    pub fn execute<'e, E>(self, engine: &'e mut E) -> Executed<'e, E, R>
+    pub fn execute<'e, E>(self, engine: &'e E) -> Executed<'e, E, R>
     where
-        E: Engine,
+        E: Engine + ?Sized,
         E::Completion: Completion<E, R>,
         R: 'e,
     {
         <E::Completion as Completion<E, R>>::complete(engine, self)
+    }
+}
+
+/// The value of a future that is already complete, as every future of an
+/// [`Immediate`] connection is: it is polled once, without a runtime.
+///
+/// # Panics
+///
+/// If `future` is still pending, which only a future that actually waits can
+/// be. [`Connection`](crate::connection::Connection)s whose `Mode` is
+/// `Immediate` never return one.
+pub fn now<T>(future: impl Future<Output = T>) -> T {
+    match pin!(future).poll(&mut Context::from_waker(Waker::noop())) {
+        Poll::Ready(value) => value,
+        Poll::Pending => panic!("an immediate connection returned a pending future"),
     }
 }

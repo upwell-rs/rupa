@@ -48,6 +48,10 @@ pub use plan::Plan;
 pub use recovery::{Recovery, RecoveryAction, RecoveryError};
 pub use report::{ApplyReport, RevertReport, RunError};
 pub use rupa_core::schema;
+
+/// The core crate, for `__session!` output. Not public API.
+#[doc(hidden)]
+pub use rupa_core as __core;
 pub use script::{ScriptError, ScriptRule, split_script, validate_script};
 pub use state::StateError;
 pub use status::{

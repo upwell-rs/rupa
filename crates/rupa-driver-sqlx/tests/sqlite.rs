@@ -1,7 +1,7 @@
 //! The conformance suite on SQLite in memory (no Docker): on one executor,
 //! then through a pooled, type-erased `Database`.
 
-use rupa::core::tx::{AsyncTransactional, AsyncTxConnection};
+use rupa::{AsyncTransactional, AsyncTxConnection};
 use rupa::{DbConfig, DriverConfig, PoolConfig, Registry, SqliteOptions};
 use rupa_conformance::{Harness, SQLITE_ATTACH, SQLITE_DDL};
 use rupa_driver_sqlx::sqlite::{SqliteDriver, SqliteExecutor, SqliteManager, SqlitePool};
@@ -22,7 +22,7 @@ impl Harness for Sqlite {
 
 #[tokio::test]
 async fn conformance() {
-    let mut exec = SqliteExecutor::connect("sqlite::memory:").await.unwrap();
+    let exec = SqliteExecutor::connect("sqlite::memory:").await.unwrap();
     exec.script(SQLITE_ATTACH).await.unwrap();
     let mut h = Sqlite(exec);
     rupa_conformance::run(&mut h).await;
@@ -46,7 +46,7 @@ async fn conformance() {
 
 #[tokio::test]
 async fn dropped_tx_marks_the_connection_dirty() {
-    let mut exec = SqliteExecutor::connect("sqlite::memory:").await.unwrap();
+    let exec = SqliteExecutor::connect("sqlite::memory:").await.unwrap();
     drop(exec.begin().await.unwrap());
     assert!(
         exec.is_dirty(),
@@ -95,7 +95,7 @@ async fn registry_builds_a_pool_from_config() {
 #[tokio::test]
 async fn statement_cache_size_is_configurable() {
     use rupa::AsyncPool;
-    use rupa::core::ExprOps as _;
+    use rupa::ExprOps as _;
     use rupa_conformance::Note;
 
     let config: DbConfig = serde_json::from_value(serde_json::json!({
@@ -111,7 +111,7 @@ async fn statement_cache_size_is_configurable() {
     for n in 1..=4i64 {
         let ids: Vec<i64> = (0..n).collect();
         let q = rupa::core::select::<Note>().filter(Note::ID.in_(ids)).all();
-        q.execute(&mut conn).await.unwrap();
+        q.execute(&conn).await.unwrap();
     }
 
     assert_eq!(conn.cached_statements(), 2, "least recently used dropped");

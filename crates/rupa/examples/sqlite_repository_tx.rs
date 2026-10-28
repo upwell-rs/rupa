@@ -1,4 +1,6 @@
-//! Two repositories sharing one application-owned SQLite transaction.
+//! Two repositories sharing one application-owned SQLite transaction: each
+//! holds `&tx`, so neither needs a session type, and `commit` takes the
+//! transaction only once both are done with it.
 //!
 //! Run: `cargo run -p rupa --example sqlite_repository_tx --features sqlite`
 
@@ -34,20 +36,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         title: "shared".into(),
     };
 
-    let session = rupa::TxSession::new(NoteWritesView::new(&pool).begin()?);
-    let writes = NoteWritesView::new(&session);
-    let reads = NoteReadsView::new(&session);
-    assert_eq!(writes.add(&note)?, 1);
-    assert_eq!(reads.all()?[0].title, "shared");
-    session.rollback()?;
-    assert!(writes.add(&note).is_err());
-    assert!(NoteReadsView::new(&pool).all()?.is_empty());
+    let tx = pool.begin()?;
+    assert_eq!(NoteWritesRepo::new(&tx).add(&note)?, 1);
+    assert_eq!(NoteReadsRepo::new(&tx).all()?[0].title, "shared");
+    tx.rollback()?;
+    assert!(NoteReadsRepo::new(&pool).all()?.is_empty());
 
-    let session = rupa::TxSession::new(NoteWritesView::new(&pool).begin()?);
-    NoteWritesView::new(&session).add(&note)?;
-    session.commit()?;
-    assert_eq!(NoteReadsView::new(&pool).all()?.len(), 1);
+    let tx = pool.begin()?;
+    NoteWritesRepo::new(&tx).add(&note)?;
+    tx.commit()?;
+    assert_eq!(NoteReadsRepo::new(&pool).all()?.len(), 1);
 
-    println!("two repository views shared one transaction; rollback and commit passed");
+    println!("two repositories shared one transaction; rollback and commit passed");
     Ok(())
 }

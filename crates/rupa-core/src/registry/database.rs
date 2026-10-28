@@ -1,27 +1,37 @@
 //! [`Database`]: a type-erased, cheaply cloneable async pool.
 
 use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
 
 use crate::dialect::{Dialect, DynDialect};
 use crate::erased::{BoxAsyncExecutor, BoxAsyncTx};
 use crate::error::DynError;
-use crate::exec::{Blocking, BoxFuture, ExecError};
+use crate::exec::{AsyncExecutor, Awaited, Blocking, BoxFuture, Engine, ExecError, Outcome};
+use crate::ir::Statement;
 use crate::pool::{AsyncPool, PoolStatus, SingleConnection};
-use crate::repo::{AcquireAsync, AsyncTransactionSource};
-use crate::security::{SecureTx, SecurityContext, apply_security, check_native_rls};
-use crate::tx::{AsyncTxConnection, TxOptions};
+use crate::query::Expect;
+use crate::tx::{AsyncTransactional, AsyncTxConnection, TxConnection, TxOptions};
 
 /// A pool behind a dyn-compatible interface; implemented for every
 /// [`AsyncPool`].
 trait DynPool: Send + Sync {
     fn status(&self) -> PoolStatus;
     fn get_dyn(&self) -> BoxFuture<'_, Result<BoxAsyncExecutor, DynError>>;
+    fn execute_dyn<'a>(
+        &'a self,
+        statement: &'a Statement,
+        expect: Expect,
+    ) -> BoxFuture<'a, Result<Outcome, DynError>>;
     fn begin_dyn(&self, options: TxOptions)
     -> BoxFuture<'_, Result<BoxAsyncTx<'static>, DynError>>;
 }
 
-impl<P: AsyncPool> DynPool for P {
+impl<P> DynPool for P
+where
+    P: AsyncPool,
+    for<'t> P::Tx<'t>: 'static,
+{
     fn status(&self) -> PoolStatus {
         AsyncPool::status(self)
     }
@@ -33,12 +43,24 @@ impl<P: AsyncPool> DynPool for P {
         })
     }
 
+    fn execute_dyn<'a>(
+        &'a self,
+        statement: &'a Statement,
+        expect: Expect,
+    ) -> BoxFuture<'a, Result<Outcome, DynError>> {
+        Box::pin(async move {
+            AsyncExecutor::execute(self, statement, expect)
+                .await
+                .map_err(ExecError::into_dyn_error)
+        })
+    }
+
     fn begin_dyn(
         &self,
         options: TxOptions,
     ) -> BoxFuture<'_, Result<BoxAsyncTx<'static>, DynError>> {
         Box::pin(async move {
-            let tx = AsyncPool::begin_with(self, options)
+            let tx = AsyncTransactional::begin_with(self, options)
                 .await
                 .map_err(ExecError::into_dyn_error)?;
             Ok(BoxAsyncTx::new(tx))
@@ -48,19 +70,20 @@ impl<P: AsyncPool> DynPool for P {
 
 /// A database chosen at run time: a type-erased async connection pool.
 ///
-/// Cloning is cheap and shares the pool. Typical uses:
+/// Cloning is cheap and shares the pool. It is a
+/// [`Connection`](crate::connection::Connection), like the pool it erases:
 ///
 /// ```ignore
 /// let db = rupa::connect(&DbConfig::new("sqlite://app.db")).await?;
 ///
-/// // `&self` repositories: one pooled connection per call.
-/// let users = UserRepositoryView::new(&db);
+/// // One pooled connection per call.
+/// let users = UserRepositoryRepo::new(&db);
 ///
-/// // A unit of work: an owned ('static) transaction on one connection.
-/// let tx = UserRepositoryView::new(&db).begin().await?;
-/// let session = AsyncTxSession::new(tx);
-/// UserRepositoryView::new(&session).rename(id, "x").await?;
-/// session.commit().await?;
+/// // A unit of work: an owned ('static) transaction on one connection,
+/// // shared by every repository that borrows it.
+/// let tx = db.begin().await?;
+/// UserRepositoryRepo::new(&tx).rename(id, "x").await?;
+/// tx.commit().await?;
 /// ```
 #[derive(Clone)]
 pub struct Database {
@@ -69,8 +92,13 @@ pub struct Database {
 }
 
 impl Database {
-    /// Erases an async pool.
-    pub fn new(pool: impl AsyncPool) -> Self {
+    /// Erases an async pool. Its transactions own their connection, and are
+    /// opened by its own `begin_with`, so a pool's transaction policy is kept.
+    pub fn new<P>(pool: P) -> Self
+    where
+        P: AsyncPool,
+        for<'t> P::Tx<'t>: 'static,
+    {
         let dialect = DynDialect::new(pool.dialect().id());
         Self {
             pool: Arc::new(pool),
@@ -82,7 +110,7 @@ impl Database {
     /// [`SingleConnection`]).
     pub fn single<E>(executor: E) -> Self
     where
-        E: AsyncTxConnection + 'static,
+        E: AsyncTxConnection + Sync + 'static,
         E::Dialect: Clone,
     {
         Self::new(SingleConnection::new(executor))
@@ -91,7 +119,7 @@ impl Database {
     /// One sync connection, shared, driven through [`Blocking`].
     pub fn single_blocking<E>(executor: E) -> Self
     where
-        E: crate::tx::TxConnection + 'static,
+        E: TxConnection + Sync + 'static,
         E::Dialect: Clone,
     {
         Self::single(Blocking(executor))
@@ -111,31 +139,6 @@ impl Database {
     pub async fn get(&self) -> Result<BoxAsyncExecutor, DynError> {
         self.pool.get_dyn().await
     }
-
-    /// Opens a transaction that owns its pooled connection, so it is
-    /// `'static` (e.g. for a request scope). Dropped while open, it is rolled
-    /// back before the connection is reused.
-    pub async fn begin_with(&self, options: TxOptions) -> Result<BoxAsyncTx<'static>, DynError> {
-        self.pool.begin_dyn(options).await
-    }
-
-    /// [`begin_with`](Self::begin_with) default options.
-    pub async fn begin(&self) -> Result<BoxAsyncTx<'static>, DynError> {
-        self.begin_with(TxOptions::default()).await
-    }
-
-    /// Opens an owned transaction with `context` applied (see
-    /// [`crate::security`]). Checked at run time: fails with
-    /// [`TxError::Unsupported`](crate::TxError::Unsupported), before
-    /// touching the pool, unless the dialect has native row-level security.
-    pub async fn try_begin_with_security(
-        &self,
-        options: TxOptions,
-        context: SecurityContext,
-    ) -> Result<SecureTx<BoxAsyncTx<'static>>, DynError> {
-        check_native_rls(&self.dialect)?;
-        apply_security(self.begin_with(options).await?, context).await
-    }
 }
 
 impl fmt::Debug for Database {
@@ -147,26 +150,35 @@ impl fmt::Debug for Database {
     }
 }
 
-impl AcquireAsync for Database {
-    type Dialect = DynDialect;
-    type Error = DynError;
-    type Conn<'a> = BoxAsyncExecutor;
-
-    fn acquire(
-        &self,
-    ) -> impl std::future::Future<Output = Result<BoxAsyncExecutor, DynError>> + Send {
-        self.pool.get_dyn()
-    }
+impl Engine for Database {
+    type Completion = Awaited;
 }
 
-impl AsyncTransactionSource for Database {
-    type Tx = BoxAsyncTx<'static>;
+/// Each statement runs on a connection checked out for it, inside one boxed
+/// future of the erased pool.
+impl AsyncExecutor for Database {
+    type Dialect = DynDialect;
+    type Error = DynError;
 
     fn dialect(&self) -> &DynDialect {
         &self.dialect
     }
 
-    async fn open(&self, options: TxOptions) -> Result<Self::Tx, DynError> {
-        self.begin_with(options).await
+    async fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
+        self.pool.execute_dyn(statement, expect).await
+    }
+}
+
+/// A transaction owns its pooled connection, so it is `'static` (e.g. for a
+/// request scope). Dropped while open, it is rolled back before the
+/// connection is reused.
+impl AsyncTransactional for Database {
+    type Tx<'t> = BoxAsyncTx<'static>;
+
+    fn begin_with(
+        &self,
+        options: TxOptions,
+    ) -> impl Future<Output = Result<BoxAsyncTx<'static>, DynError>> + Send {
+        self.pool.begin_dyn(options)
     }
 }

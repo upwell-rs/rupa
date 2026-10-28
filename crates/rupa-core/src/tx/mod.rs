@@ -8,6 +8,11 @@
 //!   a nested one (a savepoint).
 //! - **Closure:** `transaction(|tx| ..)` commits on `Ok` and rolls back on `Err`.
 //!
+//! Every method takes `&self`: two repositories share one transaction by
+//! borrowing it, and `commit(self)` cannot run while either still does.
+//! Statements sent to a transaction while one of its savepoints is open run
+//! inside that savepoint.
+//!
 //! # Who implements what
 //!
 //! Drivers implement [`TxConnection`] (sync) or [`AsyncTxConnection`]: "run
@@ -15,11 +20,12 @@
 //! below. Everything else lives here, once:
 //!
 //! - [`Tx`] / [`AsyncTx`], the transaction guards, generic over how they hold
-//!   the connection: borrowed (`Tx<&mut Conn>`, what `begin()` returns) or
+//!   the connection: borrowed (`Tx<&Conn>`, what `begin()` returns) or
 //!   owned (`AsyncTx<Box<Conn>>`, what a pool's `begin()` returns, so a
 //!   transaction can outlive the borrow of its pool, e.g. in a request scope).
-//! - Blanket [`Transactional`] / [`AsyncTransactional`] impls for every
-//!   connection.
+//! - [`Transactional`] / [`AsyncTransactional`] for the guards themselves;
+//!   a driver implements them for its connection in four lines, returning
+//!   `Tx::begin(self, options)`.
 //!
 //! # Dropping an open transaction
 //!
@@ -38,7 +44,8 @@ mod asynchronous;
 #[cfg(test)]
 mod tests;
 
-use std::ops::DerefMut;
+use std::ops::Deref;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::TxError;
 use crate::exec::{Engine, Executor, Immediate, Outcome};
@@ -57,15 +64,17 @@ pub trait Transaction: Executor + Sized {
     fn rollback(self) -> Result<(), Self::Error>;
 }
 
-/// An executor that can open transactions. Transactions are themselves
-/// transactional: `begin` on a transaction opens a savepoint.
+/// An executor that can open transactions: a connection, a pool (whose
+/// transactions own a pooled connection) or a transaction (whose
+/// transactions are savepoints).
 pub trait Transactional: Executor {
-    /// The transaction type. `Send` so a transaction can be driven from async
-    /// code (and erased for DI) like any connection; every supported sync
-    /// driver's connection is.
+    /// The transaction type. `Send + Sync` so a transaction can be shared
+    /// by reference, driven from async code and erased for DI like any
+    /// connection; every supported sync driver's connection is.
     type Tx<'t>: Transaction
         + Transactional
         + Send
+        + Sync
         + Executor<Dialect = Self::Dialect, Error = Self::Error>
         + 't
     where
@@ -73,10 +82,10 @@ pub trait Transactional: Executor {
 
     /// Starts a transaction with `options`. On a transaction, options must be
     /// the default (savepoints have none); anything else is an error.
-    fn begin_with(&mut self, options: TxOptions) -> Result<Self::Tx<'_>, Self::Error>;
+    fn begin_with(&self, options: TxOptions) -> Result<Self::Tx<'_>, Self::Error>;
 
     /// Starts a transaction with default options.
-    fn begin(&mut self) -> Result<Self::Tx<'_>, Self::Error> {
+    fn begin(&self) -> Result<Self::Tx<'_>, Self::Error> {
         self.begin_with(TxOptions::default())
     }
 
@@ -86,13 +95,13 @@ pub trait Transactional: Executor {
     /// The closure's transaction borrows from this call (`Tx<'a>`), rather than
     /// being higher-ranked: with a GAT `where Self: 't`, a higher-ranked
     /// lifetime would force `Self: 'static` and rule out nested calls on a `Tx`.
-    fn transaction<'a, T, E, F>(&'a mut self, f: F) -> Result<T, E>
+    fn transaction<'a, T, E, F>(&'a self, f: F) -> Result<T, E>
     where
-        F: FnOnce(&mut Self::Tx<'a>) -> Result<T, E>,
+        F: FnOnce(&Self::Tx<'a>) -> Result<T, E>,
         E: From<Self::Error>,
     {
-        let mut tx = self.begin()?;
-        match f(&mut tx) {
+        let tx = self.begin()?;
+        match f(&tx) {
             Ok(value) => {
                 tx.commit()?;
                 Ok(value)
@@ -119,54 +128,68 @@ pub trait Transactional: Executor {
 ///   (see [`PendingRollback`]) before *any* later statement, including
 ///   control statements, so that a broken transaction never swallows the
 ///   next unit of work.
+/// - Every method takes `&self`, like [`Executor::execute`]; a driver whose
+///   native connection needs exclusive access serializes inside.
 pub trait TxConnection: Executor<Error: From<TxError>> + Send {
     /// Runs a transaction-control statement now (after any deferred rollback).
-    fn control(&mut self, statement: TxStatement) -> Result<(), Self::Error>;
+    fn control(&self, statement: TxStatement) -> Result<(), Self::Error>;
 
     /// Records a rollback to `depth` (`0` = the whole transaction) that must
     /// be sent before the next statement.
-    fn defer_rollback(&mut self, depth: u32);
+    fn defer_rollback(&self, depth: u32);
 
     /// Whether a deferred rollback has not been sent yet.
     fn is_dirty(&self) -> bool;
 
     /// Sends the deferred rollback, if any. Pools call this before reusing a
     /// connection.
-    fn clean(&mut self) -> Result<(), Self::Error>;
+    fn clean(&self) -> Result<(), Self::Error>;
 }
 
-/// Bookkeeping for a deferred rollback, for drivers to embed.
+/// Bookkeeping for a deferred rollback, for drivers to embed. It is updated
+/// through `&self`, without a lock, and publishes nothing but its own value,
+/// so relaxed ordering suffices.
 ///
 /// ```ignore
-/// fn run(&mut self, ..) -> Result<Outcome, MyError> {
+/// fn run(&self, ..) -> Result<Outcome, MyError> {
 ///     self.clean()?; // sends `self.pending.statement()` and clears it
 ///     ..
 /// }
 /// ```
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct PendingRollback(Option<u32>);
+#[derive(Debug)]
+pub struct PendingRollback(AtomicU64);
 
 impl PendingRollback {
+    const NONE: u64 = u64::MAX;
+
     /// Records a rollback to `depth`. Several deferred rollbacks merge into
     /// the outermost one.
-    pub fn defer(&mut self, depth: u32) {
-        self.0 = Some(self.0.map_or(depth, |d| d.min(depth)));
+    pub fn defer(&self, depth: u32) {
+        self.0.fetch_min(u64::from(depth), Ordering::Relaxed);
     }
 
     /// Whether a rollback is owed.
     pub fn is_pending(&self) -> bool {
-        self.0.is_some()
+        self.0.load(Ordering::Relaxed) != Self::NONE
     }
 
     /// The statement to send, if a rollback is owed. Call [`clear`](Self::clear)
     /// once it succeeded.
     pub fn statement(&self) -> Option<TxStatement> {
-        self.0.map(rollback_to)
+        let depth = self.0.load(Ordering::Relaxed);
+
+        u32::try_from(depth).ok().map(rollback_to)
     }
 
     /// Marks the owed rollback as sent.
-    pub fn clear(&mut self) {
-        self.0 = None;
+    pub fn clear(&self) {
+        self.0.store(Self::NONE, Ordering::Relaxed);
+    }
+}
+
+impl Default for PendingRollback {
+    fn default() -> Self {
+        Self(AtomicU64::new(Self::NONE))
     }
 }
 
@@ -199,13 +222,14 @@ pub(crate) fn open_statement<E: From<TxError>>(
 }
 
 /// An open sync transaction (`depth == 0`) or savepoint (`depth > 0`) on the
-/// connection `C` holds: `&mut Conn` when borrowed, or an owning handle (a
+/// connection `C` holds: `&Conn` when borrowed, or an owning handle (a
 /// `Box`, a pooled connection) when the transaction must be `'static`.
 ///
-/// Rolled back when dropped without `commit` or `rollback`.
+/// Rolled back when dropped without `commit` or `rollback`. Its statements
+/// run through `&self`, so repositories share it by reference.
 pub struct Tx<C>
 where
-    C: DerefMut<Target: TxConnection>,
+    C: Deref<Target: TxConnection>,
 {
     conn: C,
     depth: u32,
@@ -220,14 +244,14 @@ type TxErr<C> = <TxConn<C> as Executor>::Error;
 
 impl<C> Tx<C>
 where
-    C: DerefMut<Target: TxConnection>,
+    C: Deref<Target: TxConnection>,
 {
     /// Opens a top-level transaction on `conn`.
     pub fn begin(conn: C, options: TxOptions) -> Result<Self, TxErr<C>> {
         Self::open(conn, 0, options)
     }
 
-    fn open(mut conn: C, depth: u32, options: TxOptions) -> Result<Self, TxErr<C>> {
+    fn open(conn: C, depth: u32, options: TxOptions) -> Result<Self, TxErr<C>> {
         conn.control(open_statement(depth, options)?)?;
         Ok(Self {
             conn,
@@ -243,8 +267,8 @@ where
 
     /// The connection the transaction runs on. Statements sent through the
     /// driver's own API bypass the transaction guard; use with care.
-    pub fn connection(&mut self) -> &mut TxConn<C> {
-        &mut self.conn
+    pub fn connection(&self) -> &TxConn<C> {
+        &self.conn
     }
 
     fn finish(&mut self, commit: bool) -> Result<(), TxErr<C>> {
@@ -256,7 +280,7 @@ where
 
 impl<C> Drop for Tx<C>
 where
-    C: DerefMut<Target: TxConnection>,
+    C: Deref<Target: TxConnection>,
 {
     fn drop(&mut self) {
         if !self.done && self.finish(false).is_err() {
@@ -267,14 +291,14 @@ where
 
 impl<C> Engine for Tx<C>
 where
-    C: DerefMut<Target: TxConnection>,
+    C: Deref<Target: TxConnection>,
 {
     type Completion = Immediate;
 }
 
 impl<C> Executor for Tx<C>
 where
-    C: DerefMut<Target: TxConnection>,
+    C: Deref<Target: TxConnection>,
 {
     type Dialect = <TxConn<C> as Executor>::Dialect;
     type Error = TxErr<C>;
@@ -283,14 +307,14 @@ where
         self.conn.dialect()
     }
 
-    fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, Self::Error> {
+    fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, Self::Error> {
         self.conn.execute(statement, expect)
     }
 }
 
 impl<C> Transaction for Tx<C>
 where
-    C: DerefMut<Target: TxConnection>,
+    C: Deref<Target: TxConnection>,
 {
     fn commit(mut self) -> Result<(), Self::Error> {
         self.finish(true)
@@ -303,25 +327,14 @@ where
 
 impl<C> Transactional for Tx<C>
 where
-    C: DerefMut<Target: TxConnection> + Send,
+    C: Deref<Target: TxConnection + Sync> + Send,
 {
     type Tx<'s>
-        = Tx<&'s mut TxConn<C>>
+        = Tx<&'s TxConn<C>>
     where
         Self: 's;
 
-    fn begin_with(&mut self, options: TxOptions) -> Result<Self::Tx<'_>, Self::Error> {
-        Tx::open(&mut *self.conn, self.depth + 1, options)
-    }
-}
-
-impl<E: TxConnection> Transactional for E {
-    type Tx<'t>
-        = Tx<&'t mut E>
-    where
-        Self: 't;
-
-    fn begin_with(&mut self, options: TxOptions) -> Result<Tx<&mut E>, E::Error> {
-        Tx::begin(self, options)
+    fn begin_with(&self, options: TxOptions) -> Result<Self::Tx<'_>, Self::Error> {
+        Tx::open(&*self.conn, self.depth + 1, options)
     }
 }

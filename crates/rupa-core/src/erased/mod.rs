@@ -39,25 +39,25 @@ pub use asynchronous::{BoxAsyncExecutor, BoxAsyncTx, DynAsyncExecutor, DynAsyncT
 
 /// Dyn-compatible form of a transactional [`Executor`]; implemented for every
 /// one.
-pub trait DynExecutor: Send {
+pub trait DynExecutor: Send + Sync {
     /// The executor's dialect.
     fn dialect_id(&self) -> DialectId;
     /// [`Executor::execute`].
-    fn execute_dyn(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError>;
+    fn execute_dyn(&self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError>;
     /// [`Transactional::begin_with`].
-    fn begin_dyn(&mut self, options: TxOptions) -> Result<BoxTx<'_>, DynError>;
+    fn begin_dyn(&self, options: TxOptions) -> Result<BoxTx<'_>, DynError>;
 }
 
-impl<E: Transactional + Send> DynExecutor for E {
+impl<E: Transactional + Send + Sync> DynExecutor for E {
     fn dialect_id(&self) -> DialectId {
         self.dialect().id()
     }
 
-    fn execute_dyn(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
+    fn execute_dyn(&self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
         self.execute(statement, expect).map_err(DynError::new)
     }
 
-    fn begin_dyn(&mut self, options: TxOptions) -> Result<BoxTx<'_>, DynError> {
+    fn begin_dyn(&self, options: TxOptions) -> Result<BoxTx<'_>, DynError> {
         Ok(BoxTx::new(self.begin_with(options).map_err(DynError::new)?))
     }
 }
@@ -70,7 +70,7 @@ pub trait DynTransaction<'t>: DynExecutor + 't {
     fn rollback_dyn(self: Box<Self>) -> Result<(), DynError>;
 }
 
-impl<'t, T: Transaction + Transactional + Send + 't> DynTransaction<'t> for T {
+impl<'t, T: Transaction + Transactional + Send + Sync + 't> DynTransaction<'t> for T {
     fn commit_dyn(self: Box<Self>) -> Result<(), DynError> {
         (*self).commit().map_err(DynError::new)
     }
@@ -88,7 +88,7 @@ pub struct BoxExecutor {
 
 impl BoxExecutor {
     /// Erases `executor`.
-    pub fn new(executor: impl Transactional + Send + 'static) -> Self {
+    pub fn new(executor: impl Transactional + Send + Sync + 'static) -> Self {
         Self::from_box(Box::new(executor))
     }
 
@@ -119,7 +119,7 @@ impl Executor for BoxExecutor {
         &self.dialect
     }
 
-    fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
+    fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
         self.inner.execute_dyn(statement, expect)
     }
 }
@@ -127,7 +127,7 @@ impl Executor for BoxExecutor {
 impl Transactional for BoxExecutor {
     type Tx<'t> = BoxTx<'t>;
 
-    fn begin_with(&mut self, options: TxOptions) -> Result<BoxTx<'_>, DynError> {
+    fn begin_with(&self, options: TxOptions) -> Result<BoxTx<'_>, DynError> {
         self.inner.begin_dyn(options)
     }
 }
@@ -141,7 +141,7 @@ pub struct BoxTx<'t> {
 
 impl<'t> BoxTx<'t> {
     /// Erases an open transaction.
-    pub fn new(tx: impl Transaction + Transactional + Send + 't) -> Self {
+    pub fn new(tx: impl Transaction + Transactional + Send + Sync + 't) -> Self {
         let inner: Box<dyn DynTransaction<'t> + 't> = Box::new(tx);
         let dialect = DynDialect::new(inner.dialect_id());
         Self { inner, dialect }
@@ -168,7 +168,7 @@ impl Executor for BoxTx<'_> {
         &self.dialect
     }
 
-    fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
+    fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, DynError> {
         self.inner.execute_dyn(statement, expect)
     }
 }
@@ -189,7 +189,7 @@ impl Transactional for BoxTx<'_> {
     where
         Self: 's;
 
-    fn begin_with(&mut self, options: TxOptions) -> Result<BoxTx<'_>, DynError> {
+    fn begin_with(&self, options: TxOptions) -> Result<BoxTx<'_>, DynError> {
         self.inner.begin_dyn(options)
     }
 }

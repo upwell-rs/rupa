@@ -48,7 +48,7 @@ impl Io for SqliteExecutor {
         bound: &[Value],
         columns: &[SqlType],
     ) -> Result<Vec<Vec<Value>>, SqliteError> {
-        let mut statement = self.conn.prepare(sql)?;
+        let mut statement = self.connection().prepare(sql)?;
         let mut rows = statement.query(rusqlite::params_from_iter(bound.iter().map(Param)))?;
         let mut out = Vec::new();
 
@@ -71,14 +71,14 @@ impl Io for SqliteExecutor {
 
     fn execute(&mut self, sql: &str, bound: &[Value]) -> Result<u64, SqliteError> {
         let count = self
-            .conn
+            .connection()
             .execute(sql, rusqlite::params_from_iter(bound.iter().map(Param)))?;
 
         Ok(count as u64)
     }
 
     fn batch(&mut self, sql: &str) -> Result<(), SqliteError> {
-        Ok(self.conn.execute_batch(sql)?)
+        Ok(self.connection().execute_batch(sql)?)
     }
 
     fn clean(&mut self) -> Result<(), SqliteError> {
@@ -88,11 +88,11 @@ impl Io for SqliteExecutor {
 
 impl SqliteIo for SqliteExecutor {
     fn is_autocommit(&mut self) -> Result<bool, SqliteError> {
-        Ok(self.conn.is_autocommit())
+        Ok(self.connection().is_autocommit())
     }
 
     fn authorizer(&mut self, enabled: bool) -> Result<(), SqliteError> {
-        authorization::install(&mut self.conn, enabled)
+        authorization::install(self.connection(), enabled)
     }
 }
 
@@ -104,8 +104,9 @@ impl SqliteExecutor {
         self
     }
 
-    /// Runs a typed user statement under the migration authorizer.
-    pub(super) fn execute_migration_statement(
+    /// Runs a typed statement of a migration body under the migration
+    /// authorizer; the session's `user_statement`.
+    pub(crate) fn execute_migration_statement(
         &mut self,
         statement: &Statement,
         expect: Expect,

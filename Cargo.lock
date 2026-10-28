@@ -3131,6 +3131,7 @@ name = "rupa-migrate"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "futures-util",
  "rupa-core",
  "rupa-sql",
  "serde",

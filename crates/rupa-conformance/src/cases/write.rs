@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub async fn case_update<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_update<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let meta = fixture::Meta {
         score: 100,
@@ -49,7 +49,7 @@ pub async fn case_update<E: AsyncExecutor>(e: &mut E) {
     assert!(!any);
 }
 
-pub async fn case_delete<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_delete<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     assert_eq!(
         delete::<Item>()
@@ -72,7 +72,7 @@ pub async fn case_delete<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(delete::<Item>().affected().execute(e).await.unwrap(), 2);
 }
 
-pub async fn case_duplicate_key_is_an_error<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_duplicate_key_is_an_error<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let r = insert::<Item>()
         .value(&items()[0])
@@ -82,7 +82,7 @@ pub async fn case_duplicate_key_is_an_error<E: AsyncExecutor>(e: &mut E) {
     assert!(r.is_err(), "duplicate primary key must fail");
 }
 
-pub async fn case_failed_multi_row_insert_is_atomic<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_failed_multi_row_insert_is_atomic<E: AsyncExecutor>(e: &E) {
     let mut batch = items();
     batch.push(items()[0].clone());
     assert!(
@@ -102,7 +102,7 @@ pub async fn case_failed_multi_row_insert_is_atomic<E: AsyncExecutor>(e: &mut E)
 /// One model: the entity inserts itself; its generated id is ignored.
 ///
 /// Asking for RETURNING where it does not exist is an error, not a silent no-op.
-pub async fn case_generated_ids_and_returning<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_generated_ids_and_returning<E: AsyncExecutor>(e: &E) {
     let first = insert_notes(e, &[new_note("first")]).await;
     assert_eq!(
         first,
@@ -151,7 +151,7 @@ pub async fn case_generated_ids_and_returning<E: AsyncExecutor>(e: &mut E) {
     }
 }
 
-pub async fn case_get_by_id<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_get_by_id<E: AsyncExecutor>(e: &E) {
     insert::<Note>()
         .values(&[new_note("a"), new_note("b")])
         .affected()
@@ -168,7 +168,7 @@ pub async fn case_get_by_id<E: AsyncExecutor>(e: &mut E) {
 /// Keyed patch: `None` fields stay as they are.
 ///
 /// Unkeyed patch over a filter.
-pub async fn case_update_entity_and_patches<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_update_entity_and_patches<E: AsyncExecutor>(e: &E) {
     let mut a = insert_notes(e, &[new_note("a")]).await.remove(0);
     insert::<Note>()
         .value(&new_note("b"))
@@ -221,7 +221,7 @@ pub async fn case_update_entity_and_patches<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(pinned.len(), 2);
 }
 
-pub async fn case_delete_one_and_by_id<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_delete_one_and_by_id<E: AsyncExecutor>(e: &E) {
     let all = insert_notes(e, &[new_note("a"), new_note("b"), new_note("c")]).await;
     assert_eq!(
         delete::<Note>()

@@ -1,9 +1,9 @@
 //! Native row-level security with the sync driver.
 
-use rupa::core::tx::TxConnection;
-use rupa::core::tx::{Transaction, TxOptions};
+use rupa::TxConnection;
 use rupa::prelude::*;
 use rupa::{SecureTransactional, SecurityContext};
+use rupa::{Transaction, TxOptions};
 use rupa_driver_postgres::PgExecutor;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::SyncRunner;
@@ -42,17 +42,17 @@ fn native_row_level_security_sync() {
     );
     let mut client = postgres::Client::connect(&url, postgres::NoTls).unwrap();
     client.batch_execute(DDL).unwrap();
-    let mut db = PgExecutor::new(client);
+    let db = PgExecutor::new(client);
     let tenant = |id: i64| {
         SecurityContext::new()
             .set("tenant_id", id.to_string())
             .role("app_user")
     };
 
-    let mut tx = db
+    let tx = db
         .begin_with_security(TxOptions::default(), tenant(1))
         .unwrap();
-    let docs = select::<Doc>().all().execute(&mut tx).unwrap();
+    let docs = select::<Doc>().all().execute(&tx).unwrap();
     assert_eq!(
         docs.iter().map(|d| d.title.as_str()).collect::<Vec<_>>(),
         ["a1"]
@@ -66,7 +66,7 @@ fn native_row_level_security_sync() {
         insert::<Doc>()
             .value(&foreign)
             .affected()
-            .execute(&mut tx)
+            .execute(&tx)
             .is_err()
     );
     tx.rollback().unwrap();
@@ -77,5 +77,5 @@ fn native_row_level_security_sync() {
             .unwrap(),
     );
     assert!(!db.is_dirty());
-    assert_eq!(select::<Doc>().all().execute(&mut db).unwrap().len(), 2);
+    assert_eq!(select::<Doc>().all().execute(&db).unwrap().len(), 2);
 }

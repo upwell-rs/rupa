@@ -1,8 +1,9 @@
 //! An Upwell application with two declared databases over the `db` crate's
 //! migration streams.
 //!
-//! - `Primary` (numbered stream) is configured field by field, applies its
-//!   migrations at startup and provides `Arc<dyn NoteRepository>`.
+//! - `Primary` (numbered stream) is configured field by field and applies its
+//!   migrations at startup. `NoteRepository` declares itself over it, so
+//!   `Arc<dyn NoteRepository>` is injectable like any component.
 //! - `Reporting` (timestamped stream) is configured with a templated `url`
 //!   and only checks its migrations at startup.
 //!
@@ -19,7 +20,7 @@ use rupa::upwell::Migrations;
 use upwell::{app, component};
 
 /// Reads notes from the primary database.
-#[repository]
+#[repository(database = Primary)]
 pub trait NoteRepository: Send + Sync {
     /// Every note, oldest first.
     #[query(order_by = id)]
@@ -37,7 +38,6 @@ rupa::upwell::database! {
         config: "database.primary",
         migrations: db::migrations,
         command: "migrate",
-        repositories: [dyn NoteRepository],
     }
 }
 

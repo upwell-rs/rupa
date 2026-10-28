@@ -13,6 +13,10 @@ pub enum StateError {
     /// An earlier uncertain outcome poisoned the connection; it must be discarded.
     #[error("migration connection is poisoned by an uncertain outcome and must be discarded")]
     Poisoned,
+    /// A statement was sent to the connection around a migration run that
+    /// owns it, instead of through the run's context.
+    #[error("migration connection is running a migration; statements go through its context")]
+    InRun,
     /// The artifact transaction is not open.
     #[error("no migration artifact transaction is open")]
     NoTransaction,

@@ -3,14 +3,13 @@
 
 #![warn(missing_docs)]
 
-#[cfg(feature = "async")]
-pub mod asynchronous;
 pub mod builder;
 pub mod capability;
 #[cfg(feature = "chrono")]
 pub mod chrono_text;
 pub mod column;
 pub mod config;
+pub mod connection;
 pub mod dialect;
 /// Entities: tables, their ids and row decoding.
 pub mod entity;
@@ -31,7 +30,6 @@ pub mod row;
 pub mod schema;
 pub mod security;
 pub mod sem;
-pub mod sync;
 pub mod tx;
 pub mod value;
 
@@ -75,6 +73,7 @@ pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
 pub use column::{Column, ColumnKind, ColumnMeta, Generated, Json, ReadAs, Reference, Scalar};
 pub use config::{DbConfig, PoolConfig};
+pub use connection::Connection;
 pub use dialect::{
     Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, MySql, Postgres, Sqlite,
     Supports,
@@ -87,7 +86,7 @@ pub use erased::{BoxExecutor, BoxTx};
 pub use error::{ConnectError, DecodeError, DslError, DynError, ResultError, RowError, TxError};
 #[cfg(feature = "async")]
 pub use exec::{AsyncExecutor, Awaited, Blocking};
-pub use exec::{Completion, Engine, ExecError, Executed, Executor, Immediate, Outcome};
+pub use exec::{Completion, Engine, ExecError, Executed, Executor, Immediate, Outcome, now};
 pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
 pub use join::{
     Admits, At, Fwd, Has, Inner, IntoJoined, JoinBuilder, JoinOnto, JoinPart, JoinTo, Joined, Left,
@@ -100,9 +99,7 @@ pub use pool::{Connect, OwnedTx, Pool, PoolStatus, Pooled, SyncConnect};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 #[cfg(all(feature = "dynamic", feature = "async"))]
 pub use registry::{Database, Driver, Registry};
-pub use repo::{Acquire, DynRepository, Repo, RepoMut, RepoView, Shared, TxSession};
-#[cfg(feature = "async")]
-pub use repo::{AcquireAsync, AsyncTxSession, SharedAsync};
+pub use repo::DynRepository;
 pub use row::{Row, RowCursor};
 #[cfg(feature = "async")]
 pub use security::AsyncSecureTransactional;

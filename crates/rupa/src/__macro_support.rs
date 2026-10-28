@@ -4,16 +4,11 @@ pub use ::std::boxed::Box;
 pub use ::std::future::Future;
 pub use ::std::marker::Send;
 pub use ::std::pin::Pin;
+pub use ::std::sync::Arc;
 pub use rupa_core::__macro_support::*;
-pub use rupa_core::exec::Executor;
-#[cfg(feature = "async")]
-pub use rupa_core::exec::{AsyncExecutor, complete_unboxed};
-pub use rupa_core::repo::{
-    Acquire, Context, ContextMut, DynRepository, ExclusiveSyncMode, Repo, RepoMut, RepoView,
-    Repository, SyncMode,
-};
-#[cfg(feature = "async")]
-pub use rupa_core::repo::{AcquireAsync, AsyncMode, ExclusiveAsyncMode};
+pub use rupa_core::connection::{Connection, complete};
+pub use rupa_core::exec::{Immediate, now};
+pub use rupa_core::repo::DynRepository;
 
 /// Runs `future` to completion from a sync repository method of an async
 /// repository.

@@ -22,7 +22,7 @@ use crate::{MySqlError, MySqlExecutor, found_rows};
 /// A connection checked out of a [`MySqlPool`].
 pub type MySqlConn = Pooled<r2d2::PooledConnection<MySqlManager>>;
 
-/// A transaction that owns its pooled connection (see [`Pool::begin`](rupa_core::pool::Pool::begin)).
+/// A transaction that owns its pooled connection (what `begin` on the pool returns).
 pub type MySqlPoolTx = OwnedTx<MySqlConn>;
 
 /// Opens [`MySqlExecutor`]s for `r2d2`.

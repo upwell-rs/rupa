@@ -2,14 +2,14 @@
 
 use super::*;
 
-pub async fn case_dsl_lowering_and_eval_agree<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_dsl_lowering_and_eval_agree<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let ci = |s: &str| ci_eq(Item::NAME, s);
     assert_eq!(ids(e, ci("CHERRY")).await, [3]);
     assert_eq!(ids(e, !ci("Cherry")).await, [1, 2, 4]);
 }
 
-pub async fn case_dsl_std_text<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_dsl_std_text<E: AsyncExecutor>(e: &E) {
     use rupa::dsl::{ilike, lower, upper};
     seed(e).await;
     assert_eq!(ids(e, ilike(Item::NAME, "%AN%")).await, [2]);
@@ -22,7 +22,7 @@ pub async fn case_dsl_std_text<E: AsyncExecutor>(e: &mut E) {
     assert_eq!(ids(e, upper(Item::NAME).eq("DATE")).await, [4]);
 }
 
-pub async fn case_dsl_std_json<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_dsl_std_json<E: AsyncExecutor>(e: &E) {
     use rupa::dsl::{json_contains, json_has_key};
     seed(e).await;
     assert_eq!(
