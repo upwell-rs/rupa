@@ -73,7 +73,7 @@ pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
 pub use column::{Column, ColumnKind, ColumnMeta, Generated, Json, ReadAs, Reference, Scalar};
 pub use config::{DbConfig, PoolConfig};
-pub use connection::{Connection, OpenTransaction, TxEnd};
+pub use connection::{Connection, DynConnection, OpenTransaction, RepoOn, TxEnd};
 pub use dialect::{
     Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, MySql, Postgres, Sqlite,
     Supports,

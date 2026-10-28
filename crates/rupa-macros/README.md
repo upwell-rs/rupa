@@ -29,6 +29,10 @@ futures, so the trait works as `Arc<dyn Trait>`, which DI frameworks inject.
 `#[repository(static_dispatch)]` opts into native, unboxed futures for a trait
 used only through its generated `Repo` type. Each trait gets one repository
 type, `{Trait}Repo<C>`, over any `Connection` `C`; query methods take `&self`.
+`repo.open_tx(options)` branches the repository into a transaction and
+`repo.tx(&tx)` puts it on an open one. A dyn-compatible trait also gains `tx`,
+returning a `RepoOn` that borrows the connection, so `Arc<dyn Trait>` runs on
+a transaction without allocating a repository.
 With the `upwell` feature, `#[repository(database = Primary)]` also registers
 the repository as an Upwell provider over that declared database.
 

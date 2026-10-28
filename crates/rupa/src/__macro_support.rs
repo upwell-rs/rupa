@@ -6,7 +6,13 @@ pub use ::std::marker::Send;
 pub use ::std::pin::Pin;
 pub use ::std::sync::Arc;
 pub use rupa_core::__macro_support::*;
-pub use rupa_core::connection::{Connection, OpenTransaction, TxEnd, complete};
+#[cfg(feature = "async")]
+pub use rupa_core::connection::complete_dyn_awaited;
+pub use rupa_core::connection::{
+    Connection, DynConnection, OpenTransaction, RepoOn, TxEnd, complete, complete_dyn,
+};
+#[cfg(feature = "async")]
+pub use rupa_core::exec::Awaited;
 pub use rupa_core::exec::{Immediate, now};
 pub use rupa_core::repo::DynRepository;
 pub use rupa_core::tx::TxOptions;

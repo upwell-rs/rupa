@@ -22,6 +22,8 @@
 //! that knows its mode keeps using those directly: `pool.begin()?`,
 //! `tx.commit().await?`.
 
+mod borrowed;
+
 use std::future::{Future, ready};
 
 use crate::dialect::Dialect;
@@ -34,6 +36,13 @@ use crate::{
     exec::{AsyncExecutor, Awaited},
     tx::{AsyncTransaction, AsyncTransactional},
 };
+
+#[doc(hidden)]
+pub use borrowed::complete_dyn;
+#[cfg(feature = "async")]
+#[doc(hidden)]
+pub use borrowed::complete_dyn_awaited;
+pub use borrowed::{DynConnection, DynMode, RepoOn};
 
 /// Anything statements run on: a pool, a connection, a transaction, or a
 /// reference or smart pointer to one.

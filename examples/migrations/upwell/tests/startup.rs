@@ -49,7 +49,23 @@ async fn apply_migrates_before_the_services_that_need_the_database() {
         .expect("the database provides the repository");
 
     assert_eq!(pending(&scratch.database("primary.db")), 0);
-    assert!(notes.count().is_ok(), "the notes table exists");
+    let seeded = notes.count().expect("the notes table exists");
+
+    notes
+        .import(&[note(100, "first"), note(101, "second")])
+        .expect("the import commits");
+    assert_eq!(notes.count().expect("count runs"), seeded + 2);
+    assert!(
+        notes
+            .import(&[note(102, "third"), note(100, "duplicate")])
+            .is_err(),
+        "a duplicate id fails the import"
+    );
+    assert_eq!(
+        notes.count().expect("count runs"),
+        seeded + 2,
+        "rolled back as a whole"
+    );
     assert!(
         repository
             .titled("missing")
@@ -107,4 +123,13 @@ fn each_database_binding_declares_its_fields_for_tooling() {
 
     assert!(<Settings<Primary> as ConfigProperties>::SCHEMA.is_declared());
     assert!(<Settings<Reporting> as ConfigProperties>::SCHEMA.is_declared());
+}
+
+/// A note with `id` and `title`, without a slug.
+fn note(id: i64, title: &str) -> db::Note {
+    db::Note {
+        id,
+        title: title.into(),
+        slug: None,
+    }
 }

@@ -660,6 +660,27 @@ rupa::upwell::database! {
     }
 }
 
+#[component]
+struct Notes {
+    repository: Arc<dyn NoteRepository>,
+    database: Arc<Database<Primary>>,
+}
+
+impl Notes {
+    /// Every note or none: the repository runs on a borrowed transaction.
+    fn import(&self, notes: &[Note]) -> Result<(), DynError> {
+        let tx = self.database.begin()?;
+
+        for note in notes {
+            self.repository.tx(&tx).add(note)?;
+        }
+
+        tx.commit()?;
+
+        Ok(())
+    }
+}
+
 app! {
     pub app App {
         name: "app",

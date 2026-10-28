@@ -442,3 +442,20 @@ fn connect_one_opens_a_connection_outside_the_pool() {
 
     assert_eq!(notes, []);
 }
+
+#[test]
+fn an_injected_repository_runs_on_a_borrowed_pooled_transaction() {
+    let file = TempDb::new("repo-dyn-tx");
+    let pool = file.pool(2);
+    let notes: std::sync::Arc<dyn Notes> = std::sync::Arc::new(NotesRepo::new(pool.clone()));
+    let tx = pool.begin().expect("transaction opens");
+
+    notes.tx(&tx).add(&note("borrowed")).expect("insert note");
+    assert_eq!(notes.tx(&tx).all().expect("read own write").len(), 1);
+    assert!(
+        notes.all().expect("read outside").is_empty(),
+        "isolated until commit"
+    );
+    tx.commit().expect("commit transaction");
+    assert_eq!(notes.all().expect("read committed").len(), 1);
+}
