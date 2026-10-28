@@ -201,3 +201,52 @@ fn a_sync_repository_is_a_trait_object_too() {
         Some("bob@x".to_string())
     );
 }
+
+#[test]
+fn an_injected_repository_runs_on_a_borrowed_transaction() {
+    let db = Arc::new(user_db());
+    let users: Arc<dyn Users> = Arc::new(UsersRepo::new(Arc::clone(&db)));
+    let tx = db.begin().expect("transaction opens");
+
+    users.tx(&tx).add(&dan()).expect("add runs");
+    assert!(users.tx(&tx).by_id(4).expect("by_id runs").is_some());
+    tx.commit().expect("commit runs");
+    assert!(users.by_id(4).expect("by_id runs").is_some());
+}
+
+#[test]
+fn a_borrowed_transaction_view_allocates_nothing() {
+    let db = user_db();
+    let tx = db.begin().expect("transaction opens");
+    let users: &dyn Users = &UsersRepo::new(&db);
+    let on_tx = users.tx(&tx);
+
+    assert_eq!(
+        std::mem::size_of_val(&on_tx),
+        2 * std::mem::size_of::<usize>()
+    );
+    on_tx.add(&dan()).expect("add runs");
+    tx.rollback().expect("rollback runs");
+    assert_eq!(active_ids(&UsersRepo::new(&db)), [1, 3]);
+}
+
+#[test]
+fn an_injected_async_repository_runs_on_borrowed_transactions_of_either_mode() {
+    let sync_db = Arc::new(user_db());
+    let async_db = Arc::new(async_user_db());
+    let on_sync: Arc<dyn AsyncUsers> = Arc::new(AsyncUsersRepo::new(Arc::clone(&sync_db)));
+    let on_async: Arc<dyn AsyncUsers> = Arc::new(AsyncUsersRepo::new(Arc::clone(&async_db)));
+
+    pollster::block_on(async {
+        let sync_tx = sync_db.begin().expect("sync transaction opens");
+        let async_tx = async_db.begin().await.expect("async transaction opens");
+
+        on_sync.tx(&sync_tx).add(&dan()).await.expect("add runs");
+        on_async.tx(&async_tx).add(&dan()).await.expect("add runs");
+        sync_tx.rollback().expect("rollback runs");
+        async_tx.commit().await.expect("commit runs");
+
+        assert!(on_sync.by_id(4).await.expect("by_id runs").is_none());
+        assert!(on_async.by_id(4).await.expect("by_id runs").is_some());
+    });
+}

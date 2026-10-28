@@ -10,6 +10,9 @@
 //! - **Transactions.** `repo.open_tx(None)` is the same repository on a new
 //!   transaction (a savepoint, on a transaction), ended by its `commit` or
 //!   `rollback`; `repo.tx(&tx)` is the same repository on an existing one.
+//!   A dyn-compatible trait gains `tx` too, so an injected `Arc<dyn Trait>`
+//!   runs on a borrowed transaction (`RepoOn`) without allocating a
+//!   repository.
 //! - **Sync or async, per method.** If any query method is `async`, the
 //!   repository is async: it runs on every connection, sync ones included,
 //!   and its plain `fn` methods block in place. Otherwise everything is
@@ -107,6 +110,14 @@ impl Mode {
                     #rollback
                 }
             }
+        }
+    }
+
+    /// The mode's marker type.
+    fn marker(self, ms: &TokenStream) -> TokenStream {
+        match self {
+            Self::Sync => quote!(#ms::Immediate),
+            Self::Async => quote!(#ms::Awaited),
         }
     }
 
@@ -339,13 +350,14 @@ fn impl_bounds(
     methods: &[Method],
     ms: &TokenStream,
     impl_type: &TokenStream,
+    dialect: &TokenStream,
 ) -> Vec<TokenStream> {
     let errors = distinct(methods.iter().map(|m| &m.err))
         .into_iter()
         .map(|e| quote!(#e: ::core::convert::From<#ms::DynError>));
     let functions = distinct(methods.iter().flat_map(|m| called_functions(&m.attr)))
         .into_iter()
-        .map(|p| quote!(#p: #ms::DslAvailable<<__C as #ms::Connection>::Dialect>));
+        .map(|p| quote!(#p: #ms::DslAvailable<#dialect>));
     let supertraits = tr.supertraits.iter().filter_map(|b| match b {
         TypeParamBound::Trait(t) => Some(quote!(#impl_type: #t)),
         _ => None,
@@ -365,6 +377,42 @@ fn emitted_signature<'a>(tr: &'a ItemTrait, m: &Method) -> &'a FnSignature {
         .expect("method is in the trait")
 }
 
+/// What an implementation runs its queries on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Target {
+    /// The generated repository's own connection.
+    Repo,
+    /// The borrowed `&dyn DynConnection` of a `RepoOn`.
+    Borrowed,
+}
+
+impl Target {
+    /// Runs `__query` on the target's connection: its result in sync mode, a
+    /// future of it in async mode.
+    fn complete(self, mode: Mode, ms: &TokenStream) -> TokenStream {
+        match (self, mode) {
+            (Self::Repo, Mode::Sync) => quote!(#ms::now(#ms::complete(&self.0, __query))),
+            (Self::Repo, Mode::Async) => quote!(#ms::complete(&self.0, __query)),
+            (Self::Borrowed, Mode::Sync) => {
+                quote!(#ms::complete_dyn(#ms::RepoOn::connection(self), __query))
+            }
+            (Self::Borrowed, Mode::Async) => {
+                quote!(#ms::complete_dyn_awaited(#ms::RepoOn::connection(self), __query))
+            }
+        }
+    }
+
+    /// Converts the target's error into the method's `err`.
+    fn error(self, ms: &TokenStream, err: &Type) -> TokenStream {
+        match self {
+            Self::Repo => {
+                quote!(|e| <#err as ::core::convert::From<#ms::DynError>>::from(#ms::ExecError::into_dyn_error(e)))
+            }
+            Self::Borrowed => quote!(<#err as ::core::convert::From<#ms::DynError>>::from),
+        }
+    }
+}
+
 /// The implementation of one method: build the query, then run it on the
 /// repository's connection. A plain `fn` in an async repository blocks in
 /// place.
@@ -372,21 +420,21 @@ fn method_impl(
     tr: &ItemTrait,
     m: &Method,
     mode: Mode,
+    target: Target,
     ms: &TokenStream,
     static_dispatch: bool,
 ) -> syn::Result<TokenStream> {
     let mut sig = Signature::from_sig(&m.item.sig)?;
-    let err = &m.err;
     let emitted = emitted_signature(tr, m);
     let span = m.item.sig.span();
-    let complete = quote!(#ms::complete(&self.0, __query));
-    let error = quote!(|e| <#err as ::core::convert::From<#ms::DynError>>::from(#ms::ExecError::into_dyn_error(e)));
+    let complete = target.complete(mode, ms);
+    let error = target.error(ms, &m.err);
 
     sig.result = m.ok.clone();
 
     let query = query_body(ms, &m.attr, &sig)?;
     let body = match (mode, m.is_async, static_dispatch) {
-        (Mode::Sync, _, _) => quote!(#ms::now(#complete).map_err(#error)),
+        (Mode::Sync, _, _) => quote!(#complete.map_err(#error)),
         (Mode::Async, false, _) => quote!(#ms::block_in_place(#complete).map_err(#error)),
         (Mode::Async, true, true) => quote!(async move { #complete.await.map_err(#error) }),
         (Mode::Async, true, false) => {
@@ -427,16 +475,32 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
     rewrite_async_methods(&mut tr, &methods, &ms, static_dispatch);
 
     let mode = Mode::of(&methods);
+
+    if !static_dispatch {
+        add_borrowed_tx(&mut tr, mode, &ms);
+    }
+
     let bound = mode.bound(&ms);
     let repo = format_ident!("{}Repo", tr.ident);
     let visibility = &tr.vis;
     let trait_ident = &tr.ident;
     let impl_type = quote!(#repo<__C>);
-    let bounds = impl_bounds(&tr, &methods, &ms, &impl_type);
+    let bounds = impl_bounds(
+        &tr,
+        &methods,
+        &ms,
+        &impl_type,
+        &quote!(<__C as #ms::Connection>::Dialect),
+    );
     let impl_fns = methods
         .iter()
-        .map(|m| method_impl(&tr, m, mode, &ms, static_dispatch))
+        .map(|m| method_impl(&tr, m, mode, Target::Repo, &ms, static_dispatch))
         .collect::<syn::Result<Vec<_>>>()?;
+    let borrowed = if static_dispatch {
+        None
+    } else {
+        Some(borrowed_impl(&tr, &methods, mode, &ms)?)
+    };
     let repo_doc = format!(
         "[`{trait_ident}`] over a connection `C`: a pool, a connection or a transaction, or a reference or smart pointer to one. Generated by `#[repository]`."
     );
@@ -499,9 +563,60 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
             #(#impl_fns)*
         }
 
+        #borrowed
+
         #dyn_repository
 
         #(#providers)*
+    })
+}
+
+/// Adds the provided `tx` method to a dyn-compatible trait: the trait's
+/// queries on a borrowed connection, for trait objects.
+fn add_borrowed_tx(tr: &mut ItemTrait, mode: Mode, ms: &TokenStream) {
+    let trait_ident = &tr.ident;
+    let marker = mode.marker(ms);
+    let method: TraitItemFn = syn::parse_quote! {
+        /// This repository's queries on `connection`, typically an open
+        /// transaction: `repo.tx(&tx)`. It borrows the connection and
+        /// leaves the repository as it is; nothing is allocated.
+        fn tx<'__rupa>(
+            &self,
+            connection: &'__rupa dyn #ms::DynConnection<#marker>,
+        ) -> #ms::RepoOn<'__rupa, dyn #trait_ident, #marker> {
+            #ms::RepoOn::new(connection)
+        }
+    };
+
+    tr.items.push(TraitItem::Fn(method));
+}
+
+/// The trait implemented for `RepoOn`: its queries on the borrowed
+/// connection, with statically gated functions checked against the
+/// `RepoOn`'s dialect parameter (the erased dialect, unless named).
+fn borrowed_impl(
+    tr: &ItemTrait,
+    methods: &[Method],
+    mode: Mode,
+    ms: &TokenStream,
+) -> syn::Result<TokenStream> {
+    let trait_ident = &tr.ident;
+    let marker = mode.marker(ms);
+    let impl_type = quote!(#ms::RepoOn<'__rupa, dyn #trait_ident, #marker, __D>);
+    let bounds = impl_bounds(tr, methods, ms, &impl_type, &quote!(__D));
+    let impl_fns = methods
+        .iter()
+        .map(|m| method_impl(tr, m, mode, Target::Borrowed, ms, false))
+        .collect::<syn::Result<Vec<_>>>()?;
+
+    Ok(quote! {
+        impl<'__rupa, __D> #trait_ident for #impl_type
+        where
+            __D: #ms::Dialect,
+            #(#bounds,)*
+        {
+            #(#impl_fns)*
+        }
     })
 }
 

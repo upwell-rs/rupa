@@ -34,6 +34,23 @@ rupa::upwell::database! {
 #[component]
 struct Notes {
     repository: Arc<dyn NoteRepository>,   // built after Primary's migrations
+    database: Arc<Database<Primary>>,
+}
+
+impl Notes {
+    /// Every note or none: the injected repository runs on a borrowed
+    /// transaction of the injected database, allocating nothing.
+    fn import(&self, notes: &[Note]) -> Result<(), DynError> {
+        let tx = self.database.begin()?;
+
+        for note in notes {
+            self.repository.tx(&tx).add(note)?;
+        }
+
+        tx.commit()?;
+
+        Ok(())
+    }
 }
 
 app! {

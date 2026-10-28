@@ -8,7 +8,7 @@
 /// at its own version, so later changes here cannot alter applied history.
 /// Planned migrations may use it, because their checksum covers the plan it
 /// produces: a change that alters an applied plan is reported, not applied.
-#[derive(Debug, rupa::Entity)]
+#[derive(Debug, rupa::Entity, rupa::Insertable)]
 #[entity(table = "notes")]
 pub struct Note {
     /// Primary key.

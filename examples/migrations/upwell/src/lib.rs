@@ -16,12 +16,16 @@ use db::Note;
 use rupa::DynError;
 use rupa::drivers::sqlite::SqlitePool;
 use rupa::prelude::*;
-use rupa::upwell::Migrations;
+use rupa::upwell::{Database, Migrations};
 use upwell::{app, component};
 
-/// Reads notes from the primary database.
+/// The notes of the primary database.
 #[repository(database = Primary)]
 pub trait NoteRepository: Send + Sync {
+    /// Adds `note`.
+    #[query(insert)]
+    fn add(&self, note: &Note) -> Result<u64, DynError>;
+
     /// Every note, oldest first.
     #[query(order_by = id)]
     fn all(&self) -> Result<Vec<Note>, DynError>;
@@ -56,12 +60,26 @@ rupa::upwell::database! {
 #[component]
 pub struct Notes {
     repository: Arc<dyn NoteRepository>,
+    database: Arc<Database<Primary>>,
 }
 
 impl Notes {
     /// How many notes exist.
     pub fn count(&self) -> Result<usize, DynError> {
         Ok(self.repository.all()?.len())
+    }
+
+    /// Adds every note in one transaction: all of them or none.
+    pub fn import(&self, notes: &[Note]) -> Result<(), DynError> {
+        let tx = self.database.begin()?;
+
+        for note in notes {
+            self.repository.tx(&tx).add(note)?;
+        }
+
+        tx.commit()?;
+
+        Ok(())
     }
 }
 

@@ -69,6 +69,16 @@ tags.tx(tx.connection()).add(&tag).await?;      // another repository, same tran
 tx.commit().await?;
 ```
 
+An injected `Arc<dyn NoteRepository>` does the same with a transaction opened
+anywhere, borrowing it without allocating a repository:
+
+```rust
+let tx = self.db.begin().await?;
+self.notes.tx(&tx).add(&note).await?;
+self.tags.tx(&tx).add(&tag).await?;
+tx.commit().await?;
+```
+
 Repository traits are dyn-compatible by default, so they can be injected as
 `Arc<dyn Trait>`. Use `#[repository(static_dispatch)]` for native, unboxed
 futures when the trait is only used through its generated `Repo` type. Async
