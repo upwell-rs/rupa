@@ -170,6 +170,15 @@ name = "sqlite_repository_tx"
 required-features = ["sqlite"]
 
 [[example]]
+name = "sqlite_repository_crud"
+required-features = ["sqlite"]
+
+[[example]]
+name = "memory_repository_test"
+required-features = ["memory"]
+test = true
+
+[[example]]
 name = "sqlite_config"
 required-features = ["sqlite", "dynamic"]
 
