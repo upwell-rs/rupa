@@ -75,7 +75,9 @@ use futures_util::lock::{Mutex, MutexGuard};
 use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{AsyncTransactional, AsyncTx, AsyncTxConnection, PendingRollback, TxOptions};
+use rupa_core::tx::{
+    AsyncTransactional, AsyncTx, AsyncTxConnection, PendingRollback, TxOptions, TxSlot,
+};
 use rupa_core::{Dialect, RowError, SqlType, Value};
 use sqlx::{Arguments as _, Connection as _};
 
@@ -223,6 +225,7 @@ pub struct SqlxExecutor<DB: Backend> {
     conn: Mutex<DB::Connection>,
     dialect: DB::Dialect,
     pending: PendingRollback,
+    slot: TxSlot,
     broken: AtomicBool,
     #[cfg(feature = "migrations")]
     migration: DB::Migration,
@@ -235,6 +238,7 @@ impl<DB: Backend> SqlxExecutor<DB> {
             conn: Mutex::new(conn),
             dialect: DB::Dialect::default(),
             pending: PendingRollback::default(),
+            slot: TxSlot::default(),
             broken: AtomicBool::new(false),
             #[cfg(feature = "migrations")]
             migration: DB::Migration::default(),
@@ -294,7 +298,7 @@ impl<DB: Backend> SqlxExecutor<DB> {
             let result = DB::script(conn, &sql).await;
 
             result.map_err(|e| self.failed(e))?;
-            self.pending.clear();
+            self.pending.clear(statement);
         }
 
         Ok(())
@@ -416,6 +420,10 @@ impl<DB: Backend> AsyncTxConnection for SqlxExecutor<DB> {
         }
 
         self.clean_on(&mut *self.lock().await).await
+    }
+
+    fn slot(&self) -> &TxSlot {
+        &self.slot
     }
 }
 

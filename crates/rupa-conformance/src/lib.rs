@@ -116,6 +116,7 @@ where
         tx_options_on_nested_are_rejected,
         tx_isolation_levels,
         tx_sequential_after_drop,
+        tx_one_top_level_per_connection,
     );
 }
 

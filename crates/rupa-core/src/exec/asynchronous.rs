@@ -9,7 +9,7 @@ use crate::ir::{Statement, TxStatement};
 use crate::query::{Expect, Query, QueryResult};
 use crate::tx::{
     AsyncTransaction, AsyncTransactional, AsyncTxConnection, Transaction, Transactional,
-    TxConnection, TxOptions, rollback_to,
+    TxConnection, TxOptions, TxSlot, rollback_to,
 };
 
 /// A boxed, `Send` future.
@@ -128,6 +128,10 @@ impl<E: TxConnection + Sync> AsyncTxConnection for Blocking<E> {
 
     fn clean(&self) -> impl Future<Output = Result<(), E::Error>> + Send {
         std::future::ready(self.0.clean())
+    }
+
+    fn slot(&self) -> &TxSlot {
+        self.0.slot()
     }
 }
 

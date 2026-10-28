@@ -204,6 +204,10 @@ without a runtime.
 `rupa_sql::render_tx`) and the dirty-connection bookkeeping:
 
 - `begin()` on a transaction opens a savepoint (`depth + 1`).
+- A connection runs one top-level transaction at a time. Its `TxSlot` (in
+  `tx/state.rs`, next to `PendingRollback`) is taken by `BEGIN` and freed when
+  the guard drops; a second `begin()` on the connection fails with
+  `TxError::AlreadyOpen` instead of committing or joining the first.
 - A sync `Tx` dropped while open rolls back in `Drop`.
 - An `AsyncTx` can't await in `Drop`. It marks the connection dirty
   (`PendingRollback`), the driver sends the rollback before its next

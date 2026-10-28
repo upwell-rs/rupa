@@ -7,7 +7,9 @@ use rupa_core::dialect::Memory;
 use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{AsyncTransactional, AsyncTx, AsyncTxConnection, TxConnection, TxOptions};
+use rupa_core::tx::{
+    AsyncTransactional, AsyncTx, AsyncTxConnection, TxConnection, TxOptions, TxSlot,
+};
 
 use crate::{MemoryDb, MemoryError};
 
@@ -101,6 +103,10 @@ impl AsyncTxConnection for AsyncMemoryDb {
 
     fn clean(&self) -> impl Future<Output = Result<(), MemoryError>> + Send {
         std::future::ready(Ok(()))
+    }
+
+    fn slot(&self) -> &TxSlot {
+        TxConnection::slot(&self.0)
     }
 }
 

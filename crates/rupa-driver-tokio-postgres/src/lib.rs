@@ -49,7 +49,9 @@ use rupa_core::Postgres;
 use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{AsyncTransactional, AsyncTx, AsyncTxConnection, PendingRollback, TxOptions};
+use rupa_core::tx::{
+    AsyncTransactional, AsyncTx, AsyncTxConnection, PendingRollback, TxOptions, TxSlot,
+};
 
 #[cfg(feature = "dynamic")]
 pub use driver::PgDriver;
@@ -69,6 +71,7 @@ pub struct PgExecutor {
     client: tokio_postgres::Client,
     dialect: Postgres,
     pending: PendingRollback,
+    slot: TxSlot,
     statements: StatementCache,
     #[cfg(feature = "migrations")]
     migration: rupa_migrate::protocol::postgres::State,
@@ -82,6 +85,7 @@ impl PgExecutor {
             client,
             dialect: Postgres,
             pending: PendingRollback::default(),
+            slot: TxSlot::default(),
             statements: StatementCache::default(),
             #[cfg(feature = "migrations")]
             migration: rupa_migrate::protocol::postgres::State::default(),
@@ -216,10 +220,14 @@ impl AsyncTxConnection for PgExecutor {
             self.client
                 .batch_execute(&rupa_sql::render_tx(&statement, &self.dialect)?)
                 .await?;
-            self.pending.clear();
+            self.pending.clear(statement);
         }
 
         Ok(())
+    }
+
+    fn slot(&self) -> &TxSlot {
+        &self.slot
     }
 }
 

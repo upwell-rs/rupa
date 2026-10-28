@@ -41,11 +41,11 @@
 
 #[cfg(feature = "async")]
 mod asynchronous;
+mod state;
 #[cfg(test)]
 mod tests;
 
 use std::ops::Deref;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::error::TxError;
 use crate::exec::{Engine, Executor, Immediate, Outcome};
@@ -55,6 +55,7 @@ use crate::query::Expect;
 
 #[cfg(feature = "async")]
 pub use asynchronous::{AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxConnection};
+pub use state::{PendingRollback, TxSlot};
 
 /// A transaction that is still open.
 pub trait Transaction: Executor + Sized {
@@ -130,6 +131,8 @@ pub trait Transactional: Executor {
 ///   next unit of work.
 /// - Every method takes `&self`, like [`Executor::execute`]; a driver whose
 ///   native connection needs exclusive access serializes inside.
+/// - [`slot`](Self::slot) returns a [`TxSlot`] the connection owns, so it
+///   runs one top-level transaction at a time.
 pub trait TxConnection: Executor<Error: From<TxError>> + Send {
     /// Runs a transaction-control statement now (after any deferred rollback).
     fn control(&self, statement: TxStatement) -> Result<(), Self::Error>;
@@ -144,53 +147,9 @@ pub trait TxConnection: Executor<Error: From<TxError>> + Send {
     /// Sends the deferred rollback, if any. Pools call this before reusing a
     /// connection.
     fn clean(&self) -> Result<(), Self::Error>;
-}
 
-/// Bookkeeping for a deferred rollback, for drivers to embed. It is updated
-/// through `&self`, without a lock, and publishes nothing but its own value,
-/// so relaxed ordering suffices.
-///
-/// ```ignore
-/// fn run(&self, ..) -> Result<Outcome, MyError> {
-///     self.clean()?; // sends `self.pending.statement()` and clears it
-///     ..
-/// }
-/// ```
-#[derive(Debug)]
-pub struct PendingRollback(AtomicU64);
-
-impl PendingRollback {
-    const NONE: u64 = u64::MAX;
-
-    /// Records a rollback to `depth`. Several deferred rollbacks merge into
-    /// the outermost one.
-    pub fn defer(&self, depth: u32) {
-        self.0.fetch_min(u64::from(depth), Ordering::Relaxed);
-    }
-
-    /// Whether a rollback is owed.
-    pub fn is_pending(&self) -> bool {
-        self.0.load(Ordering::Relaxed) != Self::NONE
-    }
-
-    /// The statement to send, if a rollback is owed. Call [`clear`](Self::clear)
-    /// once it succeeded.
-    pub fn statement(&self) -> Option<TxStatement> {
-        let depth = self.0.load(Ordering::Relaxed);
-
-        u32::try_from(depth).ok().map(rollback_to)
-    }
-
-    /// Marks the owed rollback as sent.
-    pub fn clear(&self) {
-        self.0.store(Self::NONE, Ordering::Relaxed);
-    }
-}
-
-impl Default for PendingRollback {
-    fn default() -> Self {
-        Self(AtomicU64::new(Self::NONE))
-    }
+    /// The connection's top-level transaction slot.
+    fn slot(&self) -> &TxSlot;
 }
 
 /// The statement that ends a transaction (`depth == 0`) or savepoint.
@@ -252,7 +211,12 @@ where
     }
 
     fn open(conn: C, depth: u32, options: TxOptions) -> Result<Self, TxErr<C>> {
-        conn.control(open_statement(depth, options)?)?;
+        let statement = open_statement(depth, options)?;
+        let claim = conn.slot().claim(depth)?;
+
+        conn.control(statement)?;
+        claim.keep();
+
         Ok(Self {
             conn,
             depth,
@@ -285,6 +249,10 @@ where
     fn drop(&mut self) {
         if !self.done && self.finish(false).is_err() {
             self.conn.defer_rollback(self.depth);
+        }
+
+        if self.depth == 0 {
+            self.conn.slot().release();
         }
     }
 }
