@@ -7,7 +7,10 @@
 //! [`begin_tx`](Connection::begin_tx), the same way in sync and async code.
 //! Repositories hold one and use nothing else.
 //!
-//! Both methods return a future. A sync connection (`Mode =`
+//! A transaction a connection opened is an [`OpenTransaction`] too: it
+//! ends with [`end_tx`](OpenTransaction::end_tx), committed or rolled back.
+//!
+//! These methods return a future. A sync connection (`Mode =`
 //! [`Immediate`]) returns futures that are already complete, so sync code
 //! takes their value with [`now`](crate::exec::now) and no runtime;
 //! an async one (`Mode = Awaited`) returns futures to `.await`. Nothing is
@@ -25,11 +28,11 @@ use crate::dialect::Dialect;
 use crate::exec::{Engine, ExecError, Immediate, Outcome};
 use crate::ir::Statement;
 use crate::query::Expect;
-use crate::tx::{Transactional, TxOptions};
+use crate::tx::{Transaction, Transactional, TxOptions};
 #[cfg(feature = "async")]
 use crate::{
     exec::{AsyncExecutor, Awaited},
-    tx::AsyncTransactional,
+    tx::{AsyncTransaction, AsyncTransactional},
 };
 
 /// Anything statements run on: a pool, a connection, a transaction, or a
@@ -46,7 +49,7 @@ pub trait Connection {
     type Error: ExecError;
     /// A transaction opened on this connection: one that owns a pooled
     /// connection on a pool, a savepoint on a transaction.
-    type Tx<'a>: Connection<Mode = Self::Mode, Dialect = Self::Dialect, Error = Self::Error>
+    type Tx<'a>: OpenTransaction<Mode = Self::Mode, Dialect = Self::Dialect, Error = Self::Error>
     where
         Self: 'a;
 
@@ -75,7 +78,7 @@ pub trait Mode<E: ?Sized>: Sized {
     /// The engine's error type.
     type Error: ExecError;
     /// The engine's transaction.
-    type Tx<'a>: Connection<Mode = Self, Dialect = Self::Dialect, Error = Self::Error>
+    type Tx<'a>: OpenTransaction<Mode = Self, Dialect = Self::Dialect, Error = Self::Error>
     where
         E: 'a;
 
@@ -168,6 +171,61 @@ where
         options: TxOptions,
     ) -> impl Future<Output = Result<Self::Tx<'_>, Self::Error>> + Send {
         <E::Completion as Mode<E>>::begin_tx(self, options)
+    }
+}
+
+/// How an open transaction ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxEnd {
+    /// Commit the transaction (or release the savepoint).
+    Commit,
+    /// Roll the transaction (or savepoint) back.
+    Rollback,
+}
+
+/// An open transaction, in either mode: what [`Connection::begin_tx`] returns.
+///
+/// Dropping one without ending it rolls it back, as its mode's transaction
+/// guard does.
+pub trait OpenTransaction: Connection + Sized {
+    /// Commits or rolls back the transaction.
+    fn end_tx(self, end: TxEnd) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+/// How open transactions of one mode end. Implemented by [`Immediate`] for
+/// sync transactions and by `Awaited` for async ones; not public API.
+#[doc(hidden)]
+pub trait Ends<T>: Mode<T> {
+    /// [`OpenTransaction::end_tx`] on `tx`.
+    fn end_tx(tx: T, end: TxEnd) -> impl Future<Output = Result<(), Self::Error>> + Send;
+}
+
+impl<T: Transaction + Transactional> Ends<T> for Immediate {
+    fn end_tx(tx: T, end: TxEnd) -> impl Future<Output = Result<(), T::Error>> + Send {
+        ready(match end {
+            TxEnd::Commit => tx.commit(),
+            TxEnd::Rollback => tx.rollback(),
+        })
+    }
+}
+
+#[cfg(feature = "async")]
+impl<T: AsyncTransaction + AsyncTransactional> Ends<T> for Awaited {
+    async fn end_tx(tx: T, end: TxEnd) -> Result<(), <T as AsyncExecutor>::Error> {
+        match end {
+            TxEnd::Commit => tx.commit().await,
+            TxEnd::Rollback => tx.rollback().await,
+        }
+    }
+}
+
+impl<T> OpenTransaction for T
+where
+    T: Engine,
+    T::Completion: Ends<T>,
+{
+    fn end_tx(self, end: TxEnd) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        <T::Completion as Ends<T>>::end_tx(self, end)
     }
 }
 

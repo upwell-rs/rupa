@@ -79,10 +79,9 @@ where
 /// // One pooled connection per call.
 /// let users = UserRepositoryRepo::new(&db);
 ///
-/// // A unit of work: an owned ('static) transaction on one connection,
-/// // shared by every repository that borrows it.
-/// let tx = db.begin().await?;
-/// UserRepositoryRepo::new(&tx).rename(id, "x").await?;
+/// // A unit of work: an owned ('static) transaction on one connection.
+/// let tx = users.open_tx(None).await?;
+/// tx.rename(id, "x").await?;
 /// tx.commit().await?;
 /// ```
 #[derive(Clone)]

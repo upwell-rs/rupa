@@ -1,7 +1,7 @@
 //! One repository that writes as well as reads: inserts (with and without
 //! `returning`, one and many), get, a patch update, delete and a filtered
 //! select, writing through subset shapes (`NewBook`, `BookPatch`), plus two
-//! repositories sharing a transaction.
+//! the repository branching into a transaction that a second one joins.
 //!
 //! Run: `cargo run -p rupa --example sqlite_repository_crud --features sqlite`
 
@@ -109,19 +109,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ["Dune Messiah", "Children of Dune"]
     );
 
-    let tx = pool.begin()?;
+    let shelf = ShelfRepo::new(&pool);
+    let tx = books.open_tx(None)?;
 
-    BooksRepo::new(&tx).patch(&BookPatch {
+    tx.patch(&BookPatch {
         id: more[0].id,
         read: Some(true),
     })?;
     assert_eq!(
-        ShelfRepo::new(&tx).finished()?.len(),
+        shelf.tx(tx.connection()).finished()?.len(),
         2,
-        "sees the shared write"
+        "sees the transaction's write"
     );
     tx.rollback()?;
-    assert_eq!(ShelfRepo::new(&pool).finished()?.len(), 1, "rolled back");
+    assert_eq!(shelf.finished()?.len(), 1, "rolled back");
 
     assert_eq!(books.remove(dune.id)?, 1);
     assert!(books.get(dune.id)?.is_none());

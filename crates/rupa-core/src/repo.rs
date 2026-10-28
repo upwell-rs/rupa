@@ -2,7 +2,8 @@
 //!
 //! A repository handle holds one [`Connection`](crate::connection::Connection),
 //! a pool, a connection or a transaction, in any wrapper, and runs every
-//! query on it. Two repositories share a transaction by holding `&tx`.
+//! query on it. A repository opens a transaction on its connection with
+//! `open_tx` and joins an open one with `tx`, staying the same repository.
 
 /// A repository trait object that can be built over a connection `C`.
 ///

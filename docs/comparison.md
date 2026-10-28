@@ -1,7 +1,7 @@
 # rupa, Diesel and SeaORM
 
 The same small tasks in each: a repository with CRUD, two repositories
-sharing a transaction, a join, a JSON filter, and a unit test without a
+a transaction across repositories, a join, a JSON filter, and a unit test without a
 database. The rupa snippets are taken from the runnable examples. The Diesel
 (2.3) and SeaORM (2.0) snippets are **illustrative**: written against their
 documented APIs at those releases, not compiled in this repository, and
@@ -68,16 +68,16 @@ let unread = Book::find()
     .await?;
 ```
 
-## Two repositories, one transaction
+## A transaction across repositories
 
-**rupa**: a transaction is a connection; repositories borrow it, and
-`commit` cannot run while they still do
-([example](../crates/rupa/examples/sqlite_repository_tx.rs)).
+**rupa**: a repository opens a transaction and stays the same repository;
+another one joins it with `tx`, and `commit` cannot run while it is still
+borrowed ([example](../crates/rupa/examples/sqlite_repository_tx.rs)).
 
 ```rust
-let tx = pool.begin()?;
-NoteWritesRepo::new(&tx).add(&note)?;
-NoteReadsRepo::new(&tx).all()?;
+let tx = notes.open_tx(None)?;
+tx.add(&note)?;
+tags.tx(tx.connection()).add(&tag)?;
 tx.commit()?;
 ```
 

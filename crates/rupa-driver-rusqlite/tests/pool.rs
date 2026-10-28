@@ -18,13 +18,10 @@ use rupa_driver_rusqlite::SqliteError;
 use rupa_driver_rusqlite::{SqliteDriver, SqliteManager, SqlitePool, SqliteTarget};
 
 #[repository]
-trait NoteWrites {
+trait Notes {
     #[query(insert)]
     fn add(&self, note: &NewNote) -> Result<u64, rupa::DynError>;
-}
 
-#[repository]
-trait NoteReads {
     #[query(order_by = id)]
     fn all(&self) -> Result<Vec<Note>, rupa::DynError>;
 }
@@ -111,33 +108,49 @@ fn erased_database_preserves_native_pool_transaction_policy() {
 }
 
 #[test]
-fn repositories_share_a_pooled_transaction_by_reference() {
-    let file = TempDb::new("repo-shared-tx");
+fn a_repository_branches_into_a_pooled_transaction() {
+    let file = TempDb::new("repo-open-tx");
     let pool = file.pool(2);
-    let tx = pool.begin().expect("transaction opens");
-    let writes = NoteWritesRepo::new(&tx);
-    let reads = NoteReadsRepo::new(&tx);
+    let notes = NotesRepo::new(&pool);
+    let tx = notes.open_tx(None).expect("transaction opens");
 
-    assert_eq!(std::mem::size_of_val(&writes), std::mem::size_of::<&()>());
-    assert_eq!(writes.add(&note("committed")).expect("insert note"), 1);
-    assert_eq!(reads.all().expect("read own write")[0].title, "committed");
-    assert_eq!(count(&pool), 0, "not visible outside the transaction");
+    assert_eq!(std::mem::size_of_val(&notes), std::mem::size_of::<&()>());
+    assert_eq!(tx.add(&note("committed")).expect("insert note"), 1);
+    assert_eq!(tx.all().expect("read own write")[0].title, "committed");
+    assert!(
+        notes.all().expect("read outside").is_empty(),
+        "not visible outside the transaction"
+    );
     tx.commit().expect("commit transaction");
     assert_eq!(count(&pool), 1);
 }
 
 #[test]
-fn a_dropped_shared_transaction_rolls_back() {
+fn a_dropped_repository_transaction_rolls_back() {
     let file = TempDb::new("repo-drop");
     let pool = file.pool(1);
-    let tx = pool.begin().expect("transaction opens");
+    let notes = NotesRepo::new(&pool);
 
-    NoteWritesRepo::new(&tx)
+    notes
+        .open_tx(None)
+        .expect("transaction opens")
         .add(&note("discarded"))
         .expect("insert note");
-    drop(tx);
 
     assert_eq!(count(&pool), 0);
+}
+
+#[test]
+fn a_repository_joins_a_transaction_opened_elsewhere() {
+    let file = TempDb::new("repo-join");
+    let pool = file.pool(1);
+    let notes = NotesRepo::new(&pool);
+    let tx = pool.begin().expect("transaction opens");
+
+    notes.tx(&tx).add(&note("joined")).expect("insert note");
+    tx.commit().expect("commit transaction");
+
+    assert_eq!(notes.all().expect("read committed").len(), 1);
 }
 
 #[test]
@@ -145,35 +158,27 @@ fn repositories_run_on_one_executor_and_its_transactions() {
     let file = TempDb::new("repo-executor");
     let pool = file.pool(1);
     let conn = pool.get().expect("connection");
-    let tx = conn.begin().expect("transaction opens");
+    let notes = NotesRepo::new(&conn);
+    let tx = notes.open_tx(None).expect("transaction opens");
 
-    NoteWritesRepo::new(&tx)
-        .add(&note("one"))
-        .expect("insert note");
+    tx.add(&note("one")).expect("insert note");
     tx.commit().expect("commit transaction");
 
-    assert_eq!(
-        NoteReadsRepo::new(&conn)
-            .all()
-            .expect("read committed")
-            .len(),
-        1
-    );
+    assert_eq!(notes.all().expect("read committed").len(), 1);
 }
 
 #[test]
-fn async_repositories_run_on_a_sync_pool_and_its_transactions() {
+fn async_repositories_branch_into_transactions_on_a_sync_pool() {
     let file = TempDb::new("repo-async-pool");
     let pool = file.pool(1);
     let notes = AsyncNotesRepo::new(&pool);
 
     pollster::block_on(async {
-        let tx = pool.begin().expect("transaction opens");
-        let in_tx = AsyncNotesRepo::new(&tx);
+        let tx = notes.open_tx(None).await.expect("transaction opens");
 
-        assert_eq!(in_tx.add(&note("async")).await.expect("insert"), 1);
-        assert_eq!(in_tx.all().await.expect("read own write")[0].title, "async");
-        tx.rollback().expect("rollback");
+        assert_eq!(tx.add(&note("async")).await.expect("insert"), 1);
+        assert_eq!(tx.all().await.expect("read own write")[0].title, "async");
+        tx.rollback().await.expect("rollback");
         assert!(notes.all().await.expect("read after rollback").is_empty());
     });
 }
