@@ -132,7 +132,7 @@ pub trait Transactional: Executor {
 /// - Every method takes `&self`, like [`Executor::execute`]; a driver whose
 ///   native connection needs exclusive access serializes inside.
 /// - [`slot`](Self::slot) returns a [`TxSlot`] the connection owns, so it
-///   runs one top-level transaction at a time.
+///   runs one transaction, and one savepoint per level, at a time.
 pub trait TxConnection: Executor<Error: From<TxError>> + Send {
     /// Runs a transaction-control statement now (after any deferred rollback).
     fn control(&self, statement: TxStatement) -> Result<(), Self::Error>;
@@ -251,9 +251,7 @@ where
             self.conn.defer_rollback(self.depth);
         }
 
-        if self.depth == 0 {
-            self.conn.slot().release();
-        }
+        self.conn.slot().release(self.depth);
     }
 }
 

@@ -246,6 +246,19 @@ pub async fn tx_one_top_level_per_connection<E: AsyncTransactional>(e: &E) {
     );
 
     let after = e.begin().await.expect("a transaction once the first ended");
+    let child = after.begin().await.expect("a savepoint");
 
+    assert!(
+        after.begin().await.is_err(),
+        "a sibling savepoint would share the first's name"
+    );
+
+    child.rollback().await.expect("savepoint rollback");
+    drop(
+        after
+            .begin()
+            .await
+            .expect("a savepoint once the first ended"),
+    );
     after.rollback().await.expect("rollback");
 }

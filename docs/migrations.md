@@ -721,7 +721,8 @@ startup  = "apply"              # off | check (default) | apply
 ```
 
 A server database takes the server fields, and can migrate with credentials
-of its own, so the application's role needs no DDL rights:
+of its own, so the application's role needs no DDL rights. A `url` replaces
+`params` too, so it repeats `sslmode`; TLS needs rupa's `tls-rustls` feature:
 
 ```toml
 [database.reporting]
@@ -732,7 +733,7 @@ user     = "app"
 password = "${DB_PASSWORD}"
 name     = "reporting"
 params   = { sslmode = "require" }
-# url    = "postgres://${database.reporting.user}:${DB_PASSWORD}@${database.reporting.host}/reporting"
+# url    = "postgres://${database.reporting.user}:${DB_PASSWORD}@${database.reporting.host}/reporting?sslmode=require"
 
 [database.reporting.migrations]
 user     = "migrator"           # optional: credentials for migrations only
