@@ -50,7 +50,7 @@ pub type ConnectOptions<DB> = <<DB as sqlx::Database>::Connection as sqlx::Conne
 /// A connection checked out of a [`SqlxPool`].
 pub type SqlxConn<DB> = Pooled<managed::Object<SqlxManager<DB>>>;
 
-/// A transaction that owns its pooled connection (see [`AsyncPool::begin`]).
+/// A transaction that owns its pooled connection (what `begin` on the pool returns).
 pub type SqlxPoolTx<DB> = OwnedAsyncTx<SqlxConn<DB>>;
 
 /// Opens and recycles [`SqlxExecutor`]s for `deadpool`.
@@ -119,7 +119,7 @@ impl<DB: Backend> SqlxManager<DB> {
                 ))
             })??,
         };
-        let mut conn = SqlxExecutor::new(conn);
+        let conn = SqlxExecutor::new(conn);
         for statement in self.init.iter() {
             conn.script(statement).await?;
         }
@@ -191,8 +191,9 @@ impl<DB: Backend> managed::Manager for SqlxManager<DB> {
     }
 }
 
-/// A pool of sqlx connections; an [`AsyncPool`], so repository views
-/// runs `&self` repositories and `pool.begin().await?` opens an owned
+/// A pool of sqlx connections. It is a
+/// [`Connection`](rupa_core::connection::Connection): each statement runs on
+/// a connection checked out for it, and `pool.begin().await?` opens an owned
 /// transaction. Cloning shares the pool.
 pub struct SqlxPool<DB: Backend> {
     pool: managed::Pool<SqlxManager<DB>>,
@@ -279,12 +280,10 @@ impl<DB: Backend> fmt::Debug for SqlxPool<DB> {
     }
 }
 
+rupa_core::pool_executor!(async, [DB: Backend] SqlxPool<DB>, |pool| &pool.dialect);
+
 impl<DB: Backend> AsyncPool for SqlxPool<DB> {
     type Conn = SqlxConn<DB>;
-
-    fn dialect(&self) -> &DB::Dialect {
-        &self.dialect
-    }
 
     async fn get(&self) -> Result<SqlxConn<DB>, SqlxError> {
         glue::get(&self.pool, SqlxError::Pool).await

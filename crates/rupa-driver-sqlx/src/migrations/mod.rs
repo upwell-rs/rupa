@@ -31,8 +31,8 @@ pub trait Engine<DB: Backend>: Default + Send + Sync + 'static {
     /// Whether a run left state on the connection.
     fn is_active(&self) -> bool;
 
-    /// Whether statements route through [`Engine::user_statement`].
-    fn is_running(&self) -> bool;
+    /// Refuses a statement sent around a run instead of through its context.
+    fn outside_run(&self) -> Result<(), StateError>;
 
     /// How long a runner waits for another runner's lock.
     fn lock_timeout(&mut self) -> &mut Duration;
@@ -55,6 +55,16 @@ impl<DB: Backend> SqlxExecutor<DB> {
         *self.migration.lock_timeout() = timeout;
 
         self
+    }
+
+    /// Runs a typed statement of a migration body under the engine's
+    /// migration checks; the session's `user_statement`.
+    pub(crate) async fn execute_migration_statement(
+        &mut self,
+        statement: &Statement,
+        expect: Expect,
+    ) -> Result<Outcome, SqlxError> {
+        <DB::Migration as Engine<DB>>::user_statement(self, statement, expect).await
     }
 }
 
@@ -88,7 +98,7 @@ impl<DB: Backend> Io for SqlxExecutor<DB> {
         columns: &[SqlType],
     ) -> Result<Vec<Vec<Value>>, SqlxError> {
         let args = arguments::<DB>(bound)?;
-        let fetched = DB::fetch(&mut self.conn, Arc::from(sql), args, None).await;
+        let fetched = DB::fetch(self.conn.get_mut(), Arc::from(sql), args, None).await;
         let rows = fetched.map_err(|e| self.failed(e))?;
 
         rows.iter()
@@ -106,13 +116,13 @@ impl<DB: Backend> Io for SqlxExecutor<DB> {
 
     async fn execute(&mut self, sql: &str, bound: &[Value]) -> Result<u64, SqlxError> {
         let args = arguments::<DB>(bound)?;
-        let result = DB::execute(&mut self.conn, Arc::from(sql), args).await;
+        let result = DB::execute(self.conn.get_mut(), Arc::from(sql), args).await;
 
         result.map_err(|e| self.failed(e))
     }
 
     async fn batch(&mut self, sql: &str) -> Result<(), SqlxError> {
-        let result = DB::raw(&mut self.conn, sql).await;
+        let result = DB::raw(self.conn.get_mut(), sql).await;
 
         result.map_err(|e| self.failed(e))
     }
@@ -122,7 +132,7 @@ impl<DB: Backend> Io for SqlxExecutor<DB> {
     }
 
     async fn forget_statements(&mut self) -> Result<(), SqlxError> {
-        let result = self.conn.clear_cached_statements().await;
+        let result = self.conn.get_mut().clear_cached_statements().await;
 
         result.map_err(|e| self.failed(e))
     }

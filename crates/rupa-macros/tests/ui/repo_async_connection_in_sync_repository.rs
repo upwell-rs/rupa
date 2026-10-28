@@ -10,11 +10,11 @@ struct User {
 #[repository]
 trait Users {
     #[query(order_by = id)]
-    async fn all(&self) -> Result<Vec<User>, rupa::DynError>;
+    fn all(&self) -> Result<Vec<User>, rupa::DynError>;
 }
 
 fn main() {
-    let source = rupa::Shared::new(rupa_driver_memory::MemoryDb::new());
-    let users = UsersView::new(&source);
+    let db = rupa_driver_memory::MemoryDb::new().into_async();
+    let users = UsersRepo::new(&db);
     let _ = users.all();
 }

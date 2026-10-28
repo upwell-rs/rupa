@@ -1,6 +1,6 @@
 //! Runs the shared conformance suite against a real Postgres in Docker.
 
-use rupa::core::tx::TxConnection;
+use rupa::TxConnection;
 use rupa::{DbConfig, DriverConfig, PostgresOptions, Registry};
 use rupa_conformance::{Blocking, Harness, POSTGRES_DDL};
 use rupa_driver_postgres::{PgDriver, PgExecutor};

@@ -172,7 +172,7 @@ fn lost_advisory_lock_poisons_instead_of_committing(pg: &mut Pg) {
         rupa::raw()
             .sql("SELECT 1")
             .execute::<u64>()
-            .execute(&mut session),
+            .execute(&session),
         Err(PgError::Migration(StateError::Poisoned))
     ));
     assert!(!pg.table_exists("marker"));
@@ -265,7 +265,7 @@ fn sync_and_async_drivers_share_one_lock_and_history(pg: &mut Pg) {
 }
 
 fn an_abandoned_pooled_session_is_discarded(pg: &mut Pg) {
-    use rupa::core::pool::Pool;
+    use rupa::Pool;
     use rupa_conformance::migrations::fixture::Interrupted;
 
     let entries = [Interrupted];
@@ -277,14 +277,14 @@ fn an_abandoned_pooled_session_is_discarded(pg: &mut Pg) {
         let mut conn = pool.get().expect("pooled connection");
         let _ = conn.apply(&catalog);
     }));
-    let mut replacement = pool.get().expect("replacement connection");
+    let replacement = pool.get().expect("replacement connection");
 
     assert!(interrupted.is_err());
     assert!(
         rupa::raw()
             .sql("SELECT 1")
             .execute::<u64>()
-            .execute(&mut *replacement)
+            .execute(&*replacement)
             .is_ok(),
         "the pool replaced the abandoned connection"
     );

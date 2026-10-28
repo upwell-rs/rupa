@@ -11,7 +11,7 @@ description = "Explicit migration catalogs, history and execution for RUPA"
 # Synchronous sessions, bodies and `apply` (`rupa_migrate::sync`).
 sync = []
 # Asynchronous sessions, bodies and `apply` (`rupa_migrate::asynchronous`).
-async = ["rupa-core/async"]
+async = ["rupa-core/async", "dep:futures-util"]
 # The engine session protocols driver crates implement sessions on, in each
 # enabled mode (alone: only `protocol::SqlState`); not public API.
 protocol = []
@@ -30,3 +30,4 @@ serde_json.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
 clap = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }

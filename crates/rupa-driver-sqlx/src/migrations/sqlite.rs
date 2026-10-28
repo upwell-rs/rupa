@@ -6,6 +6,7 @@ use libsqlite3_sys::{SQLITE_DENY, SQLITE_OK, sqlite3_get_autocommit, sqlite3_set
 use rupa_core::exec::Outcome;
 use rupa_core::ir::Statement;
 use rupa_core::query::Expect;
+use rupa_migrate::StateError;
 use rupa_migrate::protocol::asynchronous::SqliteIo;
 use rupa_migrate::protocol::sqlite::{self, State, authorize};
 use sqlx::Connection as _;
@@ -21,8 +22,8 @@ impl Engine<sqlx::Sqlite> for State {
         State::is_active(self)
     }
 
-    fn is_running(&self) -> bool {
-        State::is_running(self)
+    fn outside_run(&self) -> Result<(), StateError> {
+        State::outside_run(self)
     }
 
     fn lock_timeout(&mut self) -> &mut Duration {
@@ -47,7 +48,7 @@ impl Engine<sqlx::Sqlite> for State {
 /// the raw handle, locked away from sqlx's worker thread for the call.
 impl SqliteIo for SqlxExecutor<sqlx::Sqlite> {
     async fn is_autocommit(&mut self) -> Result<bool, SqlxError> {
-        let autocommit = match self.conn.lock_handle().await {
+        let autocommit = match self.conn.get_mut().lock_handle().await {
             // SAFETY: the locked handle is a live connection no other thread
             // uses until it is dropped, and the call only reads its state.
             Ok(mut handle) => {
@@ -62,12 +63,12 @@ impl SqliteIo for SqlxExecutor<sqlx::Sqlite> {
     /// Prepared statements were authorized under the previous policy, so the
     /// statement cache is cleared first.
     async fn authorizer(&mut self, enabled: bool) -> Result<(), SqlxError> {
-        let cleared = self.conn.clear_cached_statements().await;
+        let cleared = self.conn.get_mut().clear_cached_statements().await;
 
         cleared.map_err(|e| self.failed(e))?;
 
         let callback = enabled.then_some(decide as Callback);
-        let installed = match self.conn.lock_handle().await {
+        let installed = match self.conn.get_mut().lock_handle().await {
             // SAFETY: the locked handle is a live connection no other thread
             // uses until it is dropped. `decide` keeps no state, never unwinds
             // and reads its arguments only for the duration of each call, and

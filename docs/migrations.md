@@ -637,13 +637,14 @@ deployments.
 
 With the facade's `upwell-database` feature, `rupa::upwell::database!`
 declares a database of an Upwell application: its driver pool, configuration
-path, migration catalog, optional migration command and the repositories it
-provides. Like `#[component]`, it registers itself at link time. Only the
+path, migration catalog and optional migration command. A repository declares
+the database it is provided over, `#[repository(database = Primary)]`. Like
+`#[component]`, both register themselves at link time. Only the
 migration commands need the `Migrations` plugin, registered once, because Upwell
 discovers components, providers and configuration but not plugins:
 
 ```rust,ignore
-#[repository]
+#[repository(database = Primary)]     // provided as Arc<dyn NoteRepository>
 pub trait NoteRepository: Send + Sync {
     #[query(order_by = id)]
     fn all(&self) -> Result<Vec<Note>, DynError>;
@@ -656,7 +657,6 @@ rupa::upwell::database! {
         config: "database.primary",
         migrations: db::migrations,     // the module include_migrations! generated
         command: "migrate",
-        repositories: [dyn NoteRepository],
     }
 }
 

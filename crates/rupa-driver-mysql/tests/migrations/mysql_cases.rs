@@ -206,7 +206,7 @@ fn lost_named_lock_poisons_instead_of_completing(my: &mut My) {
         "string-literal dynamic SQL passes the grammar, the lock check refuses completion"
     );
     assert!(matches!(
-        raw().sql("SELECT 1").execute::<u64>().execute(&mut session),
+        raw().sql("SELECT 1").execute::<u64>().execute(&session),
         Err(MySqlError::Migration(StateError::Poisoned))
     ));
     assert!(my.table_exists("marker"), "autocommit effects persist");

@@ -1,4 +1,4 @@
-use rupa::core::dialect::DialectId;
+use rupa::DialectId;
 use rupa::migrate::schema::Index;
 use rupa::migrate::{Blocker, Error, Planned, RunError};
 

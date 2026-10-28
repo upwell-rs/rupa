@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn pending_rollbacks_merge_into_the_outermost() {
-    let mut p = PendingRollback::default();
+    let p = PendingRollback::default();
     assert_eq!(p.statement(), None);
     p.defer(2);
     p.defer(1);

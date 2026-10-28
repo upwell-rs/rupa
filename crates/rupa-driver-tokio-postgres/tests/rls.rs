@@ -1,11 +1,11 @@
 //! Native row-level security on a real Postgres: policies read the context
 //! that `begin_with_security` applies inside the transaction.
 
-use rupa::core::exec::AsyncExecutor;
-use rupa::core::tx::{AsyncTransaction, AsyncTransactional, TxOptions};
+use rupa::AsyncExecutor;
 use rupa::prelude::*;
-use rupa::{AsyncPool, Database, DbConfig};
 use rupa::{AsyncSecureTransactional, SecurityContext};
+use rupa::{AsyncTransaction, AsyncTransactional, TxOptions};
+use rupa::{Database, DbConfig};
 use rupa_driver_tokio_postgres::{PgExecutor, PgPool};
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
@@ -92,7 +92,7 @@ fn tenant(id: i64) -> SecurityContext {
         .role("app_user")
 }
 
-async fn titles<E: AsyncExecutor>(e: &mut E) -> Vec<String> {
+async fn titles<E: AsyncExecutor>(e: &E) -> Vec<String> {
     let docs = select::<Doc>()
         .order_by(Doc::ID.asc())
         .all()
@@ -121,21 +121,21 @@ async fn native_row_level_security() {
     let pool = PgPool::connect(&DbConfig::new(&url).max_connections(2))
         .await
         .unwrap();
-    let mut db = PgExecutor::new(client);
+    let db = PgExecutor::new(client);
 
     // Each tenant sees only its rows; the context travels with the tx.
-    let mut tx = db
+    let tx = db
         .begin_with_security(TxOptions::default(), tenant(1))
         .await
         .unwrap();
     assert_eq!(tx.context().get("tenant_id"), Some("1"));
-    assert_eq!(titles(&mut tx).await, ["a1", "a2"]);
+    assert_eq!(titles(&tx).await, ["a1", "a2"]);
     tx.commit().await.unwrap();
-    let mut tx = db
+    let tx = db
         .begin_with_security(TxOptions::default(), tenant(2))
         .await
         .unwrap();
-    assert_eq!(titles(&mut tx).await, ["b1"]);
+    assert_eq!(titles(&tx).await, ["b1"]);
 
     // WITH CHECK: writing another tenant's row is refused by the database.
     let foreign = insert::<Doc>()
@@ -144,14 +144,14 @@ async fn native_row_level_security() {
             title: "x".into(),
         })
         .affected()
-        .execute(&mut tx)
+        .execute(&tx)
         .await;
     assert!(
         foreign.is_err(),
         "the policy must reject other tenants' rows"
     );
     tx.rollback().await.unwrap();
-    let mut tx = db
+    let tx = db
         .begin_with_security(TxOptions::default(), tenant(2))
         .await
         .unwrap();
@@ -161,39 +161,35 @@ async fn native_row_level_security() {
             title: "b2".into(),
         })
         .affected()
-        .execute(&mut tx)
+        .execute(&tx)
         .await
         .unwrap();
 
     // Savepoints are part of the same transaction: same context.
-    let mut inner = tx.begin().await.unwrap();
-    assert_eq!(titles(&mut inner).await, ["b1", "b2"]);
+    let inner = tx.begin().await.unwrap();
+    assert_eq!(titles(&inner).await, ["b1", "b2"]);
     inner.rollback().await.unwrap();
 
     tx.commit().await.unwrap();
 
-    // A repository can open an RLS transaction and share it with other views.
-    let session = rupa::AsyncTxSession::new(
-        DocsView::new(&pool)
-            .begin_with_security(TxOptions::default(), tenant(2))
-            .await
-            .unwrap(),
-    );
-    let docs = DocsView::new(&session);
-    let counts = DocCountsView::new(&session);
+    // An RLS transaction shared by several repositories.
+    let tx = pool
+        .begin_with_security(TxOptions::default(), tenant(2))
+        .await
+        .unwrap();
+    let docs = DocsRepo::new(&tx);
+    let counts = DocCountsRepo::new(&tx);
     let found = docs.after(0).await.unwrap();
     assert_eq!(
         found.iter().map(|d| d.title.as_str()).collect::<Vec<_>>(),
         ["b1", "b2"]
     );
     assert!(counts.any_after(0).await.unwrap());
-    session.commit().await.unwrap();
-    assert!(docs.after(0).await.is_err());
-    drop(session);
+    tx.commit().await.unwrap();
 
     // Settings are transaction-local: nothing leaks to the next transaction.
     // A role without a tenant sees nothing; the superuser (no context) sees all.
-    let mut tx = db
+    let tx = db
         .begin_with_security(
             TxOptions::default(),
             SecurityContext::new().role("app_user"),
@@ -201,15 +197,15 @@ async fn native_row_level_security() {
         .await
         .unwrap();
     assert!(
-        titles(&mut tx).await.is_empty(),
+        titles(&tx).await.is_empty(),
         "no tenant set: the policy matches nothing"
     );
     tx.commit().await.unwrap();
-    assert_eq!(titles(&mut db).await, ["a1", "a2", "b1", "b2"]);
+    assert_eq!(titles(&db).await, ["a1", "a2", "b1", "b2"]);
 
     // A dropped secure transaction rolls back like any other.
     {
-        let mut tx = db
+        let tx = db
             .begin_with_security(TxOptions::default(), tenant(1))
             .await
             .unwrap();
@@ -219,11 +215,11 @@ async fn native_row_level_security() {
                 title: "gone".into(),
             })
             .affected()
-            .execute(&mut tx)
+            .execute(&tx)
             .await
             .unwrap();
     }
-    assert_eq!(titles(&mut db).await.len(), 4);
+    assert_eq!(titles(&db).await.len(), 4);
 
     // An invalid key is refused before anything runs.
     let bad = db
@@ -235,28 +231,26 @@ async fn native_row_level_security() {
         .is_err();
     assert!(bad);
     assert_eq!(
-        titles(&mut db).await.len(),
+        titles(&db).await.len(),
         4,
         "the connection is usable afterwards"
     );
 
     // Pools open owned secure transactions: statically gated on `PgPool`...
-    let mut tx = pool
+    let tx = pool
         .begin_with_security(TxOptions::default(), tenant(1))
         .await
         .unwrap();
-    assert_eq!(titles(&mut tx).await, ["a1", "a2"]);
+    assert_eq!(titles(&tx).await, ["a1", "a2"]);
     tx.commit().await.unwrap();
 
     // ...and checked at run time on a type-erased `Database`.
     let erased = Database::new(pool);
-    let session = rupa::AsyncTxSession::new(
-        DocsView::new(&erased)
-            .try_begin_with_security(TxOptions::default(), tenant(2))
-            .await
-            .unwrap(),
-    );
-    let docs = DocsView::new(&session);
+    let tx = erased
+        .try_begin_with_security(TxOptions::default(), tenant(2))
+        .await
+        .unwrap();
+    let docs = DocsRepo::new(&tx);
     assert_eq!(
         docs.after(0)
             .await
@@ -266,11 +260,11 @@ async fn native_row_level_security() {
             .collect::<Vec<_>>(),
         ["b1", "b2"]
     );
-    session.rollback().await.unwrap();
+    tx.rollback().await.unwrap();
 
     // Joins: each table's policy filters its own rows. Tenant 1 sees its
     // docs, and on a1 only its own comment (not tenant 2's).
-    let mut tx = db
+    let tx = db
         .begin_with_security(TxOptions::default(), tenant(1))
         .await
         .unwrap();
@@ -279,7 +273,7 @@ async fn native_row_level_security() {
         .left()
         .order_by(|(d, _)| d.col(Doc::ID).asc())
         .all()
-        .execute(&mut tx)
+        .execute(&tx)
         .await
         .unwrap();
     assert_eq!(
@@ -290,7 +284,7 @@ async fn native_row_level_security() {
     tx.commit().await.unwrap();
 
     // Tenant 2 sees its comment on a1, but not a1 itself.
-    let mut tx = db
+    let tx = db
         .begin_with_security(TxOptions::default(), tenant(2))
         .await
         .unwrap();
@@ -299,7 +293,7 @@ async fn native_row_level_security() {
         .left()
         .order_by(|(c, _)| c.col(Comment::ID).asc())
         .all()
-        .execute(&mut tx)
+        .execute(&tx)
         .await
         .unwrap();
     let got: Vec<_> = rows

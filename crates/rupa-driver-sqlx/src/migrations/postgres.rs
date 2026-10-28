@@ -3,6 +3,7 @@ use std::time::Duration;
 use rupa_core::exec::Outcome;
 use rupa_core::ir::Statement;
 use rupa_core::query::Expect;
+use rupa_migrate::StateError;
 use rupa_migrate::protocol::postgres::State;
 
 use super::Engine;
@@ -17,8 +18,8 @@ impl Engine<sqlx::Postgres> for State {
         State::is_active(self)
     }
 
-    fn is_running(&self) -> bool {
-        State::is_running(self)
+    fn outside_run(&self) -> Result<(), StateError> {
+        State::outside_run(self)
     }
 
     fn lock_timeout(&mut self) -> &mut Duration {

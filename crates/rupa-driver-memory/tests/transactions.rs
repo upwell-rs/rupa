@@ -1,8 +1,8 @@
 //! Sync transaction API specifics: the closure form and panics.
 
-use rupa::core::exec::Executor;
-use rupa::core::tx::{Transaction, Transactional};
+use rupa::Executor;
 use rupa::prelude::*;
+use rupa::{Transaction, Transactional};
 use rupa_conformance::{NewNote, Note};
 use rupa_driver_memory::{MemoryDb, MemoryError};
 
@@ -12,7 +12,7 @@ fn db() -> MemoryDb {
     db
 }
 
-fn add<E: Executor>(e: &mut E, title: &str) -> Result<u64, E::Error> {
+fn add<E: Executor>(e: &E, title: &str) -> Result<u64, E::Error> {
     insert::<Note>()
         .value(&NewNote {
             title: title.into(),
@@ -42,7 +42,7 @@ fn closure_commits_on_ok_and_rolls_back_on_err() {
 
 #[test]
 fn nested_closures_use_savepoints() {
-    let mut db = db();
+    let db = db();
     db.transaction(|outer| {
         add(outer, "outer")?;
         let inner: Result<(), MemoryError> = outer.transaction(|inner| {
@@ -55,7 +55,7 @@ fn nested_closures_use_savepoints() {
     .unwrap();
     let titles: Vec<_> = select::<Note>()
         .all()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap()
         .into_iter()
         .map(|n| n.title)
@@ -83,8 +83,8 @@ fn panic_inside_a_transaction_rolls_back() {
 #[test]
 fn guard_api_commit() {
     let mut db = db();
-    let mut tx = db.begin().unwrap();
-    add(&mut tx, "a").unwrap();
+    let tx = db.begin().unwrap();
+    add(&tx, "a").unwrap();
     tx.commit().unwrap();
     assert_eq!(count(&mut db), 1);
 }

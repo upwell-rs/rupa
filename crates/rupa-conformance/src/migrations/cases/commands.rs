@@ -1,4 +1,4 @@
-use rupa::core::dialect::DialectId;
+use rupa::DialectId;
 use rupa::migrate::commands::{Command, Exit, Format, Redactor, Report};
 use rupa::migrate::{Adoption, ApplyOptions, Engine, Recovery, RecoveryAction, RevertTarget};
 

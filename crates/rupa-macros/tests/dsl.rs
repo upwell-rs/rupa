@@ -34,7 +34,7 @@ pub fn longer_than(s: Expr<String>, n: Expr<i64>) -> Expr<bool> {
 fn eval_longer_than(args: &[Value]) -> Result<Value, DslError> {
     match args {
         [Value::Text(s), Value::I64(n)] => Ok(Value::Bool(s.chars().count() as i64 > *n)),
-        _ => Ok(Value::Null(rupa::core::SqlType::Bool)),
+        _ => Ok(Value::Null(rupa::SqlType::Bool)),
     }
 }
 
@@ -70,14 +70,14 @@ fn db() -> MemoryDb {
     insert::<User>()
         .values(&users)
         .affected()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap();
     db
 }
 
 #[test]
 fn dsl_functions_in_a_repository() {
-    let repo: Arc<dyn Users> = Arc::new(UsersRepo::shared(rupa::core::exec::Blocking(db())));
+    let repo: Arc<dyn Users> = Arc::new(UsersRepo::new(db()));
     let ids = |v: Vec<User>| v.into_iter().map(|u| u.id).collect::<Vec<_>>();
 
     let found = pollster::block_on(repo.search("ada%", 15)).unwrap();
@@ -105,7 +105,7 @@ fn dsl_functions_render_for_postgres() {
     #[query(filter = dsl::ilike(email, $pattern) && longer_than(email, $n))]
     fn search(pattern: &str, n: i64) -> Vec<User>;
 
-    let r = rupa::sql::render_query(&search("ada%", 3), &rupa::core::Postgres).unwrap();
+    let r = rupa::sql::render_query(&search("ada%", 3), &rupa::Postgres).unwrap();
     assert_eq!(
         r.sql,
         r#"SELECT "id", "email", "prefs" FROM "users" WHERE "email" ILIKE $1 AND char_length("email") > $2"#
@@ -122,7 +122,7 @@ fn runtime_checked_functions_work_with_a_dynamic_dialect() {
         async fn search(&self, pattern: &str) -> Result<Vec<User>, DynError>;
     }
     let boxed = rupa::BoxAsyncExecutor::new(db().into_async());
-    let repo: Arc<dyn Search> = Arc::new(SearchRepo::shared(boxed));
+    let repo: Arc<dyn Search> = Arc::new(SearchRepo::new(boxed));
     let found = pollster::block_on(repo.search("%EXAMPLE%")).unwrap();
     assert_eq!(found.iter().map(|u| u.id).collect::<Vec<_>>(), [1, 3]);
 }

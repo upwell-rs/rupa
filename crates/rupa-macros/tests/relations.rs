@@ -1,6 +1,6 @@
 //! `#[column(references = ..)]`: the `ON` conditions that inferred joins render.
 
-use rupa::core::Postgres;
+use rupa::Postgres;
 use rupa::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Entity)]
@@ -218,7 +218,7 @@ fn self_joins() {
 }
 
 /// Schema facts are constants: usable in `const` items, not only at run time.
-const ORDER_COLUMNS: &[rupa::core::ColumnMeta] = <Order as rupa::core::Entity>::COLUMNS;
+const ORDER_COLUMNS: &[rupa::core::ColumnMeta] = <Order as rupa::Entity>::COLUMNS;
 
 #[test]
 fn references_are_recorded_in_column_metadata() {
@@ -229,7 +229,7 @@ fn references_are_recorded_in_column_metadata() {
             .expect("an order column")
             .references
     };
-    let users = rupa::core::Reference {
+    let users = rupa::Reference {
         table: rupa::core::ir::TableRef::new("users"),
         columns: &["id"],
     };
@@ -238,7 +238,7 @@ fn references_are_recorded_in_column_metadata() {
     assert_eq!(reference("reviewer"), Some(users));
     assert_eq!(reference("id"), None);
     assert!(
-        <User as rupa::core::Entity>::COLUMNS
+        <User as rupa::Entity>::COLUMNS
             .iter()
             .any(|c| c.name == "manager_id" && c.references == Some(users)),
         "a self-reference resolves to the entity's own table"

@@ -47,7 +47,7 @@ async fn dyn_repository_on_postgres() {
     tokio::spawn(connection);
     client.batch_execute(POSTGRES_DDL).await.unwrap();
 
-    let mut exec = PgExecutor::new(client);
+    let exec = PgExecutor::new(client);
     {
         let notes = [("alpha", true), ("beta", false), ("alphabet", true)].map(|(t, p)| NewNote {
             title: t.into(),
@@ -56,12 +56,12 @@ async fn dyn_repository_on_postgres() {
         insert::<Note>()
             .values(&notes)
             .affected()
-            .execute(&mut exec)
+            .execute(&exec)
             .await
             .unwrap();
     }
 
-    let repo: Arc<dyn Notes> = Arc::new(NotesRepo::shared(exec));
+    let repo: Arc<dyn Notes> = Arc::new(NotesRepo::new(exec));
     let pinned = repo.pinned(true).await.unwrap();
     assert_eq!(
         pinned.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(),

@@ -28,7 +28,7 @@ use crate::{PgError, PgExecutor};
 /// A connection checked out of a [`PgPool`].
 pub type PgConn = Pooled<r2d2::PooledConnection<PgManager>>;
 
-/// A transaction that owns its pooled connection (see [`Pool::begin`](rupa_core::pool::Pool::begin)).
+/// A transaction that owns its pooled connection (what `begin` on the pool returns).
 pub type PgPoolTx = OwnedTx<PgConn>;
 
 type ConnectFn =

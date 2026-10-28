@@ -269,7 +269,7 @@ pub fn add_pinned() -> Plan {
         .add_column_to(
             <Post as rupa::Entity>::TABLE,
             ColumnDef::new("pinned", ColumnType::Bool)
-                .default(ColumnDefault::Value(rupa::core::Value::Bool(false))),
+                .default(ColumnDefault::Value(rupa::Value::Bool(false))),
         )
         .sql("INSERT INTO authors (name) VALUES ('ada'); INSERT INTO posts (author_id, title) VALUES (1, 'hello');")
 }

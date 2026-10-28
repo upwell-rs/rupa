@@ -2,9 +2,9 @@
 //! [`database!`](crate::database!).
 //!
 //! A declaration names a driver pool, the configuration path of its
-//! [`DatabaseSettings`], its migration catalog, an optional migration
-//! command and the repositories it provides. Like `#[component]`, it
-//! registers itself at link time, so the application discovers:
+//! [`DatabaseSettings`], its migration catalog and an optional migration
+//! command. Like `#[component]`, it registers itself at link time, so the
+//! application discovers:
 //!
 //! - a typed configuration binding: separate connection fields, an optional
 //!   `url` override templated by Upwell, the pool, driver options and the
@@ -12,8 +12,11 @@
 //!   Upwell's tooling;
 //! - a singleton [`Database`] component whose factory checks or applies the
 //!   migrations before it opens the pool, so everything that injects it is
-//!   built after the schema is ready, and nothing starts when it is not;
-//! - each listed repository as `Arc<dyn Repository>` over the pool.
+//!   built after the schema is ready, and nothing starts when it is not. It
+//!   is a [`Connection`](rupa_core::connection::Connection) like its pool:
+//!   `NoteRepositoryRepo::new(&*db)` or `db.begin()` work on it directly;
+//! - every repository declared `#[repository(database = Primary)]`, as
+//!   `Arc<dyn Repository>` over the component itself.
 //!
 //! The migration commands come from one plugin, [`Migrations`], registered
 //! once for every declared database: Upwell discovers components, providers
@@ -21,6 +24,7 @@
 
 mod cli;
 mod component;
+mod connection;
 mod declaration;
 mod error;
 mod mode;
@@ -48,16 +52,19 @@ pub use settings::{DatabaseSettings, MigrationSettings, Settings, SettingsError,
 ///         config: "database.primary",
 ///         migrations: db::migrations,
 ///         command: "migrate",
-///         repositories: [dyn NoteRepository, dyn TagRepository],
 ///     }
 /// }
+///
+/// #[repository(database = Primary)]
+/// pub trait NoteRepository: Send + Sync { .. }
 /// ```
 ///
 /// `migrations` is the module `include_migrations!` generated; its
-/// `Migrations` must run on the pool's mode. `command` and `repositories`
-/// are optional. A command name uses lowercase letters, digits, `.`, `_` and
-/// `-`; its runner is the once-registered [`Migrations`] plugin. Inject
-/// `Arc<Database<Primary>>` or a listed `Arc<dyn Repository>`.
+/// `Migrations` must run on the pool's mode. `command` is optional. A command
+/// name uses lowercase letters, digits, `.`, `_` and `-`; its runner is the
+/// once-registered [`Migrations`] plugin. Inject `Arc<Database<Primary>>`, or
+/// the `Arc<dyn Repository>` of a repository declared with
+/// `#[repository(database = Primary)]`, which runs on that database.
 #[macro_export]
 macro_rules! database {
     (
@@ -66,8 +73,7 @@ macro_rules! database {
             pool: $pool:ty,
             config: $config:literal,
             migrations: $($migrations:ident)::+,
-            $(command: $command:literal,)?
-            $(repositories: [$(dyn $repo:path),* $(,)?] $(,)?)?
+            $(command: $command:literal $(,)?)?
         }
     ) => {
         $(#[$meta])*
@@ -125,23 +131,5 @@ macro_rules! database {
                     };
             };
         )?
-
-        $($(
-            impl $crate::__private::ProviderOf<dyn $repo> for $crate::databases::Database<$name> {
-                fn upcast(this: $crate::__private::Arc<Self>) -> $crate::__private::Arc<dyn $repo> {
-                    let pool = ::core::clone::Clone::clone(this.pool());
-
-                    <dyn $repo as $crate::__private::DynRepository<$pool>>::over(pool)
-                }
-            }
-
-            const _: () = {
-                #[$crate::__private::linkme::distributed_slice($crate::__private::PROVIDERS)]
-                #[linkme(crate = $crate::__private::linkme)]
-                #[allow(unsafe_code)]
-                static PROVIDER: $crate::__private::ProviderDescriptor =
-                    $crate::databases::provider::<$name, dyn $repo>(::core::stringify!(dyn $repo));
-            };
-        )*)?
     };
 }

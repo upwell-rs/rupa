@@ -5,9 +5,8 @@
 #[path = "support/sqlite.rs"]
 mod sqlite;
 
-use rupa::Pool;
-use rupa::core::{Dialect, DialectId, DslError};
 use rupa::prelude::*;
+use rupa::{Dialect, DialectId, DslError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,7 +43,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = sqlite::open(
         "CREATE TABLE profiles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, settings TEXT NOT NULL)",
     )?;
-    let mut conn = pool.get()?;
     insert::<Profile>()
         .value(&Profile {
             id: 1,
@@ -54,16 +52,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         })
         .affected()
-        .execute(&mut conn)?;
+        .execute(&pool)?;
 
     let query = select::<Profile>()
         .filter(same_name_ci(Profile::NAME, "ADA"))
         .filter(Profile::SETTINGS.path("theme").text().eq("dark"))
         .all();
-    let rendered = rupa::sql::render_query(&query, &rupa::core::Sqlite)?;
+    let rendered = rupa::sql::render_query(&query, &rupa::Sqlite)?;
     assert_eq!(rendered.params.len(), 2);
     assert!(!rendered.sql.contains("'ADA'"));
-    assert_eq!(query.execute(&mut conn)?[0].id, 1);
+    assert_eq!(query.execute(&pool)?[0].id, 1);
 
     println!("custom DSL, JSON path and bound parameters passed");
     Ok(())

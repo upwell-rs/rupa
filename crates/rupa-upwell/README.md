@@ -6,7 +6,8 @@ The Upwell integration. A `database!` declaration gives an Upwell application:
 
 - a typed, separately configured database;
 - a pool component gated on its migrations;
-- its repositories as `Arc<dyn Trait>`;
+- every repository declared `#[repository(database = ..)]` over it, as
+  `Arc<dyn Trait>`;
 - its migration commands.
 
 ## Usage
@@ -14,7 +15,7 @@ The Upwell integration. A `database!` declaration gives an Upwell application:
 `rupa = { version = "0.1", features = ["upwell-database", "sqlite"] }`:
 
 ```rust,ignore
-#[repository]
+#[repository(database = Primary)]     // provided as Arc<dyn NoteRepository>
 pub trait NoteRepository: Send + Sync {
     #[query(order_by = id)]
     fn all(&self) -> Result<Vec<Note>, DynError>;
@@ -27,7 +28,6 @@ rupa::upwell::database! {
         config: "database.primary",
         migrations: db::migrations,
         command: "migrate",
-        repositories: [dyn NoteRepository],
     }
 }
 
@@ -70,16 +70,19 @@ user     = "migrator"         # optional migration credentials
 password = "${MIGRATOR_PASSWORD}"
 ```
 
-Nothing is registered per database: like `#[component]`, `database!` is
-discovered at link time. SQLite takes `path` (or `":memory:"`) instead of the
+Nothing is registered per database or repository: like `#[component]`,
+`database!` and `#[repository(database = ..)]` are discovered at link time.
+`Database<Primary>` is a `Connection` like its pool, so a component that
+injects it runs queries, transactions and repositories on it directly. SQLite takes `path` (or `":memory:"`) instead of the
 server fields. See
 [`docs/migrations.md`](../../docs/migrations.md#upwell-applications).
 
 ## Internal role
 
 - **Discovery.** `database!` registers itself at link time, like `#[component]`:
-  its config binding, component and repository providers go into Upwell's
-  `CONFIG_BINDINGS`, `COMPONENTS` and `PROVIDERS`. Its command goes into
+  its config binding and component go into Upwell's `CONFIG_BINDINGS` and
+  `COMPONENTS`, and `#[repository(database = ..)]` puts its provider into
+  `PROVIDERS`. Its command goes into
   rupa's `COMMANDS`, which the single `Migrations` plugin reads. Upwell has no
   link-time plugin discovery, so that one plugin is the only registration an
   application writes.
@@ -91,9 +94,12 @@ server fields. See
   runtime pool. Everything that injects it is therefore built afterwards.
 - **Modes.** Sync and async pools are dispatched with blanket impls over their
   `Connect::Completion` marker (`Immediate`, `Awaited`).
-- **Repositories.** Each listed repository is a provider: `ProviderOf<dyn
-  Trait>` builds the repository over a clone of the pool through
-  `DynRepository`.
+- **Connection.** `Database<D>` forwards the executor and transaction traits
+  to its pool, which makes it, `&Database<D>` and `Arc<Database<D>>`
+  connections.
+- **Repositories.** A repository declared over `D` is a provider:
+  `ProviderOf<dyn Trait>` builds it over the injected `Arc<Database<D>>`
+  itself through `DynRepository`; nothing is cloned.
 - **Commands.** The migration commands go through `rupa-migrate`'s command
   contract unchanged, at Upwell's Setup phase.
 

@@ -10,7 +10,7 @@ use super::*;
 /// The reverse: Item joined onto Review, naming the relation.
 ///
 /// The relation can be to any earlier source, here the second.
-pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &E) {
     seed(e).await;
 
     let rows = select::<Item>()
@@ -107,7 +107,7 @@ pub struct Reviewed {
     stars: i32,
 }
 
-pub async fn case_join_into_merged_struct<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_into_merged_struct<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = select::<Item>()
         .join::<Review>()
@@ -169,7 +169,7 @@ fn reviewed(min: i32) -> Vec<(Item, Review)>;
 fn uncommented() -> Vec<ItemReview>;
 
 /// Joins declared with `#[query]`.
-pub async fn case_join_query_attribute<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_query_attribute<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = reviewed(4).execute(e).await.unwrap();
     assert_eq!(rows, [(item(1), review(10)), (item(3), review(12))]);
@@ -216,7 +216,7 @@ pub struct StockPair {
 fn stock_pairs() -> Vec<StockPair>;
 
 /// The self-join of `case_join_self_left_join_decodes_none`, through aliases.
-pub async fn case_join_self_join_aliases<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_self_join_aliases<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = more_stock().execute(e).await.unwrap();
     let ids: Vec<_> = rows

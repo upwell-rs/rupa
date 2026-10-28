@@ -5,7 +5,6 @@
 #[path = "support/sqlite.rs"]
 mod sqlite;
 
-use rupa::Pool;
 use rupa::prelude::*;
 
 #[derive(Debug, Clone, Entity, Insertable)]
@@ -44,9 +43,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         ])
         .affected()
-        .execute(&mut pool.get()?)?;
+        .execute(&pool)?;
 
-    let messages = MessagesView::new(&pool);
+    let messages = MessagesRepo::new(&pool);
     let first = messages.by_id(1)?.expect("message 1 exists");
     assert_eq!(first.body, "hello");
     assert_eq!(messages.with_read_state(true)?[0].id, 2);

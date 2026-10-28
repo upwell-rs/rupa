@@ -40,7 +40,7 @@ use crate::{SqliteError, SqliteExecutor};
 /// A connection checked out of a [`SqlitePool`].
 pub type SqliteConn = Pooled<r2d2::PooledConnection<SqliteManager>>;
 
-/// A transaction that owns its pooled connection (see [`Pool::begin`](rupa_core::pool::Pool::begin)).
+/// A transaction that owns its pooled connection (what `begin` on the pool returns).
 pub type SqlitePoolTx = OwnedTx<SqliteConn>;
 
 type InitFn = dyn Fn(&mut rusqlite::Connection) -> rusqlite::Result<()> + Send + Sync;

@@ -110,7 +110,7 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-/// A repository trait with a distinct owned type and borrowed view.
+/// A repository trait, and one repository type over any connection.
 ///
 /// ```ignore
 /// #[repository]
@@ -122,11 +122,14 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     fn active(&self, active: bool) -> Result<Vec<User>, DynError>;  // blocks in place
 /// }
 ///
-/// let users = UserRepositoryView::new(&pool);
+/// let users = UserRepositoryRepo::new(&pool);
+/// let tx = pool.begin().await?;
+/// UserRepositoryRepo::new(&tx).by_email("ada@x").await?;
 /// ```
 ///
 /// See the `rupa_macros::repository` module docs for the rules on receivers,
-/// sync/async methods, errors and the optional `static_dispatch`. Async methods
+/// sync/async methods, errors and the options `static_dispatch` and
+/// `database = ..` (an Upwell provider). Async methods
 /// return boxed futures by default, so the trait is dyn-compatible.
 ///
 /// Keep the trait so code using it still resolves; only the
@@ -158,7 +161,7 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     .join::<Coupon>().left()
 ///     .into::<OrderLine>()
 ///     .all()
-///     .execute(&mut db)?;
+///     .execute(&db)?;
 /// ```
 ///
 /// Every field says where it comes from; nothing is matched by name. Only

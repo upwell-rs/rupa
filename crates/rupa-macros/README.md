@@ -27,9 +27,10 @@ field fails as "not a scalar column type" unless marked `#[column(json)]`.
 Repositories are dyn-compatible by default: async methods return boxed
 futures, so the trait works as `Arc<dyn Trait>`, which DI frameworks inject.
 `#[repository(static_dispatch)]` opts into native, unboxed futures for a trait
-used only through its generated `Repo`/`View` types.
-`&mut self` query methods borrow a connection or transaction directly;
-`&self` methods acquire from a pool or an explicitly shared context.
+used only through its generated `Repo` type. Each trait gets one repository
+type, `{Trait}Repo<C>`, over any `Connection` `C`; query methods take `&self`.
+With the `upwell` feature, `#[repository(database = Primary)]` also registers
+the repository as an Upwell provider over that declared database.
 
 Raw `#[query(sql = "...")]` statements use `$name` parameters outside quotes
 and comments. Backslashes immediately before a closing or escaped quote are
@@ -43,10 +44,11 @@ Bind such values as parameters, or use SQL's doubled quotes for literal quotes.
 - `dsl` parses the filter grammar shared by `#[query]` and `on!`.
 - `query` turns a declared signature into a `Query<R>` builder expression
   (`attr` grammar, `ctx` filter codegen, `join`, `crud`, `raw` SQL).
-- `repository` generates a distinct owned repository and borrowed view from its `#[query]` methods.
+- `repository` generates the repository type over a connection from its `#[query]` methods, and its Upwell provider registration.
 
 ## Feature flags
 
 | feature | adds |
 |---|---|
 | `async` | `async fn` methods in `#[repository]` (set by the facade's `async`) |
+| `upwell` | `#[repository(database = ..)]` Upwell providers (set by the facade's `upwell-database`) |

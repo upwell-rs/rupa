@@ -3,7 +3,7 @@
 use std::fmt::Write as _;
 
 use chrono::{DateTime, Utc};
-use rupa::core::Postgres;
+use rupa::Postgres;
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
 use serde::{Deserialize, Serialize};
@@ -113,25 +113,22 @@ fn queries_run_on_memory() {
     insert::<User>()
         .values(&users)
         .affected()
-        .execute(&mut db)
+        .execute(&db)
         .unwrap();
 
     let ids = |v: Vec<User>| v.into_iter().map(|u| u.id).collect::<Vec<_>>();
     assert_eq!(
-        by_email("bob@x").execute(&mut db).unwrap().map(|u| u.id),
+        by_email("bob@x").execute(&db).unwrap().map(|u| u.id),
         Some(2)
     );
     assert_eq!(
-        ids(active_by_theme(true, "dark").execute(&mut db).unwrap()),
+        ids(active_by_theme(true, "dark").execute(&db).unwrap()),
         [2, 1]
     );
-    assert_eq!(
-        ids(named_or_listed(&[3]).execute(&mut db).unwrap()),
-        [1, 3, 4]
-    );
-    assert_eq!(ids(page("%@x", 2, 1).execute(&mut db).unwrap()), [2, 4]);
-    assert_eq!(ids(beta_after(true, 1).execute(&mut db).unwrap()), [2, 4]);
-    assert!(email_taken("di@x").execute(&mut db).unwrap());
-    assert!(!email_taken("zed@x").execute(&mut db).unwrap());
-    assert_eq!(exactly(3).execute(&mut db).unwrap().email, "cy@y");
+    assert_eq!(ids(named_or_listed(&[3]).execute(&db).unwrap()), [1, 3, 4]);
+    assert_eq!(ids(page("%@x", 2, 1).execute(&db).unwrap()), [2, 4]);
+    assert_eq!(ids(beta_after(true, 1).execute(&db).unwrap()), [2, 4]);
+    assert!(email_taken("di@x").execute(&db).unwrap());
+    assert!(!email_taken("zed@x").execute(&db).unwrap());
+    assert_eq!(exactly(3).execute(&db).unwrap().email, "cy@y");
 }

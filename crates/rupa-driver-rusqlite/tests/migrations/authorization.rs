@@ -91,7 +91,7 @@ fn internal_sequence_names_cannot_be_reassigned_and_user_autoincrement_tables_ca
 fn migration_support_does_not_make_native_transaction_methods_ambiguous() {
     use rupa::{Transaction, Transactional};
 
-    let mut connection = memory_runner();
+    let connection = memory_runner();
 
     let transaction = connection.begin().expect("ordinary native transaction");
     transaction.rollback().expect("ordinary native rollback");

@@ -32,7 +32,7 @@ impl Io for PgExecutor {
         let params = params(bound);
         let refs: Vec<&(dyn ToSql + Sync)> =
             params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
-        let rows = self.client.query(sql, &refs)?;
+        let rows = self.client().query(sql, &refs)?;
 
         values(&rows, columns)
     }
@@ -42,11 +42,11 @@ impl Io for PgExecutor {
         let refs: Vec<&(dyn ToSql + Sync)> =
             params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
 
-        Ok(self.client.execute(sql, &refs)?)
+        Ok(self.client().execute(sql, &refs)?)
     }
 
     fn batch(&mut self, sql: &str) -> Result<(), PgError> {
-        Ok(self.client.batch_execute(sql)?)
+        Ok(self.client().batch_execute(sql)?)
     }
 
     fn clean(&mut self) -> Result<(), PgError> {

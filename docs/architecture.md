@@ -49,7 +49,7 @@ pub trait Users: Send + Sync {
 }
 
 let pool = SqlitePool::connect(&config)?;
-let users = UsersView::new(&pool);
+let users = UsersRepo::new(&pool);
 users.by_email("a@b.c")?;
 ```
 
@@ -64,18 +64,22 @@ is selected at compile time from the field type
 (`rupa-core/src/column/__private.rs`): scalar for `ScalarColumn` types,
 nullable JSON for `Option` of a serde type, JSON for any other serde type.
 
-`#[repository]` (`rupa-macros/src/repository.rs`) emits the trait, a unique
-`UsersKey`, a borrowed `UsersView<'_, S>`, and an owned `UsersRepo<S>`.
-The key prevents unrelated repository traits from accumulating on one
-concrete type. Owned handles and borrowed views share one implementation.
-The query declarations select sync or async execution at compile time, so both
-use `begin`, `begin_with`, and `begin_with_security` without method suffixes.
-These return native transactions directly. `&mut self` query methods borrow an
-executor or transaction exclusively; `&self` methods acquire from a pool or an
-explicitly shared session. `Blocking` is the explicit adapter for a sync driver
-used through async traits; the adapter itself adds no locks. Repository traits are dyn-compatible by default, with boxed async futures;
-`#[repository(static_dispatch)]` opts into unboxed futures. Dynamic `Database`
-implements the same transaction-source contract as native pools.
+`#[repository]` (`rupa-macros/src/repository.rs`) emits the trait and one
+repository type, `UsersRepo<C>`, which holds a `Connection` `C`: here
+`&SqlitePool`, but equally a single connection, a transaction, or an `Arc`,
+`Box` or `Rc` of any of them. Two repositories share a transaction by holding
+`&tx`. The query declarations select sync or async execution at compile time:
+a sync repository runs on `Connection<Mode = Immediate>`, an async one on
+every `Sync` connection, sync ones included. Repository traits are
+dyn-compatible by default, with boxed async futures;
+`#[repository(static_dispatch)]` opts into unboxed futures.
+
+`Connection` (`rupa-core/src/connection.rs`) is implemented for every
+transactional engine through its mode, never by drivers: `run` a statement and
+`begin_tx` a transaction, both returning futures. A sync engine's futures are
+`ready`, and `now` takes their value. Drivers implement the mode's own traits
+through `&self` (`Executor`, `TxConnection`, `Transactional`, or their async
+twins); a driver whose native API needs `&mut` serializes inside its executor.
 
 For each method:
 
@@ -84,17 +88,15 @@ For each method:
   .optional()`. The filter grammar is parsed by `dsl.rs` and turned into
   `Expr` code by `query/ctx.rs`. The result type (`Option<User>`) picks the
   terminal (`.optional()`) in `query/signature.rs`.
-- An `&self` method acquires from a pool or transaction session. Acquisition
-  and execution errors pass through `DynError`; the declared error type only
-  needs `From<DynError>`. An `&mut self` method runs on the borrowed executor
-  directly. Sync or async is decided by whether any method is `async`.
+- The method runs the query on its connection. Execution errors pass through
+  `DynError`; the declared error type only needs `From<DynError>`. Sync or
+  async is decided by whether any method is `async`.
 
 So the method body is roughly:
 
 ```rust
 let __query = select::<User>().filter(User::EMAIL.eq(email)).optional();
-let mut __conn = Acquire::acquire(self.source()).map_err(ExecError::into_dyn_error)?;
-Ok(__query.execute(&mut __conn).map_err(ExecError::into_dyn_error)?)
+now(complete(&self.0, __query)).map_err(|e| E::from(ExecError::into_dyn_error(e)))
 ```
 
 ### 2. Building: a `Query<R>` value, no IO
@@ -111,19 +113,19 @@ statement plus `Expect::AtMostOne`, so the driver can stop after two rows.
 
 ### 3. Checking out a connection
 
-`SqlitePool` implements `Pool` through `rupa_core::r2d2_pool!`
-(`rupa-core/src/pool/r2d2.rs`), and every `Pool` is an `Acquire` source
-(`pool/mod.rs`). `acquire()` returns a `Pooled<r2d2::PooledConnection<..>>`,
-which forwards `Executor` to the `SqliteExecutor` inside and returns the
-connection to the pool when dropped.
+`SqlitePool` implements `Pool`, and through `pool_executor!` the executor
+traits, in `rupa_core::r2d2_pool!` (`rupa-core/src/pool/r2d2.rs`): its
+`execute` checks out a `Pooled<r2d2::PooledConnection<..>>`, which forwards
+`Executor` to the `SqliteExecutor` inside, runs the statement on it and
+returns the connection to the pool when dropped.
 
 ### 4. Executing: render (cached), prepare (cached), run
 
 `Query::execute` (`rupa-core/src/exec/engine.rs`) hands the query to the
 engine's `Completion`, which calls the driver's `execute(statement, expect)`
-and decodes the `Outcome`. Generated async repository methods use the
-unboxed `complete_unboxed` instead: a `static_dispatch` method's future stays
-unboxed, and a dyn method boxes only its own future.
+and decodes the `Outcome`. Repository methods call `Connection::run` through
+`complete` instead: a `static_dispatch` method's future stays unboxed, and a
+dyn method boxes only its own future.
 `SqliteExecutor::dispatch` (`rupa-driver-rusqlite/src/lib.rs`):
 
 1. `clean()`: sends a rollback still owed by a transaction dropped earlier

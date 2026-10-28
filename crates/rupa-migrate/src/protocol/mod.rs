@@ -141,7 +141,9 @@ pub trait SqlState {
 
 /// Implements a migration `Session` on a driver's executor by forwarding to
 /// an engine protocol: `__session!(sync, postgres, PgExecutor)`. The executor
-/// implements the mode's [`Io`](sync::Io) with the engine's `State`.
+/// implements the mode's [`Io`](sync::Io) with the engine's `State`, and an
+/// inherent `execute_migration_statement(&mut self, statement, expect)` for
+/// the typed statements of migration bodies.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __session {
@@ -220,6 +222,14 @@ macro_rules! __session {
 
             $($async)* fn script(&mut self, sql: &str) -> Result<(), $crate::Error<<Self as $crate::protocol::$mode::Io>::Error>> {
                 $crate::protocol::$engine::$mode::script(self, sql) $($await)*
+            }
+
+            $($async)* fn user_statement(
+                &mut self,
+                statement: &$crate::__core::ir::Statement,
+                expect: $crate::__core::query::Expect,
+            ) -> Result<$crate::__core::exec::Outcome, <Self as $crate::protocol::$mode::Io>::Error> {
+                <$executor>::execute_migration_statement(self, statement, expect) $($await)*
             }
 
             $($async)* fn recover(

@@ -2,7 +2,7 @@
 
 use std::convert::Infallible;
 
-use rupa::core::sync::Connection;
+use rupa::Executor as Connection;
 use rupa::migrate::Catalog;
 use rupa::migrate::commands::{self, Command, Outcome};
 use rupa::migrate::sync::{Adopt, Apply, Inspect, Migration, Recover, Revert, Session};
@@ -13,7 +13,7 @@ use super::{catalog, versions};
 /// A migration target handing out independent dedicated sync connections.
 pub trait Harness: Target {
     /// The driver's native migration connection.
-    type Session: Session + Send;
+    type Session: Session + Send + Sync;
 
     /// Opens an independent connection to the target. Lock waits should be
     /// short, since exclusion cases expect a busy competitor to give up.

@@ -36,9 +36,8 @@
 //!
 //! # Transactions
 //!
-//! [`SqlxExecutor`] is an [`AsyncTxConnection`], so it is
-//! [`AsyncTransactional`](rupa_core::tx::AsyncTransactional): `begin`
-//! returns a [`SqlxTx`], and `begin` on that opens a savepoint. Transaction
+//! [`SqlxExecutor`] is an [`AsyncTxConnection`] and [`AsyncTransactional`]:
+//! `begin` returns a [`SqlxTx`], and `begin` on that opens a savepoint. Transaction
 //! control is rendered by rupa (isolation levels, read-only, savepoints) and
 //! sent as plain SQL; sqlx's own `Transaction` type is not involved. A
 //! `SqlxTx` dropped while open marks the executor dirty, and the rollback is
@@ -68,12 +67,15 @@ mod rows;
 pub mod sqlite;
 
 use std::fmt;
+use std::future::Future;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use futures_util::lock::{Mutex, MutexGuard};
 use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{AsyncTx, AsyncTxConnection, PendingRollback};
+use rupa_core::tx::{AsyncTransactional, AsyncTx, AsyncTxConnection, PendingRollback, TxOptions};
 use rupa_core::{Dialect, RowError, SqlType, Value};
 use sqlx::{Arguments as _, Connection as _};
 
@@ -209,14 +211,19 @@ pub(crate) use sqlx_io;
 
 /// A transaction (or savepoint) on a [`SqlxExecutor`]. Dropped while open, it
 /// leaves the rollback to the executor (see the crate docs).
-pub type SqlxTx<'t, DB> = AsyncTx<&'t mut SqlxExecutor<DB>>;
+pub type SqlxTx<'t, DB> = AsyncTx<&'t SqlxExecutor<DB>>;
 
 /// Executes queries on one sqlx connection.
+///
+/// sqlx runs a statement through `&mut` on its connection, so the executor
+/// holds it behind an async lock, taken for each statement. That makes a
+/// single executor, and a transaction on it, shareable by reference across
+/// tasks; prefer [`SqlxPool`] when tasks query concurrently.
 pub struct SqlxExecutor<DB: Backend> {
-    conn: DB::Connection,
+    conn: Mutex<DB::Connection>,
     dialect: DB::Dialect,
     pending: PendingRollback,
-    broken: bool,
+    broken: AtomicBool,
     #[cfg(feature = "migrations")]
     migration: DB::Migration,
 }
@@ -225,10 +232,10 @@ impl<DB: Backend> SqlxExecutor<DB> {
     /// Wraps a connection.
     pub fn new(conn: DB::Connection) -> Self {
         Self {
-            conn,
+            conn: Mutex::new(conn),
             dialect: DB::Dialect::default(),
             pending: PendingRollback::default(),
-            broken: false,
+            broken: AtomicBool::new(false),
             #[cfg(feature = "migrations")]
             migration: DB::Migration::default(),
         }
@@ -243,53 +250,75 @@ impl<DB: Backend> SqlxExecutor<DB> {
     /// the pending-rollback check; call [`clean`](AsyncTxConnection::clean)
     /// first.
     pub fn connection(&mut self) -> &mut DB::Connection {
-        &mut self.conn
+        self.conn.get_mut()
     }
 
     /// The underlying connection.
     pub fn into_inner(self) -> DB::Connection {
-        self.conn
+        self.conn.into_inner()
     }
 
     /// The number of prepared statements sqlx keeps for this connection.
-    pub fn cached_statements(&self) -> usize {
-        self.conn.cached_statements_size()
+    pub fn cached_statements(&mut self) -> usize {
+        self.conn.get_mut().cached_statements_size()
     }
 
     /// Whether a statement failed in a way that leaves the connection
     /// unusable (see [`SqlxError::is_fatal`]). Pools discard such
     /// connections.
     pub fn is_broken(&self) -> bool {
-        self.broken
+        self.broken.load(Ordering::Acquire)
     }
 
     /// Runs a `;`-separated script without binding or preparing, e.g. DDL
     /// or fixtures. Sends an owed rollback first.
-    pub async fn script(&mut self, sql: &str) -> Result<(), SqlxError> {
-        self.clean().await?;
-        let result = DB::script(&mut self.conn, sql).await;
+    pub async fn script(&self, sql: &str) -> Result<(), SqlxError> {
+        let mut conn = self.lock().await;
+
+        self.clean_on(&mut conn).await?;
+
+        let result = DB::script(&mut conn, sql).await;
+
         result.map_err(|e| self.failed(e))
+    }
+
+    /// The connection, for one statement.
+    async fn lock(&self) -> MutexGuard<'_, DB::Connection> {
+        self.conn.lock().await
+    }
+
+    /// Sends the rollback a dropped transaction owes, on the locked `conn`.
+    async fn clean_on(&self, conn: &mut DB::Connection) -> Result<(), SqlxError> {
+        if let Some(statement) = self.pending.statement() {
+            let sql = rupa_sql::render_tx(&statement, &self.dialect)?;
+            let result = DB::script(conn, &sql).await;
+
+            result.map_err(|e| self.failed(e))?;
+            self.pending.clear();
+        }
+
+        Ok(())
     }
 
     /// Rendered SQL is cached by statement shape; sqlx caches prepared
     /// statements by SQL text: a repeated query skips both.
-    async fn dispatch(
-        &mut self,
-        statement: &Statement,
-        expect: Expect,
-    ) -> Result<Outcome, SqlxError> {
-        self.clean().await?;
+    async fn dispatch(&self, statement: &Statement, expect: Expect) -> Result<Outcome, SqlxError> {
+        let mut conn = self.lock().await;
+
+        self.clean_on(&mut conn).await?;
+
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let args = arguments::<DB>(&rendered.params)?;
         let result = if expect == Expect::Affected {
-            DB::execute(&mut self.conn, rendered.sql, args)
+            DB::execute(&mut conn, rendered.sql, args)
                 .await
                 .map(Outcome::Affected)
         } else {
-            DB::fetch(&mut self.conn, rendered.sql, args, expect.fetch_limit())
+            DB::fetch(&mut conn, rendered.sql, args, expect.fetch_limit())
                 .await
                 .map(|rows| Outcome::Rows(Box::new(SqlxRows::<DB>::new(rows))))
         };
+
         result.map_err(|e| self.failed(e))
     }
 
@@ -305,9 +334,13 @@ impl<DB: Backend> SqlxExecutor<DB> {
         active
     }
 
-    fn failed(&mut self, e: impl Into<SqlxError>) -> SqlxError {
+    fn failed(&self, e: impl Into<SqlxError>) -> SqlxError {
         let e = e.into();
-        self.broken |= e.is_fatal();
+
+        if e.is_fatal() {
+            self.broken.store(true, Ordering::Release);
+        }
+
         e
     }
 }
@@ -325,13 +358,19 @@ fn arguments<DB: Backend>(values: &[Value]) -> Result<DB::Arguments, SqlxError> 
     Ok(args)
 }
 
+/// The statement count is left out while a statement holds the connection.
 impl<DB: Backend> fmt::Debug for SqlxExecutor<DB> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let cached = self
+            .conn
+            .try_lock()
+            .map(|conn| conn.cached_statements_size());
+
         f.debug_struct("SqlxExecutor")
             .field("database", &DB::NAME)
             .field("dirty", &self.pending.is_pending())
-            .field("broken", &self.broken)
-            .field("cached_statements", &self.cached_statements())
+            .field("broken", &self.is_broken())
+            .field("cached_statements", &cached)
             .finish_non_exhaustive()
     }
 }
@@ -348,30 +387,22 @@ impl<DB: Backend> AsyncExecutor for SqlxExecutor<DB> {
         &self.dialect
     }
 
-    async fn execute(
-        &mut self,
-        statement: &Statement,
-        expect: Expect,
-    ) -> Result<Outcome, SqlxError> {
+    async fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, SqlxError> {
         #[cfg(feature = "migrations")]
-        if migrations::Engine::is_running(&self.migration) {
-            return <DB::Migration as migrations::Engine<DB>>::user_statement(
-                self, statement, expect,
-            )
-            .await;
-        }
+        migrations::Engine::outside_run(&self.migration)?;
 
         self.dispatch(statement, expect).await
     }
 }
 
 impl<DB: Backend> AsyncTxConnection for SqlxExecutor<DB> {
-    async fn control(&mut self, statement: TxStatement) -> Result<(), SqlxError> {
+    async fn control(&self, statement: TxStatement) -> Result<(), SqlxError> {
         let sql = rupa_sql::render_tx(&statement, &self.dialect)?;
+
         self.script(&sql).await
     }
 
-    fn defer_rollback(&mut self, depth: u32) {
+    fn defer_rollback(&self, depth: u32) {
         self.pending.defer(depth);
     }
 
@@ -379,14 +410,22 @@ impl<DB: Backend> AsyncTxConnection for SqlxExecutor<DB> {
         self.pending.is_pending()
     }
 
-    async fn clean(&mut self) -> Result<(), SqlxError> {
-        if let Some(statement) = self.pending.statement() {
-            let sql = rupa_sql::render_tx(&statement, &self.dialect)?;
-            let result = DB::script(&mut self.conn, &sql).await;
-            result.map_err(|e| self.failed(e))?;
-            self.pending.clear();
+    async fn clean(&self) -> Result<(), SqlxError> {
+        if !self.pending.is_pending() {
+            return Ok(());
         }
 
-        Ok(())
+        self.clean_on(&mut *self.lock().await).await
+    }
+}
+
+impl<DB: Backend> AsyncTransactional for SqlxExecutor<DB> {
+    type Tx<'t> = SqlxTx<'t, DB>;
+
+    fn begin_with(
+        &self,
+        options: TxOptions,
+    ) -> impl Future<Output = Result<SqlxTx<'_, DB>, SqlxError>> + Send {
+        AsyncTx::begin(self, options)
     }
 }

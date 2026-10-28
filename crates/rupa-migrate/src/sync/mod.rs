@@ -2,7 +2,9 @@
 //! `asynchronous`; the import selects the mode.
 
 use rupa_core::dialect::Dialect;
-use rupa_core::sync::Connection;
+use rupa_core::exec::{Executor, Outcome};
+use rupa_core::ir::Statement;
+use rupa_core::query::Expect;
 
 use crate::runner::mode;
 use crate::{
@@ -17,7 +19,7 @@ use crate::{
 /// must atomically record transactional effects/history and retain exclusion
 /// across artifact commits. Dropping an interrupted session must close its
 /// connection; an unresolved durable claim must never expire automatically.
-pub trait Session: Connection {
+pub trait Session: Executor {
     /// The execution policies this session can honour. A catalog containing
     /// any other policy is rejected before the target is touched; a policy is
     /// never downgraded.
@@ -78,6 +80,14 @@ pub trait Session: Connection {
 
     /// Executes an authorized user script on this session's current transaction.
     fn script(&mut self, sql: &str) -> Result<(), Error<Self::Error>>;
+
+    /// Runs a typed statement from a migration body, under the same
+    /// authorization as its scripts, inside the attempt's transaction.
+    fn user_statement(
+        &mut self,
+        statement: &Statement,
+        expect: Expect,
+    ) -> Result<Outcome, Self::Error>;
 
     /// Records an operator's `recovery` assertion under newly acquired
     /// exclusion, with `entries` as the catalog the assertion is checked
@@ -148,7 +158,7 @@ pub trait Session: Connection {
 
 /// Exclusive query/script access without transaction, connection or lock escape hatches.
 pub struct Context<'a, S: Session> {
-    pub(crate) session: &'a mut S,
+    pub(crate) session: std::cell::RefCell<&'a mut S>,
     /// The checksummed plan of the running direction, if the entry is planned.
     pub(crate) plan: Option<&'a Plan>,
     /// Set by the default [`Migration::down`]: the entry declared a down
@@ -178,12 +188,12 @@ pub trait Migration<S: Session>: MigrationInfo {
 
 /// What applying a catalog of `M` on session `S` returns.
 pub type ApplyResult<S, M> =
-    Result<ApplyReport, RunError<<S as Connection>::Error, <M as Migration<S>>::Error>>;
+    Result<ApplyReport, RunError<<S as Executor>::Error, <M as Migration<S>>::Error>>;
 
 /// What reverting a catalog of `M` on session `S` returns.
 pub type RevertResult<S, M> = Result<
     RevertReport,
-    RunError<<S as Connection>::Error, <M as Migration<S>>::Error, RevertReport>,
+    RunError<<S as Executor>::Error, <M as Migration<S>>::Error, RevertReport>,
 >;
 
 /// Applies a catalog on a dedicated native connection, then closes it.

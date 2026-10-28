@@ -44,23 +44,33 @@ pub trait UserRepository: Send + Sync {
 }
 
 let db = PgPool::connect(&DbConfig::new("postgres://app@localhost/app")).await?;   // a pool
-let users = UserRepositoryView::new(&db);
+let users = UserRepositoryRepo::new(&db);
 ```
 
-Queries run on an engine with `execute`. The engine decides whether to
+Everything a statement runs on is a `Connection`: a pool, a single
+connection, a transaction, and any `&`, `&mut`, `Box`, `Rc` or `Arc` of one.
+Queries run on one with `execute`, and the connection decides whether to
 `.await`:
 
 ```rust
-let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&mut conn)?;       // sync
-let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&mut pg).await?;   // async
+let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&pool)?;       // sync
+let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&tx).await?;   // async
+```
+
+A repository holds one connection, so repositories share a transaction by
+borrowing it, and `commit` takes the transaction once they are done:
+
+```rust
+let tx = pool.begin().await?;
+NoteWritesRepo::new(&tx).add(&note).await?;
+NoteReadsRepo::new(&tx).all().await?;
+tx.commit().await?;
 ```
 
 Repository traits are dyn-compatible by default, so they can be injected as
 `Arc<dyn Trait>`. Use `#[repository(static_dispatch)]` for native, unboxed
-futures when the trait is only used through its generated `Repo`/`View` types.
-Repositories open native transactions with `begin` and `begin_with_security`;
-exclusive `&mut self` queries borrow those transactions directly. Shared
-`&self` transaction views use an explicit `TxSession` or `AsyncTxSession`.
+futures when the trait is only used through its generated `Repo` type. Async
+repositories run on sync connections too, without an adapter.
 
 ## Examples
 
@@ -75,10 +85,10 @@ no database server, Docker, or database file.
 | [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
 | [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
 | [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |
-| [Repository transaction](crates/rupa/examples/sqlite_repository_tx.rs) | Two repository views sharing one transaction, explicit rollback and commit | `cargo run -p rupa --example sqlite_repository_tx --features sqlite` |
+| [Repository transaction](crates/rupa/examples/sqlite_repository_tx.rs) | Two repositories sharing one transaction by reference, explicit rollback and commit | `cargo run -p rupa --example sqlite_repository_tx --features sqlite` |
 | [DSL and JSON](crates/rupa/examples/sqlite_dsl.rs) | Custom DSL lowering, JSON paths, dialect rendering, bound parameters | `cargo run -p rupa --example sqlite_dsl --features sqlite` |
 | [Dynamic connection](crates/rupa/examples/sqlite_config.rs) | `DbConfig`, runtime driver selection, raw DDL, async pooled repository | `cargo run -p rupa --example sqlite_config --features sqlite,dynamic` |
-| [Async companion](crates/rupa/examples/sqlite_async.rs) | The same `Task` and repository view API on an async transaction | `cargo run -p rupa --example sqlite_async --features sqlx-sqlite` |
+| [Async companion](crates/rupa/examples/sqlite_async.rs) | The same `Task` model and a repository on an async pool and transaction | `cargo run -p rupa --example sqlite_async --features sqlx-sqlite` |
 
 The main examples use synchronous SQLite. The async companion shows API parity
 with a native async driver; for SQLite workloads, the synchronous driver is
@@ -158,10 +168,9 @@ acquire_timeout = "5s"
 
 ```rust
 let db: rupa::Database = rupa::connect(&config.database).await?;   // `dynamic`
-let tx = UserRepositoryView::new(&db).begin().await?;
-let session = rupa::AsyncTxSession::new(tx);
-UserRepositoryView::new(&session).create(&new_user).await?;
-session.commit().await?;
+let tx = db.begin().await?;
+UserRepositoryRepo::new(&tx).create(&new_user).await?;
+tx.commit().await?;
 ```
 
 `Database` (feature `dynamic`) is a cheaply cloneable, type-erased pool.

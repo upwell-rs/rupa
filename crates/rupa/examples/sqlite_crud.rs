@@ -7,24 +7,19 @@ mod sqlite;
 #[path = "support/task.rs"]
 mod task;
 
-use rupa::Pool;
 use rupa::prelude::*;
 use task::{NewTask, Task, TaskPatch};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = sqlite::open(task::SCHEMA)?;
-    let mut conn = pool.get()?;
     let task = insert::<Task>()
         .value(&NewTask {
             title: "write examples".into(),
             done: false,
         })
         .returning_one()
-        .execute(&mut conn)?;
-    assert_eq!(
-        get::<Task>(&task.id).execute(&mut conn)?,
-        Some(task.clone())
-    );
+        .execute(&pool)?;
+    assert_eq!(get::<Task>(&task.id).execute(&pool)?, Some(task.clone()));
 
     update::<Task>()
         .one(&TaskPatch {
@@ -32,28 +27,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             done: Some(true),
         })
         .affected()
-        .execute(&mut conn)?;
+        .execute(&pool)?;
     assert_eq!(
         select::<Task>()
             .filter(Task::DONE.eq(true))
             .all()
-            .execute(&mut conn)?
+            .execute(&pool)?
             .len(),
         1
     );
 
     {
-        let mut tx = conn.begin()?;
-        delete::<Task>()
-            .by_id(&task.id)
-            .affected()
-            .execute(&mut tx)?;
+        let tx = pool.begin()?;
+        delete::<Task>().by_id(&task.id).affected().execute(&tx)?;
     }
-    assert!(get::<Task>(&task.id).execute(&mut conn)?.is_some());
+    assert!(get::<Task>(&task.id).execute(&pool)?.is_some());
 
-    let removed = conn.transaction(|tx| delete::<Task>().by_id(&task.id).affected().execute(tx))?;
+    let removed = pool.transaction(|tx| delete::<Task>().by_id(&task.id).affected().execute(tx))?;
     assert_eq!(removed, 1);
-    assert!(get::<Task>(&task.id).execute(&mut conn)?.is_none());
+    assert!(get::<Task>(&task.id).execute(&pool)?.is_none());
 
     println!("insert, get, filter, patch, rollback, commit and delete passed");
     Ok(())

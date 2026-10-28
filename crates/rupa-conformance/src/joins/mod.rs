@@ -7,7 +7,7 @@ use super::*;
 
 pub use declared::*;
 
-pub(super) async fn seed<E: AsyncExecutor>(e: &mut E) {
+pub(super) async fn seed<E: AsyncExecutor>(e: &E) {
     insert::<Item>()
         .values(&items())
         .affected()
@@ -51,7 +51,7 @@ pub(super) fn pairs(rows: &[(Item, Option<Review>)]) -> Vec<(i64, Option<i64>)> 
 /// cherry doesn't match the pattern, and the DSL call `ci_eq` drops banana.
 ///
 /// `$variables` are borrowed and cloned, so they are still usable.
-pub async fn case_join_on_macro<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_on_macro<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = select::<Item>()
         .inner_join_on::<Review>(rupa::on!(Review::item_id == Item::id))
@@ -90,7 +90,7 @@ pub async fn case_join_on_macro<E: AsyncExecutor>(e: &mut E) {
 }
 
 /// Whole entities on both sides, including JSON and timestamp columns.
-pub async fn case_join_inner<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_inner<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = select::<Item>()
         .inner_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
@@ -110,7 +110,7 @@ pub async fn case_join_inner<E: AsyncExecutor>(e: &mut E) {
 }
 
 /// Items without reviews: the unmatched side's id is NULL.
-pub async fn case_join_left<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_left<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = select::<Item>()
         .left_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
@@ -145,7 +145,7 @@ pub async fn case_join_left<E: AsyncExecutor>(e: &mut E) {
 /// Postgres ordering on every backend: descending puts left-join NULLs first.
 ///
 /// Limit and offset apply to joined rows.
-pub async fn case_join_filter_and_order_on_joined_columns<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_filter_and_order_on_joined_columns<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = select::<Item>()
         .inner_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
@@ -193,7 +193,7 @@ pub async fn case_join_filter_and_order_on_joined_columns<E: AsyncExecutor>(e: &
 /// A self-join: each item with the labelled items that have more stock.
 /// Unmatched rows decode as `None` even though `Item` has non-null JSON and
 /// timestamp columns, which come back as `NULL`.
-pub async fn case_join_self_left_join_decodes_none<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_self_left_join_decodes_none<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = select::<Item>()
         .left_join_on::<Item>(|(a, b)| {
@@ -226,7 +226,7 @@ pub async fn case_join_self_left_join_decodes_none<E: AsyncExecutor>(e: &mut E) 
 
 /// The third source's condition refers to the second: each review with a
 /// later review of the same item.
-pub async fn case_join_three_sources<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_three_sources<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let rows = select::<Item>()
         .inner_join_on::<Review>(|(i, r)| r.col(Review::ITEM_ID).eq(i.col(Item::ID)))
@@ -252,7 +252,7 @@ pub async fn case_join_three_sources<E: AsyncExecutor>(e: &mut E) {
 }
 
 /// A plain column (no source handle) refers to the first source.
-pub async fn case_join_single_row_shapes_and_exists<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_single_row_shapes_and_exists<E: AsyncExecutor>(e: &E) {
     seed(e).await;
     let joined = || {
         select::<Item>()

@@ -79,7 +79,7 @@ where
     }
 
     fn execute(&self, sql: &str) {
-        let mut inspector = self.inspector();
+        let inspector = self.inspector();
 
         self.runtime
             .block_on(inspector.script(sql))

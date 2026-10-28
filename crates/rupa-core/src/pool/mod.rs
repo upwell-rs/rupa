@@ -3,14 +3,17 @@
 //! rupa doesn't implement pooling itself: each driver crate wraps an
 //! established pool (`r2d2` for sync drivers, `deadpool` for async ones)
 //! behind its `pool` cargo feature, and implements [`Pool`] or [`AsyncPool`]
-//! for it. In return the pool gets, from here:
+//! for it, plus the executor traits through [`pool_executor!`](crate::pool_executor).
+//! A pool is then a [`Connection`](crate::connection::Connection) like any
+//! other:
 //!
-//! - [`Acquire`] / [`AcquireAsync`](crate::repo::AcquireAsync), so repository views run queries through the pool
-//!   repositories with one pooled connection per call;
-//! - **owned transactions** (`pool.begin().await?`): an [`AsyncTx`](crate::tx::AsyncTx) that holds
-//!   its pooled connection, so it is `'static` and can live in a request
-//!   scope. Dropping one returns the connection to the pool;
-//! - `begin_with_security`, statically gated like the executor version;
+//! - every statement runs on a connection checked out for it, so
+//!   `query.execute(&pool)` and repositories over the pool need no lock;
+//! - **owned transactions** (`pool.begin()?`): a [`Tx`] that holds its
+//!   pooled connection, so it is `'static` and can live in a request scope.
+//!   Dropping one returns the connection to the pool;
+//! - `begin_with_security`, statically gated like every transactional
+//!   executor's;
 //! - type erasure, through [`Database::new`](crate::registry::Database::new).
 //!
 //! # Dirty connections
@@ -39,16 +42,17 @@ pub mod r2d2;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
-use crate::dialect::{Supports, caps};
+use crate::error::TxError;
 use crate::exec::{Engine, Executor, Outcome};
 use crate::ir::{Statement, TxStatement};
 use crate::query::Expect;
-use crate::repo::Acquire;
-use crate::security::{self, SecureTx, SecurityContext};
-use crate::tx::{Tx, TxConnection, TxOptions};
+use crate::tx::{Transactional, Tx, TxConnection, TxOptions};
 
 #[cfg(feature = "async")]
 pub use asynchronous::{AsyncPool, OwnedAsyncTx, SingleConnection};
+#[cfg(feature = "async")]
+#[doc(hidden)]
+pub use asynchronous::{begin_async, execute_async};
 #[cfg(feature = "async")]
 pub use connect::AsyncConnect;
 pub use connect::{Connect, SyncConnect};
@@ -71,63 +75,134 @@ impl PoolStatus {
     }
 }
 
-/// A sync transaction that owns its pooled connection; see [`Pool::begin`].
+/// A sync transaction that owns its pooled connection; what `begin` on a
+/// [`Pool`] returns.
 pub type OwnedTx<C> = Tx<Box<C>>;
-
-type ConnError<C> = <C as Executor>::Error;
 
 /// A pool of sync connections.
 ///
 /// Implementations hand out owned connections (`'static`), which return to
 /// the pool when dropped. Pool failures (e.g. a timeout waiting for a
-/// connection) are reported as the connection's error type.
-pub trait Pool: Send + Sync + 'static {
+/// connection) are reported as the connection's error type. A pool is an
+/// executor itself, implemented with [`pool_executor!`](crate::pool_executor):
+/// each statement runs on a connection checked out for it, and `begin` opens
+/// an [`OwnedTx`].
+pub trait Pool: Transactional<Error: From<TxError>> + Send + Sync + 'static {
     /// A pooled connection; usually [`Pooled`]`<the pool's guard>`.
-    type Conn: TxConnection + 'static;
-
-    /// The connections' dialect.
-    fn dialect(&self) -> &<Self::Conn as Executor>::Dialect;
+    type Conn: TxConnection<Dialect = Self::Dialect, Error = Self::Error>
+        + Transactional
+        + Sync
+        + 'static;
 
     /// Checks a connection out, waiting up to the pool's acquire timeout.
-    fn get(&self) -> Result<Self::Conn, ConnError<Self::Conn>>;
+    fn get(&self) -> Result<Self::Conn, Self::Error>;
 
     /// The pool's current occupancy.
     fn status(&self) -> PoolStatus;
-
-    /// Opens a transaction on a pooled connection it owns. The connection
-    /// returns to the pool when the transaction ends or is dropped.
-    fn begin_with(&self, options: TxOptions) -> Result<OwnedTx<Self::Conn>, ConnError<Self::Conn>> {
-        Tx::begin(Box::new(self.get()?), options)
-    }
-
-    /// [`begin_with`](Self::begin_with) default options.
-    fn begin(&self) -> Result<OwnedTx<Self::Conn>, ConnError<Self::Conn>> {
-        self.begin_with(TxOptions::default())
-    }
-
-    /// Opens an owned transaction with `context` applied (see
-    /// [`crate::security`]). Only compiles for dialects with native
-    /// row-level security.
-    fn begin_with_security(
-        &self,
-        options: TxOptions,
-        context: SecurityContext,
-    ) -> Result<SecureTx<OwnedTx<Self::Conn>>, ConnError<Self::Conn>>
-    where
-        <Self::Conn as Executor>::Dialect: Supports<caps::NativeRls>,
-    {
-        security::apply(self.begin_with(options)?, context)
-    }
 }
 
-impl<P: Pool> Acquire for P {
-    type Dialect = <P::Conn as Executor>::Dialect;
-    type Error = ConnError<P::Conn>;
-    type Conn<'a> = P::Conn;
+/// Runs `statement` on a connection checked out of `pool`; how a pool is an
+/// executor. Not public API.
+#[doc(hidden)]
+pub fn execute<P: Pool>(
+    pool: &P,
+    statement: &Statement,
+    expect: Expect,
+) -> Result<Outcome, P::Error> {
+    pool.get()?.execute(statement, expect)
+}
 
-    fn acquire(&self) -> Result<P::Conn, Self::Error> {
-        self.get()
-    }
+/// Opens a transaction that owns a connection checked out of `pool`. Not
+/// public API.
+#[doc(hidden)]
+pub fn begin<P: Pool>(pool: &P, options: TxOptions) -> Result<OwnedTx<P::Conn>, P::Error> {
+    Tx::begin(Box::new(pool.get()?), options)
+}
+
+/// Implements the executor traits of a pool type through its [`Pool`] or
+/// [`AsyncPool`] implementation: statements run on a checked-out connection,
+/// transactions own one. The pool type holds its dialect at `$dialect`.
+///
+/// ```ignore
+/// rupa_core::pool_executor!(sync, [] SqlitePool, |pool| &pool.dialect);
+/// rupa_core::pool_executor!(async, [DB: Backend] SqlxPool<DB>, |pool| &pool.dialect);
+/// ```
+#[macro_export]
+macro_rules! pool_executor {
+    (sync, [$($generics:tt)*] $pool:ty, |$this:ident| $dialect:expr) => {
+        impl<$($generics)*> $crate::exec::Engine for $pool {
+            type Completion = $crate::exec::Immediate;
+        }
+
+        impl<$($generics)*> $crate::exec::Executor for $pool {
+            type Dialect = <<$pool as $crate::pool::Pool>::Conn as $crate::exec::Executor>::Dialect;
+            type Error = <<$pool as $crate::pool::Pool>::Conn as $crate::exec::Executor>::Error;
+
+            fn dialect(&self) -> &Self::Dialect {
+                let $this = self;
+
+                $dialect
+            }
+
+            fn execute(
+                &self,
+                statement: &$crate::ir::Statement,
+                expect: $crate::query::Expect,
+            ) -> ::core::result::Result<$crate::exec::Outcome, Self::Error> {
+                $crate::pool::execute(self, statement, expect)
+            }
+        }
+
+        impl<$($generics)*> $crate::tx::Transactional for $pool {
+            type Tx<'t> = $crate::pool::OwnedTx<<$pool as $crate::pool::Pool>::Conn>;
+
+            fn begin_with(
+                &self,
+                options: $crate::tx::TxOptions,
+            ) -> ::core::result::Result<Self::Tx<'_>, Self::Error> {
+                $crate::pool::begin(self, options)
+            }
+        }
+    };
+    (async, [$($generics:tt)*] $pool:ty, |$this:ident| $dialect:expr) => {
+        impl<$($generics)*> $crate::exec::Engine for $pool {
+            type Completion = $crate::exec::Awaited;
+        }
+
+        impl<$($generics)*> $crate::exec::AsyncExecutor for $pool {
+            type Dialect = <<$pool as $crate::pool::AsyncPool>::Conn as $crate::exec::AsyncExecutor>::Dialect;
+            type Error = <<$pool as $crate::pool::AsyncPool>::Conn as $crate::exec::AsyncExecutor>::Error;
+
+            fn dialect(&self) -> &Self::Dialect {
+                let $this = self;
+
+                $dialect
+            }
+
+            fn execute(
+                &self,
+                statement: &$crate::ir::Statement,
+                expect: $crate::query::Expect,
+            ) -> impl ::core::future::Future<
+                Output = ::core::result::Result<$crate::exec::Outcome, Self::Error>,
+            > + ::core::marker::Send {
+                $crate::pool::execute_async(self, statement, expect)
+            }
+        }
+
+        impl<$($generics)*> $crate::tx::AsyncTransactional for $pool {
+            type Tx<'t> = $crate::pool::OwnedAsyncTx<<$pool as $crate::pool::AsyncPool>::Conn>;
+
+            fn begin_with(
+                &self,
+                options: $crate::tx::TxOptions,
+            ) -> impl ::core::future::Future<
+                Output = ::core::result::Result<Self::Tx<'_>, Self::Error>,
+            > + ::core::marker::Send {
+                $crate::pool::begin_async(self, options)
+            }
+        }
+    };
 }
 
 /// A connection checked out of a pool: the pool's guard type `G` (which
@@ -169,11 +244,11 @@ impl<G: Deref<Target: fmt::Debug>> fmt::Debug for Pooled<G> {
 }
 
 /// A pooled connection runs queries in its connection's mode.
-impl<G: DerefMut<Target: Engine>> Engine for Pooled<G> {
+impl<G: Deref<Target: Engine>> Engine for Pooled<G> {
     type Completion = <G::Target as Engine>::Completion;
 }
 
-impl<G: DerefMut<Target: Executor>> Executor for Pooled<G> {
+impl<G: Deref<Target: Executor>> Executor for Pooled<G> {
     type Dialect = <G::Target as Executor>::Dialect;
     type Error = <G::Target as Executor>::Error;
 
@@ -181,17 +256,17 @@ impl<G: DerefMut<Target: Executor>> Executor for Pooled<G> {
         self.0.dialect()
     }
 
-    fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, Self::Error> {
+    fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, Self::Error> {
         self.0.execute(statement, expect)
     }
 }
 
-impl<G: DerefMut<Target: TxConnection> + Send> TxConnection for Pooled<G> {
-    fn control(&mut self, statement: TxStatement) -> Result<(), Self::Error> {
+impl<G: Deref<Target: TxConnection> + Send> TxConnection for Pooled<G> {
+    fn control(&self, statement: TxStatement) -> Result<(), Self::Error> {
         self.0.control(statement)
     }
 
-    fn defer_rollback(&mut self, depth: u32) {
+    fn defer_rollback(&self, depth: u32) {
         self.0.defer_rollback(depth);
     }
 
@@ -199,7 +274,18 @@ impl<G: DerefMut<Target: TxConnection> + Send> TxConnection for Pooled<G> {
         self.0.is_dirty()
     }
 
-    fn clean(&mut self) -> Result<(), Self::Error> {
+    fn clean(&self) -> Result<(), Self::Error> {
         self.0.clean()
+    }
+}
+
+impl<G: Deref<Target: TxConnection> + Send + Sync> Transactional for Pooled<G> {
+    type Tx<'t>
+        = Tx<&'t Self>
+    where
+        Self: 't;
+
+    fn begin_with(&self, options: TxOptions) -> Result<Tx<&Self>, Self::Error> {
+        Tx::begin(self, options)
     }
 }
