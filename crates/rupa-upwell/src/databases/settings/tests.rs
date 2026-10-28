@@ -169,3 +169,51 @@ fn the_schema_declares_every_field_for_tooling() {
     );
     assert!(fields.iter().all(|field| !field.docs.is_empty()));
 }
+
+#[test]
+fn private_memory_databases_refuse_startup_migrations() {
+    let memory = |path: &str, startup| DatabaseSettings {
+        driver: Some(String::from("sqlite")),
+        path: Some(path.to_owned()),
+        migrations: MigrationSettings {
+            startup,
+            ..MigrationSettings::default()
+        },
+        ..DatabaseSettings::default()
+    };
+    let by_url = |url: &str| DatabaseSettings {
+        url: Some(url.to_owned()),
+        ..DatabaseSettings::default()
+    };
+
+    assert!(matches!(
+        memory(":memory:", Startup::Check).startup(),
+        Err(SettingsError::PrivateMemory)
+    ));
+    assert!(matches!(
+        memory(":memory:", Startup::Apply).startup(),
+        Err(SettingsError::PrivateMemory)
+    ));
+    assert!(matches!(
+        by_url("sqlite://:memory:?mode=rwc").startup(),
+        Err(SettingsError::PrivateMemory)
+    ));
+    assert_eq!(
+        memory(":memory:", Startup::Off)
+            .startup()
+            .expect("off never connects"),
+        Startup::Off
+    );
+    assert_eq!(
+        memory("app.db", Startup::Apply)
+            .startup()
+            .expect("a file is shared by every connection"),
+        Startup::Apply
+    );
+    assert_eq!(
+        by_url("sqlite://memory.db")
+            .startup()
+            .expect("a file named like memory is still a file"),
+        Startup::Check
+    );
+}

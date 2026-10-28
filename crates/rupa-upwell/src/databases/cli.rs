@@ -54,15 +54,12 @@ impl<D: Declaration> PluginCliCommand for Command<D> {
     async fn run(&self, mut context: PluginCommandContext<Setup>) -> Result<(), CommandError> {
         let catalog = D::catalog()?;
         let settings = configured::<D>(context.bootstrap_mut())?;
-        let config = match (settings.map(|s| s.migration()), &self.migrate.url) {
-            (Some(Ok(mut config)), Some(url)) => {
-                config.url.clone_from(url);
-
-                Ok(config)
-            }
-            (Some(Ok(config)), None) => Ok(config),
+        let config = match (settings, &self.migrate.url) {
+            (Some(settings), Some(url)) => settings
+                .config(url.clone())
+                .map_err(|error| error.to_string()),
+            (Some(settings), None) => settings.migration().map_err(|error| error.to_string()),
             (None, Some(url)) => Ok(rupa_core::config::DbConfig::new(url.as_str())),
-            (Some(Err(error)), _) => Err(error.to_string()),
             (None, None) => Err(format!(
                 "no database is configured at `{}`; configure one or pass --url",
                 D::CONFIG
