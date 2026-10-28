@@ -123,8 +123,9 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 ///
 /// let users = UserRepositoryRepo::new(&pool);
-/// let tx = pool.begin().await?;
-/// UserRepositoryRepo::new(&tx).by_email("ada@x").await?;
+/// let tx = users.open_tx(None).await?;   // the same repository, in a transaction
+/// tx.by_email("ada@x").await?;
+/// tx.commit().await?;
 /// ```
 ///
 /// See the `rupa_macros::repository` module docs for the rules on receivers,

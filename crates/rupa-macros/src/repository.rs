@@ -7,6 +7,9 @@
 //! - **The connection.** `{Trait}Repo::new(c)` takes a pool, a connection or
 //!   a transaction, or any `&`, `&mut`, `Box`, `Rc` or `Arc` of one, and runs
 //!   every query on it. Methods take `&self`.
+//! - **Transactions.** `repo.open_tx(None)` is the same repository on a new
+//!   transaction (a savepoint, on a transaction), ended by its `commit` or
+//!   `rollback`; `repo.tx(&tx)` is the same repository on an existing one.
 //! - **Sync or async, per method.** If any query method is `async`, the
 //!   repository is async: it runs on every connection, sync ones included,
 //!   and its plain `fn` methods block in place. Otherwise everything is
@@ -55,6 +58,58 @@ enum Mode {
 }
 
 impl Mode {
+    /// The repository's transaction methods: `open_tx`, `commit` and
+    /// `rollback`, sync or async like its queries.
+    fn transactions(
+        self,
+        ms: &TokenStream,
+        repo: &syn::Ident,
+        vis: &syn::Visibility,
+    ) -> TokenStream {
+        let bound = self.bound(ms);
+        let (asyncness, finish) = match self {
+            Self::Sync => (quote!(), quote!(#ms::now)),
+            Self::Async => (quote!(async), quote!(::core::convert::identity)),
+        };
+        let wait = (self == Self::Async).then(|| quote!(.await));
+        let end = |end: &str| {
+            let end = format_ident!("{end}");
+
+            quote!(#finish(#ms::OpenTransaction::end_tx(self.0, #ms::TxEnd::#end)) #wait)
+        };
+        let commit = end("Commit");
+        let rollback = end("Rollback");
+
+        quote! {
+            impl<__C: #bound> #repo<__C> {
+                /// This repository on a new transaction opened on its
+                /// connection, with `options` (the default when `None`); on a
+                /// transaction, a savepoint. End it with `commit` or
+                /// `rollback`; dropped, it rolls back.
+                #vis #asyncness fn open_tx(
+                    &self,
+                    options: ::core::option::Option<#ms::TxOptions>,
+                ) -> ::core::result::Result<#repo<<__C as #ms::Connection>::Tx<'_>>, <__C as #ms::Connection>::Error> {
+                    let begun = #finish(#ms::Connection::begin_tx(&self.0, options.unwrap_or_default())) #wait;
+
+                    begun.map(#repo)
+                }
+            }
+
+            impl<__C: #ms::OpenTransaction + #bound> #repo<__C> {
+                /// Commits the transaction this repository runs on.
+                #vis #asyncness fn commit(self) -> ::core::result::Result<(), <__C as #ms::Connection>::Error> {
+                    #commit
+                }
+
+                /// Rolls back the transaction this repository runs on.
+                #vis #asyncness fn rollback(self) -> ::core::result::Result<(), <__C as #ms::Connection>::Error> {
+                    #rollback
+                }
+            }
+        }
+    }
+
     fn of(methods: &[Method]) -> Self {
         match methods.iter().any(|m| m.is_async) {
             true => Self::Async,
@@ -398,6 +453,7 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
         }
     });
 
+    let transactions = mode.transactions(&ms, &repo, visibility);
     let providers = options
         .databases
         .iter()
@@ -425,7 +481,15 @@ pub fn repository(args: TokenStream, item: TokenStream) -> syn::Result<TokenStre
             #visibility fn into_connection(self) -> __C {
                 self.0
             }
+
+            /// This repository on another connection, typically an open
+            /// transaction: `repo.tx(&tx)`.
+            #visibility fn tx<__T>(&self, connection: __T) -> #repo<__T> {
+                #repo(connection)
+            }
         }
+
+        #transactions
 
         impl<__C> #trait_ident for #impl_type
         where

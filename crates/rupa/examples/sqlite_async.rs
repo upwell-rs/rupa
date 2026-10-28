@@ -1,5 +1,5 @@
 //! The same Task model and queries as `sqlite_crud`, on an async pool: a
-//! repository over the pool, and one over a transaction.
+//! repository over the pool, branching into a transaction with `open_tx`.
 //!
 //! Run: `cargo run -p rupa --example sqlite_async --features sqlx-sqlite`
 
@@ -28,21 +28,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .execute::<u64>()
         .execute(&pool)
         .await?;
-    let tx = pool.begin().await?;
-    let tasks = TasksRepo::new(&tx);
-    tasks
-        .add(&NewTask {
-            title: "write examples".into(),
-            done: false,
-        })
-        .await?;
+    let tasks = TasksRepo::new(&pool);
+    let tx = tasks.open_tx(None).await?;
+
+    tx.add(&NewTask {
+        title: "write examples".into(),
+        done: false,
+    })
+    .await?;
     assert_eq!(
-        tasks.get(1).await?.expect("task in transaction").title,
+        tx.get(1).await?.expect("task in transaction").title,
         "write examples"
     );
     tx.commit().await?;
 
-    let tasks = TasksRepo::new(&pool);
     let task = tasks.get(1).await?.expect("committed task");
     assert_eq!(task.title, "write examples");
     update::<Task>()

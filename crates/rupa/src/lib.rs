@@ -26,12 +26,14 @@
 //! ```
 //!
 //! Every pool, connection and transaction is a [`Connection`], and so is a
-//! `&`, `&mut`, `Box`, `Rc` or `Arc` of one. A repository holds one:
+//! `&`, `&mut`, `Box`, `Rc` or `Arc` of one. A repository holds one, and
+//! branches into a transaction itself:
 //!
 //! ```ignore
-//! let tx = pool.begin()?;
-//! NoteWritesRepo::new(&tx).add(&note)?;
-//! NoteReadsRepo::new(&tx).all()?;
+//! let notes = NoteRepositoryRepo::new(&pool);
+//! let tx = notes.open_tx(None)?;
+//! tx.add(&note)?;
+//! tags.tx(tx.connection()).add(&tag)?;   // another repository, same transaction
 //! tx.commit()?;
 //! ```
 //!

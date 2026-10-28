@@ -172,19 +172,19 @@ async fn native_row_level_security() {
 
     tx.commit().await.unwrap();
 
-    // An RLS transaction shared by several repositories.
+    // Repositories over the pool join an RLS transaction with `tx`.
+    let docs = DocsRepo::new(&pool);
+    let counts = DocCountsRepo::new(&pool);
     let tx = pool
         .begin_with_security(TxOptions::default(), tenant(2))
         .await
         .unwrap();
-    let docs = DocsRepo::new(&tx);
-    let counts = DocCountsRepo::new(&tx);
-    let found = docs.after(0).await.unwrap();
+    let found = docs.tx(&tx).after(0).await.unwrap();
     assert_eq!(
         found.iter().map(|d| d.title.as_str()).collect::<Vec<_>>(),
         ["b1", "b2"]
     );
-    assert!(counts.any_after(0).await.unwrap());
+    assert!(counts.tx(&tx).any_after(0).await.unwrap());
     tx.commit().await.unwrap();
 
     // Settings are transaction-local: nothing leaks to the next transaction.
@@ -250,7 +250,7 @@ async fn native_row_level_security() {
         .try_begin_with_security(TxOptions::default(), tenant(2))
         .await
         .unwrap();
-    let docs = DocsRepo::new(&tx);
+    let docs = DocsRepo::new(&erased).tx(&tx);
     assert_eq!(
         docs.after(0)
             .await

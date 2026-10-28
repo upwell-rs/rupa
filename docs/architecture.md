@@ -67,9 +67,10 @@ nullable JSON for `Option` of a serde type, JSON for any other serde type.
 `#[repository]` (`rupa-macros/src/repository.rs`) emits the trait and one
 repository type, `UsersRepo<C>`, which holds a `Connection` `C`: here
 `&SqlitePool`, but equally a single connection, a transaction, or an `Arc`,
-`Box` or `Rc` of any of them. Two repositories share a transaction by holding
-`&tx`. The query declarations select sync or async execution at compile time:
-a sync repository runs on `Connection<Mode = Immediate>`, an async one on
+`Box` or `Rc` of any of them. `repo.open_tx(options)` is the same
+repository on a new transaction (ended with its `commit` or `rollback`), and
+`repo.tx(&tx)` puts it on an open one. The query declarations select sync or
+async execution at compile time: a sync repository runs on `Connection<Mode = Immediate>`, an async one on
 every `Sync` connection, sync ones included. Repository traits are
 dyn-compatible by default, with boxed async futures;
 `#[repository(static_dispatch)]` opts into unboxed futures.

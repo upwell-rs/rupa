@@ -57,13 +57,15 @@ let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&pool
 let open = select::<User>().filter(User::NICKNAME.is_null()).all().execute(&tx).await?;   // async
 ```
 
-A repository holds one connection, so repositories share a transaction by
-borrowing it, and `commit` takes the transaction once they are done:
+A repository branches into a transaction itself: `open_tx` is the same
+repository on a new transaction, and `tx` puts any repository on one that is
+already open, so a transaction is passed around without new types:
 
 ```rust
-let tx = pool.begin().await?;
-NoteWritesRepo::new(&tx).add(&note).await?;
-NoteReadsRepo::new(&tx).all().await?;
+let notes = NoteRepositoryRepo::new(&pool);
+let tx = notes.open_tx(None).await?;             // or Some(TxOptions::default().read_only())
+tx.add(&note).await?;
+tags.tx(tx.connection()).add(&tag).await?;      // another repository, same transaction
 tx.commit().await?;
 ```
 
@@ -186,7 +188,7 @@ acquire_timeout = "5s"
 ```rust
 let db: rupa::Database = rupa::connect(&config.database).await?;   // `dynamic`
 let tx = db.begin().await?;
-UserRepositoryRepo::new(&tx).create(&new_user).await?;
+UserRepositoryRepo::new(&tx).create(&new_user).await?;   // or users.tx(&tx)
 tx.commit().await?;
 ```
 

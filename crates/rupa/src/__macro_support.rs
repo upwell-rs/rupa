@@ -6,9 +6,10 @@ pub use ::std::marker::Send;
 pub use ::std::pin::Pin;
 pub use ::std::sync::Arc;
 pub use rupa_core::__macro_support::*;
-pub use rupa_core::connection::{Connection, complete};
+pub use rupa_core::connection::{Connection, OpenTransaction, TxEnd, complete};
 pub use rupa_core::exec::{Immediate, now};
 pub use rupa_core::repo::DynRepository;
+pub use rupa_core::tx::TxOptions;
 
 /// Runs `future` to completion from a sync repository method of an async
 /// repository.
