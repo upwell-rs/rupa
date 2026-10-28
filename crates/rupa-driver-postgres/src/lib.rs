@@ -50,7 +50,7 @@ use rupa_core::Postgres;
 use rupa_core::exec::{Engine, Executor, Immediate, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{PendingRollback, Transactional, Tx, TxConnection, TxOptions};
+use rupa_core::tx::{PendingRollback, Transactional, Tx, TxConnection, TxOptions, TxSlot};
 use rupa_driver_tokio_postgres::shared::{Param, PgRows};
 
 #[cfg(feature = "dynamic")]
@@ -68,6 +68,7 @@ pub struct PgExecutor {
     client: Mutex<postgres::Client>,
     dialect: Postgres,
     pending: PendingRollback,
+    slot: TxSlot,
     statements: StatementCache,
     #[cfg(feature = "migrations")]
     migration: rupa_migrate::protocol::postgres::State,
@@ -80,6 +81,7 @@ impl PgExecutor {
             client: Mutex::new(client),
             dialect: Postgres,
             pending: PendingRollback::default(),
+            slot: TxSlot::default(),
             statements: StatementCache::default(),
             #[cfg(feature = "migrations")]
             migration: rupa_migrate::protocol::postgres::State::default(),
@@ -163,7 +165,7 @@ impl PgExecutor {
     fn clean_on(&self, client: &mut postgres::Client) -> Result<(), PgError> {
         if let Some(statement) = self.pending.statement() {
             client.batch_execute(&rupa_sql::render_tx(&statement, &self.dialect)?)?;
-            self.pending.clear();
+            self.pending.clear(statement);
         }
 
         Ok(())
@@ -249,6 +251,10 @@ impl TxConnection for PgExecutor {
         }
 
         self.clean_on(&mut self.lock())
+    }
+
+    fn slot(&self) -> &TxSlot {
+        &self.slot
     }
 }
 

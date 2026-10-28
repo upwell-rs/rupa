@@ -4,7 +4,7 @@
 use std::future::Future;
 use std::ops::Deref;
 
-use super::{TxConn, TxOptions, finish_statement, open_statement};
+use super::{TxConn, TxOptions, TxSlot, finish_statement, open_statement};
 use crate::error::TxError;
 use crate::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use crate::ir::{Statement, TxStatement};
@@ -92,6 +92,10 @@ pub trait AsyncTxConnection: AsyncExecutor<Error: From<TxError>> {
     /// Sends the deferred rollback, if any. Pools call this before reusing a
     /// connection.
     fn clean(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// The connection's top-level transaction slot; see
+    /// [`TxConnection::slot`](crate::tx::TxConnection::slot).
+    fn slot(&self) -> &TxSlot;
 }
 
 /// An open async transaction (`depth == 0`) or savepoint (`depth > 0`) on
@@ -122,7 +126,12 @@ where
     }
 
     async fn open(conn: C, depth: u32, options: TxOptions) -> Result<Self, AsyncErr<C>> {
-        conn.control(open_statement(depth, options)?).await?;
+        let statement = open_statement(depth, options)?;
+        let claim = conn.slot().claim(depth)?;
+
+        conn.control(statement).await?;
+        claim.keep();
+
         Ok(Self {
             conn,
             depth,
@@ -157,6 +166,10 @@ where
     fn drop(&mut self) {
         if !self.done {
             self.conn.defer_rollback(self.depth);
+        }
+
+        if self.depth == 0 {
+            self.conn.slot().release();
         }
     }
 }

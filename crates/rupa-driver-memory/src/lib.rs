@@ -34,7 +34,7 @@ use rupa_core::column::ColumnMeta;
 use rupa_core::dialect::Memory;
 use rupa_core::exec::{Engine, Executor, Immediate, Outcome};
 use rupa_core::ir::{Statement, TableRef, TxStatement};
-use rupa_core::tx::{Transactional, Tx, TxConnection, TxOptions};
+use rupa_core::tx::{Transactional, Tx, TxConnection, TxOptions, TxSlot};
 use rupa_core::{Entity, Expect, Value};
 
 #[cfg(feature = "async")]
@@ -53,6 +53,7 @@ use store::Store;
 pub struct MemoryDb {
     store: Mutex<Store>,
     dialect: Memory,
+    slot: TxSlot,
 }
 
 impl MemoryDb {
@@ -101,6 +102,7 @@ impl Clone for MemoryDb {
         Self {
             store: Mutex::new(self.lock().clone()),
             dialect: self.dialect,
+            slot: TxSlot::default(),
         }
     }
 }
@@ -144,6 +146,10 @@ impl TxConnection for MemoryDb {
 
     fn clean(&self) -> Result<(), MemoryError> {
         Ok(())
+    }
+
+    fn slot(&self) -> &TxSlot {
+        &self.slot
     }
 }
 

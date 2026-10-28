@@ -11,7 +11,7 @@ use crate::error::TxError;
 use crate::exec::{AsyncExecutor, Blocking, Outcome};
 use crate::ir::{Statement, TxStatement};
 use crate::query::Expect;
-use crate::tx::{AsyncTransactional, AsyncTx, AsyncTxConnection, TxOptions};
+use crate::tx::{AsyncTransactional, AsyncTx, AsyncTxConnection, TxOptions, TxSlot};
 
 /// An async transaction that owns its pooled connection; what `begin` on an
 /// [`AsyncPool`] returns.
@@ -100,6 +100,10 @@ impl<G: Deref<Target: AsyncTxConnection> + Send + Sync> AsyncTxConnection for Po
 
     fn clean(&self) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.0.clean()
+    }
+
+    fn slot(&self) -> &TxSlot {
+        self.0.slot()
     }
 }
 

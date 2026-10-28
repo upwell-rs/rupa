@@ -46,7 +46,7 @@ use crate::error::TxError;
 use crate::exec::{Engine, Executor, Outcome};
 use crate::ir::{Statement, TxStatement};
 use crate::query::Expect;
-use crate::tx::{Transactional, Tx, TxConnection, TxOptions};
+use crate::tx::{Transactional, Tx, TxConnection, TxOptions, TxSlot};
 
 #[cfg(feature = "async")]
 pub use asynchronous::{AsyncPool, OwnedAsyncTx, SingleConnection};
@@ -276,6 +276,10 @@ impl<G: Deref<Target: TxConnection> + Send> TxConnection for Pooled<G> {
 
     fn clean(&self) -> Result<(), Self::Error> {
         self.0.clean()
+    }
+
+    fn slot(&self) -> &TxSlot {
+        self.0.slot()
     }
 }
 

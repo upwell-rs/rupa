@@ -68,7 +68,7 @@ use rupa_core::Sqlite;
 use rupa_core::exec::{Engine, Executor, Immediate, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{PendingRollback, Transactional, Tx, TxConnection, TxOptions};
+use rupa_core::tx::{PendingRollback, Transactional, Tx, TxConnection, TxOptions, TxSlot};
 use rusqlite::types::Value as SqlValue;
 
 #[cfg(feature = "dynamic")]
@@ -90,6 +90,7 @@ pub struct SqliteExecutor {
     conn: Mutex<rusqlite::Connection>,
     dialect: Sqlite,
     pending: PendingRollback,
+    slot: TxSlot,
     #[cfg(feature = "migrations")]
     migration: rupa_migrate::protocol::sqlite::State,
 }
@@ -103,6 +104,7 @@ impl SqliteExecutor {
             conn: Mutex::new(conn),
             dialect: Sqlite,
             pending: PendingRollback::default(),
+            slot: TxSlot::default(),
             #[cfg(feature = "migrations")]
             migration: rupa_migrate::protocol::sqlite::State::default(),
         })
@@ -179,7 +181,7 @@ impl SqliteExecutor {
     fn clean_on(&self, conn: &rusqlite::Connection) -> Result<(), SqliteError> {
         if let Some(statement) = self.pending.statement() {
             conn.execute_batch(&rupa_sql::render_tx(&statement, &self.dialect)?)?;
-            self.pending.clear();
+            self.pending.clear(statement);
         }
 
         Ok(())
@@ -247,6 +249,10 @@ impl TxConnection for SqliteExecutor {
         }
 
         self.clean_on(&self.lock())
+    }
+
+    fn slot(&self) -> &TxSlot {
+        &self.slot
     }
 }
 

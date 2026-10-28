@@ -224,3 +224,28 @@ pub async fn tx_sequential_after_drop<E: AsyncTransactional>(e: &E) {
     drop(tx);
     assert_eq!(titles(e).await, ["second"]);
 }
+
+pub async fn tx_one_top_level_per_connection<E: AsyncTransactional>(e: &E) {
+    let first = e.begin().await.expect("a first transaction");
+
+    add(&first, "first").await;
+
+    let second = e.begin().await;
+
+    assert!(
+        second.is_err(),
+        "a second BEGIN on the connection would commit or join the first"
+    );
+
+    drop(second);
+    first.rollback().await.expect("rollback");
+
+    assert!(
+        titles(e).await.is_empty(),
+        "the refused BEGIN must not commit the first transaction"
+    );
+
+    let after = e.begin().await.expect("a transaction once the first ended");
+
+    after.rollback().await.expect("rollback");
+}

@@ -51,7 +51,7 @@ use rupa_core::MySql;
 use rupa_core::exec::{Engine, Executor, Immediate, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{PendingRollback, Transactional, Tx, TxConnection, TxOptions};
+use rupa_core::tx::{PendingRollback, Transactional, Tx, TxConnection, TxOptions, TxSlot};
 
 #[cfg(feature = "dynamic")]
 pub use driver::MySqlDriver;
@@ -78,6 +78,7 @@ pub struct MySqlExecutor {
     conn: Mutex<mysql::Conn>,
     dialect: MySql,
     pending: PendingRollback,
+    slot: TxSlot,
     #[cfg(feature = "migrations")]
     migration: rupa_migrate::protocol::mysql::State,
 }
@@ -89,6 +90,7 @@ impl MySqlExecutor {
             conn: Mutex::new(conn),
             dialect: MySql,
             pending: PendingRollback::default(),
+            slot: TxSlot::default(),
             #[cfg(feature = "migrations")]
             migration: rupa_migrate::protocol::mysql::State::default(),
         }
@@ -131,7 +133,7 @@ impl MySqlExecutor {
             let sql = rupa_sql::render_tx(&statement, &self.dialect)?;
 
             script(conn, &sql)?;
-            self.pending.clear();
+            self.pending.clear(statement);
         }
 
         Ok(())
@@ -245,6 +247,10 @@ impl TxConnection for MySqlExecutor {
         }
 
         self.clean_on(&mut self.lock())
+    }
+
+    fn slot(&self) -> &TxSlot {
+        &self.slot
     }
 }
 
