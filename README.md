@@ -86,7 +86,9 @@ repositories run on sync connections too, without an adapter.
 
 Repositories are tested without a database: the in-memory backend evaluates
 the same queries with Postgres semantics, so application code that depends on
-the trait runs unchanged in a unit test.
+the trait runs unchanged in a unit test. Custom DSL functions need a memory
+evaluator to run there; one without, like `same_name_ci` in the SQLite DSL
+example, fails on `MemoryDb`.
 
 ```rust
 let mut db = rupa::drivers::memory::MemoryDb::new();

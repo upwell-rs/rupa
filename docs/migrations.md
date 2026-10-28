@@ -648,6 +648,9 @@ discovers components, providers and configuration but not plugins:
 pub trait NoteRepository: Send + Sync {
     #[query(order_by = id)]
     fn all(&self) -> Result<Vec<Note>, DynError>;
+
+    #[query(insert)]
+    fn add(&self, note: &Note) -> Result<u64, DynError>;
 }
 
 rupa::upwell::database! {
@@ -696,27 +699,42 @@ async fn main() -> ExitCode {
 ```
 
 The configuration describes the connection field by field. SQLite takes `path`
-(or `":memory:"`) instead of the server fields. `url` replaces the fields with
-a complete URL. Upwell templates it like any value, so it can reference the
-fields or the environment:
+instead of the server fields. A `":memory:"` path needs `startup = "off"`: the
+migration connection and the pool would each open their own private database,
+so `check` and `apply` are refused. `url` replaces the fields with a complete
+URL. Upwell templates it like any value, so it can reference the fields or the
+environment:
 
 ```toml
 [database.primary]
-driver   = "postgres"           # also postgres-sync, mysql, sqlite, sqlx-*, memory
+driver  = "sqlite"              # also postgres, postgres-sync, mysql, sqlx-*, memory
+path    = "app.db"
+params  = { mode = "rwc" }
+options = { foreign_keys = true }            # the driver's DbConfig options
+# url   = "sqlite://${APP_DATA:.}/app.db"
+
+[database.primary.pool]
+max_size = 4
+
+[database.primary.migrations]
+startup  = "apply"              # off | check (default) | apply
+```
+
+A server database takes the server fields, and can migrate with credentials
+of its own, so the application's role needs no DDL rights:
+
+```toml
+[database.reporting]
+driver   = "postgres"
 host     = "db.internal"
 port     = 5432
 user     = "app"
 password = "${DB_PASSWORD}"
-name     = "app"
+name     = "reporting"
 params   = { sslmode = "require" }
-options  = { statement_cache_size = 128 }    # the driver's DbConfig options
-# url    = "postgres://${database.primary.user}:${DB_PASSWORD}@${database.primary.host}/app"
+# url    = "postgres://${database.reporting.user}:${DB_PASSWORD}@${database.reporting.host}/reporting"
 
-[database.primary.pool]
-max_size = 16
-
-[database.primary.migrations]
-startup  = "apply"              # off | check (default) | apply
+[database.reporting.migrations]
 user     = "migrator"           # optional: credentials for migrations only
 password = "${MIGRATOR_PASSWORD}"
 # url    = "..."                # or a complete migration URL
@@ -733,7 +751,8 @@ The settings declare their schema, so Upwell's tooling lists every field.
     or blocked. Nothing that needs the database is built, and no service starts.
   - `apply` applies once per target and process. A database rebuilt by a
     configuration reload only checks, so a speculative reload never migrates.
-  - Sync pools run the gate on the startup task.
+  - Sync pools run the gate on a scoped thread outside the async runtime, which
+    the startup task waits for.
 - **Repositories.** Each listed `#[repository]` trait is provided as
   `Arc<dyn Trait>` over the pool, so services inject it directly.
   `#[repository(static_dispatch)]` traits aren't dyn-compatible, so they aren't

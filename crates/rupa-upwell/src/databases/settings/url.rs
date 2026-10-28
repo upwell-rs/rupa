@@ -151,6 +151,18 @@ fn query(url: &mut String, settings: &DatabaseSettings) {
     }
 }
 
+/// Whether `url` names a private in-memory SQLite database, which every
+/// connection opens afresh.
+pub(super) fn is_private_memory(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("sqlite:") else {
+        return false;
+    };
+    let rest = rest.strip_prefix("//").unwrap_or(rest);
+    let path = rest.split(['?', '#']).next().unwrap_or(rest);
+
+    path == MEMORY_PATH
+}
+
 /// `url` with its credentials replaced by `user` and `password`.
 pub(super) fn with_userinfo(
     url: &str,

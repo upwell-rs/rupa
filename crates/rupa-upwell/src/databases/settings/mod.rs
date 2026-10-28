@@ -14,7 +14,7 @@ use upwell::schema::ConfigSchema;
 use upwell::{ConfigProperties, DefaultSpec, config};
 
 use super::Declaration;
-use url::{Family, build, with_userinfo};
+use url::{Family, build, is_private_memory, with_userinfo};
 
 /// One database's configuration, as written at its configuration path.
 ///
@@ -125,6 +125,13 @@ pub enum SettingsError {
     /// Migration credentials cannot be placed in the URL.
     #[error("cannot put migration credentials into `url`: {0}")]
     Credentials(String),
+    /// Startup would check or apply migrations on a private in-memory SQLite
+    /// database, which the migration connection and the pool each open
+    /// afresh.
+    #[error(
+        "set `migrations.startup = \"off\"` for a private in-memory SQLite database: the migration connection and the pool would each open their own"
+    )]
+    PrivateMemory,
 }
 
 impl DatabaseSettings {
@@ -156,8 +163,24 @@ impl DatabaseSettings {
         self.config(url)
     }
 
+    /// The startup policy, refused where it cannot work: checking or applying
+    /// migrations on a private in-memory SQLite database would reach a
+    /// database the pool never sees.
+    pub fn startup(&self) -> Result<Startup, SettingsError> {
+        let startup = self.migrations.startup;
+
+        if startup != Startup::Off
+            && (is_private_memory(&self.runtime()?.url)
+                || is_private_memory(&self.migration()?.url))
+        {
+            return Err(SettingsError::PrivateMemory);
+        }
+
+        Ok(startup)
+    }
+
     /// A `DbConfig` for `url` with this database's driver options and pool.
-    fn config(&self, url: String) -> Result<DbConfig, SettingsError> {
+    pub(super) fn config(&self, url: String) -> Result<DbConfig, SettingsError> {
         let driver = match &self.driver {
             Some(driver) => DriverConfig::from_parts(driver, self.options.clone())
                 .map_err(SettingsError::Options)?,

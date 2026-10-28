@@ -9,8 +9,10 @@ use rupa_migrate::commands::{Command, Exit, Outcome};
 
 /// How pools of one mode open and run migration commands of catalogs of
 /// `M`, implemented by the `Connect::Completion` markers: `Immediate` for
-/// sync pools, `Awaited` for async ones. Sync work runs on the calling
-/// task, which only startup and Setup-phase commands do.
+/// sync pools, `Awaited` for async ones. Sync work runs on a scoped thread
+/// outside the async runtime, as drivers such as the sync `postgres` start
+/// their own runtime and panic inside another; the calling task waits for
+/// it, which only startup and Setup-phase commands do.
 pub trait Mode<P: Connect, M>: Sized {
     /// Opens the pool `config` describes.
     fn pool(config: &DbConfig) -> impl Future<Output = Result<P, ConnectError>> + Send;
@@ -49,6 +51,15 @@ mod sync {
 
     use super::{Mode, configured};
 
+    /// `work`'s result, computed on a scoped thread outside the async
+    /// runtime. A panic in `work` resumes on the caller.
+    fn blocking<T: Send>(work: impl FnOnce() -> T + Send) -> T {
+        std::thread::scope(|scope| match scope.spawn(work).join() {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        })
+    }
+
     impl<P, M> Mode<P, M> for Immediate
     where
         P: SyncConnect,
@@ -56,7 +67,7 @@ mod sync {
         M: Migration<P::Connection> + Sync,
     {
         async fn pool(config: &DbConfig) -> Result<P, ConnectError> {
-            P::connect(config)
+            blocking(|| P::connect(config))
         }
 
         async fn run<'c>(
@@ -64,7 +75,7 @@ mod sync {
             command: &Command<'_>,
             config: &DbConfig,
         ) -> Outcome<'c> {
-            commands::sync::run(catalog, command, || P::connect_one(config))
+            blocking(|| commands::sync::run(catalog, command, || P::connect_one(config)))
         }
 
         async fn execute(
@@ -72,7 +83,9 @@ mod sync {
             catalog: &Catalog<'static, M>,
             config: Result<&DbConfig, &str>,
         ) -> Exit {
-            cli::sync::execute(migrate, catalog, |_| P::connect_one(configured(config)?))
+            blocking(|| {
+                cli::sync::execute(migrate, catalog, |_| P::connect_one(configured(config)?))
+            })
         }
     }
 }

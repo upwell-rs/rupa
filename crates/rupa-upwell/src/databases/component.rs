@@ -2,7 +2,7 @@ use std::any::TypeId;
 use std::collections::HashSet;
 use std::fmt;
 use std::ops::Deref;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use rupa_core::config::DbConfig;
 use rupa_migrate::ApplyOptions;
@@ -75,9 +75,10 @@ pub(super) async fn build<D: Declaration>(
 
 /// Checks or applies `D`'s migrations as `settings` say. Apply runs once
 /// per target and process; later builds, such as after a configuration
-/// reload, only check.
+/// reload, only check. A failed or cancelled apply leaves the next build to
+/// apply again.
 async fn gate<D: Declaration>(settings: &DatabaseSettings) -> Result<(), DatabaseError> {
-    let startup = settings.migrations.startup;
+    let startup = settings.startup()?;
 
     if startup == Startup::Off {
         return Ok(());
@@ -85,10 +86,13 @@ async fn gate<D: Declaration>(settings: &DatabaseSettings) -> Result<(), Databas
 
     let config = settings.migration()?;
     let catalog = D::catalog()?;
-    let command = if startup == Startup::Apply && first_apply::<D>(&config) {
-        Command::Apply(ApplyOptions::DEFAULT)
-    } else {
-        Command::Status
+    let claim = match startup {
+        Startup::Apply => ApplyClaim::take::<D>(&config),
+        Startup::Off | Startup::Check => None,
+    };
+    let command = match claim {
+        Some(_) => Command::Apply(ApplyOptions::DEFAULT),
+        None => Command::Status,
     };
     let outcome = D::Mode::run(&catalog, &command, &config).await;
     let report = || outcome.render(Format::Human, &Redactor::new().url(&config.url));
@@ -98,7 +102,13 @@ async fn gate<D: Declaration>(settings: &DatabaseSettings) -> Result<(), Databas
     };
 
     match outcome.exit() {
-        Exit::Success if pending == 0 => Ok(()),
+        Exit::Success if pending == 0 => {
+            if let Some(claim) = claim {
+                claim.keep();
+            }
+
+            Ok(())
+        }
         Exit::Success => Err(DatabaseError::Pending {
             database: D::NAME,
             pending,
@@ -112,11 +122,42 @@ async fn gate<D: Declaration>(settings: &DatabaseSettings) -> Result<(), Databas
     }
 }
 
-/// Whether this is the first apply to `config`'s target for `D` in this
-/// process. A poisoned set is still a valid set, so poisoning is ignored.
-fn first_apply<D: Declaration>(config: &DbConfig) -> bool {
-    let applied = APPLIED.get_or_init(Mutex::default);
-    let mut applied = applied.lock().unwrap_or_else(PoisonError::into_inner);
+/// The right to apply migrations to one target for one declaration, taken
+/// at most once per process. Dropped before [`keep`](Self::keep), as when the
+/// apply failed or was cancelled, it lets a later build apply again.
+struct ApplyClaim {
+    key: Option<(TypeId, String)>,
+}
 
-    applied.insert((TypeId::of::<D>(), config.url.clone()))
+impl ApplyClaim {
+    /// The claim on `config`'s target for `D`, unless this process already
+    /// holds or kept one.
+    fn take<D: Declaration>(config: &DbConfig) -> Option<Self> {
+        let key = (TypeId::of::<D>(), config.url.clone());
+        let taken = applied().insert(key.clone());
+
+        taken.then_some(Self { key: Some(key) })
+    }
+
+    /// Records the target as applied for the rest of the process.
+    fn keep(mut self) {
+        self.key = None;
+    }
+}
+
+impl Drop for ApplyClaim {
+    fn drop(&mut self) {
+        if let Some(key) = &self.key {
+            applied().remove(key);
+        }
+    }
+}
+
+/// The targets this process applied migrations to, or is applying them to.
+/// A poisoned set is still a valid set, so poisoning is ignored.
+fn applied() -> MutexGuard<'static, HashSet<(TypeId, String)>> {
+    APPLIED
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
 }
