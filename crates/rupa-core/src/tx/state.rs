@@ -1,7 +1,7 @@
 //! The per-connection transaction state drivers embed: the rollback a
 //! dropped transaction owes, and whether the top-level transaction is open.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use super::rollback_to;
 use crate::error::TxError;
@@ -69,49 +69,49 @@ impl Default for PendingRollback {
     }
 }
 
-/// Whether a connection's top-level transaction is open, for drivers to
-/// embed and return from [`TxConnection::slot`](super::TxConnection::slot).
+/// How deep a connection's open transactions go, for drivers to embed and
+/// return from [`TxConnection::slot`](super::TxConnection::slot): `0` with
+/// none open, `n + 1` while the transaction or savepoint at depth `n` is.
 ///
-/// A connection runs one top-level transaction at a time: a second `BEGIN`
-/// would commit (MySQL) or join (Postgres) the first, so opening one while
-/// the slot is taken fails with [`TxError::AlreadyOpen`]. Savepoints do not
-/// take it.
+/// A transaction or savepoint opens only at the innermost depth, one per
+/// level: a second `BEGIN` would commit (MySQL) or join (Postgres) the
+/// first, and two sibling savepoints would share one name, so either fails
+/// with [`TxError::AlreadyOpen`].
 #[derive(Debug, Default)]
-pub struct TxSlot(AtomicBool);
+pub struct TxSlot(AtomicU32);
 
 impl TxSlot {
-    /// Whether a top-level transaction holds the slot.
+    /// Whether a top-level transaction is open.
     pub fn is_open(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.load(Ordering::Acquire) > 0
     }
 
-    /// Takes the slot for a transaction at `depth`: only a top-level one
-    /// (`depth == 0`) needs it, so a savepoint's claim holds nothing.
+    /// Takes the level at `depth`, which must be the innermost one.
     pub(crate) fn claim(&self, depth: u32) -> Result<Claim<'_>, TxError> {
-        if depth > 0 {
-            return Ok(Claim(None));
-        }
+        self.0
+            .compare_exchange(depth, depth + 1, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| TxError::AlreadyOpen)?;
 
-        if self.0.swap(true, Ordering::AcqRel) {
-            return Err(TxError::AlreadyOpen);
-        }
-
-        Ok(Claim(Some(self)))
+        Ok(Claim { slot: self, depth })
     }
 
-    /// Frees the slot once the top-level transaction ended.
-    pub(crate) fn release(&self) {
-        self.0.store(false, Ordering::Release);
+    /// Frees the level at `depth` once its transaction or savepoint ended.
+    pub(crate) fn release(&self, depth: u32) {
+        self.0.store(depth, Ordering::Release);
     }
 }
 
-/// A taken [`TxSlot`] (none for a savepoint) whose transaction is still
-/// being opened. Dropped, as when `BEGIN` failed or its future was
-/// cancelled, it frees the slot again.
-pub(crate) struct Claim<'s>(Option<&'s TxSlot>);
+/// A taken [`TxSlot`] level whose transaction or savepoint is still being
+/// opened. Dropped, as when `BEGIN` failed or its future was cancelled, it
+/// frees the level again.
+pub(crate) struct Claim<'s> {
+    slot: &'s TxSlot,
+    depth: u32,
+}
 
 impl Claim<'_> {
-    /// Hands the slot to the opened transaction, which frees it when dropped.
+    /// Hands the level to the opened transaction, which frees it when
+    /// dropped.
     pub(crate) fn keep(self) {
         std::mem::forget(self);
     }
@@ -119,8 +119,6 @@ impl Claim<'_> {
 
 impl Drop for Claim<'_> {
     fn drop(&mut self) {
-        if let Some(slot) = self.0 {
-            slot.release();
-        }
+        self.slot.release(self.depth);
     }
 }

@@ -31,26 +31,36 @@ fn clearing_a_sent_rollback_keeps_one_deferred_meanwhile() {
 }
 
 #[test]
-fn a_slot_holds_one_top_level_transaction() {
+fn a_slot_opens_one_transaction_per_level() {
     let slot = TxSlot::default();
-    let claim = slot.claim(0).expect("a free slot");
+    let top = slot.claim(0).expect("a free slot");
 
     assert!(slot.is_open());
     assert!(matches!(slot.claim(0), Err(TxError::AlreadyOpen)));
+    assert!(
+        matches!(slot.claim(2), Err(TxError::AlreadyOpen)),
+        "a savepoint opens only at the innermost depth"
+    );
 
-    drop(slot.claim(1).expect("a savepoint needs no slot"));
+    let child = slot.claim(1).expect("a savepoint in the transaction");
 
-    assert!(slot.is_open(), "a savepoint's claim frees nothing");
+    assert!(
+        matches!(slot.claim(1), Err(TxError::AlreadyOpen)),
+        "a sibling savepoint would share the first's name"
+    );
 
-    drop(claim);
+    drop(child);
+    slot.claim(1).expect("a freed level").keep();
+    slot.release(1);
+    drop(top);
 
-    assert!(!slot.is_open(), "an unkept claim frees the slot");
+    assert!(!slot.is_open(), "an unkept claim frees its level");
 
     slot.claim(0).expect("a freed slot").keep();
 
-    assert!(slot.is_open(), "a kept claim holds the slot");
+    assert!(slot.is_open(), "a kept claim holds its level");
 
-    slot.release();
+    slot.release(0);
 
     assert!(!slot.is_open());
 }

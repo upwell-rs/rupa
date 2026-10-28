@@ -168,9 +168,7 @@ where
             self.conn.defer_rollback(self.depth);
         }
 
-        if self.depth == 0 {
-            self.conn.slot().release();
-        }
+        self.conn.slot().release(self.depth);
     }
 }
 
