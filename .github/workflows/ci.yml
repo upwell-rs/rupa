@@ -87,6 +87,12 @@ jobs:
       - run: cargo run -p rupa-example-app -- primary apply
       - run: cargo run -p rupa-example-app -- reporting apply
       - run: cargo run -p rupa-example-upwell -- --config examples/migrations/upwell/config migrate apply
+      # The facade's runnable examples; `memory_repository_test` runs as a test above.
+      - run: |
+          set -e
+          for e in sqlite_crud sqlite_joins sqlite_dsl sqlite_repository sqlite_repository_tx sqlite_repository_crud; do
+            cargo run -p rupa --example "$e" --features sqlite
+          done
       # nextest doesn't run doctests.
       - run: cargo test --doc --workspace --features rupa/full
       # trybuild's work dir looks like a nested target dir to rust-cache, whose

@@ -72,6 +72,21 @@ Repository traits are dyn-compatible by default, so they can be injected as
 futures when the trait is only used through its generated `Repo` type. Async
 repositories run on sync connections too, without an adapter.
 
+Repositories are tested without a database: the in-memory backend evaluates
+the same queries with Postgres semantics, so application code that depends on
+the trait runs unchanged in a unit test.
+
+```rust
+let mut db = rupa::drivers::memory::MemoryDb::new();
+db.register::<User>();
+
+let users = UserRepositoryRepo::new(db);
+users.create(&new_user).await?;     // the same query, evaluated in memory
+```
+
+See [rupa, Diesel and SeaORM](docs/comparison.md) for the same tasks side by
+side, with what each does better.
+
 ## Examples
 
 See [`docs/architecture.md`](docs/architecture.md) for how a query flows
@@ -85,7 +100,9 @@ no database server, Docker, or database file.
 | [CRUD and transactions](crates/rupa/examples/sqlite_crud.rs) | Entity capabilities, typed insert and patch values, select, get, rollback, commit, delete | `cargo run -p rupa --example sqlite_crud --features sqlite` |
 | [Joins](crates/rupa/examples/sqlite_joins.rs) | Declared relations, inner and left joins, `Joined`, `#[query]`, bound SQL | `cargo run -p rupa --example sqlite_joins --features sqlite` |
 | [Repositories](crates/rupa/examples/sqlite_repository.rs) | `#[repository]` with a statically typed SQLite pool | `cargo run -p rupa --example sqlite_repository --features sqlite` |
+| [Repository CRUD](crates/rupa/examples/sqlite_repository_crud.rs) | Inserts with and without `returning`, one and many, get, patch, delete and a filtered select through subset shapes | `cargo run -p rupa --example sqlite_repository_crud --features sqlite` |
 | [Repository transaction](crates/rupa/examples/sqlite_repository_tx.rs) | Two repositories sharing one transaction by reference, explicit rollback and commit | `cargo run -p rupa --example sqlite_repository_tx --features sqlite` |
+| [Testing in memory](crates/rupa/examples/memory_repository_test/main.rs) | A service unit-tested through its repository on `MemoryDb`, no database at all | `cargo test -p rupa --example memory_repository_test --features memory` |
 | [DSL and JSON](crates/rupa/examples/sqlite_dsl.rs) | Custom DSL lowering, JSON paths, dialect rendering, bound parameters | `cargo run -p rupa --example sqlite_dsl --features sqlite` |
 | [Dynamic connection](crates/rupa/examples/sqlite_config.rs) | `DbConfig`, runtime driver selection, raw DDL, async pooled repository | `cargo run -p rupa --example sqlite_config --features sqlite,dynamic` |
 | [Async companion](crates/rupa/examples/sqlite_async.rs) | The same `Task` model and a repository on an async pool and transaction | `cargo run -p rupa --example sqlite_async --features sqlx-sqlite` |
