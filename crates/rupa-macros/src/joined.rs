@@ -27,7 +27,7 @@ use syn::parse::ParseStream;
 use syn::spanned::Spanned;
 use syn::{Data, DeriveInput, Fields, Ident, LitInt, Path, Token, Type};
 
-use crate::model::{self, column_expr, option_inner};
+use crate::model::{self, column_path, option_inner};
 
 enum Source {
     /// `#[from(Entity::field)]`
@@ -174,7 +174,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         let fi = &part.ident;
         match &part.source {
             Source::Column { entity, field } => {
-                let column = column_expr(&ms, &quote!(#entity), field, field.span());
+                let column = column_path(&quote!(#entity), field);
                 projection.push(quote! {
                     columns.push(#ms::ColumnRef::of(#part_of::ID, #column.name()));
                 });
@@ -187,7 +187,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
                 projection.push(quote! {
                     let source = #part_of::ID;
                     columns.extend(
-                        <#entity as #ms::Entity>::columns()
+                        <#entity as #ms::Entity>::COLUMNS
                             .iter()
                             .map(|c| #ms::ColumnRef::of(source, c.name)),
                     );

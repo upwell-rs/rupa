@@ -1,6 +1,6 @@
 //! Runs the shared conformance suite against a real Postgres in Docker.
 
-use rupa::core::tx::AsyncTxConnection;
+use rupa::AsyncTxConnection;
 use rupa::{DbConfig, Registry};
 use rupa_conformance::{Harness, POSTGRES_DDL};
 use rupa_driver_tokio_postgres::{PgDriver, PgExecutor, PgPool};
@@ -60,8 +60,8 @@ async fn conformance() {
 /// A pooled connection whose transaction was dropped goes back dirty; the
 /// pool rolls it back before handing it out again.
 async fn dirty_connections_are_cleaned_on_return(url: &str) {
-    use rupa::core::ExprOps as _;
-    use rupa::core::tx::AsyncTransactional;
+    use rupa::AsyncTransactional;
+    use rupa::ExprOps as _;
     use rupa::{AsyncPool, PoolConfig};
     use rupa_conformance::Note;
 
@@ -69,11 +69,11 @@ async fn dirty_connections_are_cleaned_on_return(url: &str) {
         .await
         .unwrap();
     {
-        let mut conn = pool.get().await.unwrap();
+        let conn = pool.get().await.unwrap();
         drop(conn.begin().await.unwrap());
         assert!(conn.is_dirty());
     }
-    let mut conn = pool.get().await.unwrap();
+    let conn = pool.get().await.unwrap();
     assert!(!conn.is_dirty(), "recycling cleaned it");
     assert_eq!(conn.statement_cache().capacity(), 256, "the default");
     drop(conn);
@@ -83,15 +83,11 @@ async fn dirty_connections_are_cleaned_on_return(url: &str) {
         serde_json::from_value(serde_json::json!({ "url": url, "statement_cache_size": 2 }))
             .unwrap();
     let small = PgPool::connect(&config).await.unwrap();
-    let mut conn = small.get().await.unwrap();
+    let conn = small.get().await.unwrap();
     for n in 1..=4i64 {
         let ids: Vec<i64> = (0..n).collect();
-        let q = rupa::core::select::<Note>()
-            .filter(rupa::col!(Note::id).in_(ids))
-            .all();
-        rupa::core::exec::AsyncExecutor::run(&mut conn, q)
-            .await
-            .unwrap();
+        let q = rupa::core::select::<Note>().filter(Note::ID.in_(ids)).all();
+        q.execute(&conn).await.unwrap();
     }
 
     assert_eq!(
@@ -111,7 +107,7 @@ async fn dirty_connections_are_cleaned_on_return(url: &str) {
 /// The async-drop strategy, observed directly: a dropped `PgTx` leaves the
 /// executor dirty until the rollback is sent.
 async fn dropped_tx_marks_the_connection_dirty(exec: &mut PgExecutor) {
-    use rupa::core::tx::AsyncTransactional;
+    use rupa::AsyncTransactional;
 
     exec.clean().await.unwrap();
     exec.client().batch_execute(POSTGRES_DDL).await.unwrap();

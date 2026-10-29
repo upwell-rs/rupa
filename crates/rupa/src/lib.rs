@@ -12,7 +12,8 @@
 //! | `dynamic` | run-time driver selection and type erasure ([`registry()`], [`connect`], `Database`) |
 //! | `postgres`, `postgres-sync`, `sqlite`, `sqlite-unbundled`, `mysql`, `memory`, `sqlx-*` | drivers |
 //! | `tls-rustls` | TLS for every enabled networked driver |
-//! | `full` | every driver, plus `dynamic` |
+//! | `migrations` | explicit SQL/Rust migration catalogs and native SQLite apply |
+//! | `full` | every driver, plus `dynamic` and `migrations` |
 //!
 //! # Statically typed (the default)
 //!
@@ -21,14 +22,26 @@
 //!
 //! ```ignore
 //! let pool = rupa::drivers::sqlite::SqlitePool::connect(&DbConfig::new("sqlite://app.db"))?;
-//! let users = UserRepositoryView::new(&pool);
+//! let users = UserRepositoryRepo::new(&pool);
+//! ```
+//!
+//! Every pool, connection and transaction is a [`Connection`], and so is a
+//! `&`, `&mut`, `Box`, `Rc` or `Arc` of one. A repository holds one, and
+//! branches into a transaction itself:
+//!
+//! ```ignore
+//! let notes = NoteRepositoryRepo::new(&pool);
+//! let tx = notes.open_tx(None)?;
+//! tx.add(&note)?;
+//! tags.tx(tx.connection()).add(&tag)?;   // another repository, same transaction
+//! tx.commit()?;
 //! ```
 //!
 //! # Chosen at run time (`dynamic`)
 //!
 //! ```ignore
 //! let db: rupa::Database = rupa::connect(&DbConfig::new("sqlite://app.db")).await?;
-//! let users = UserRepositoryView::new(&db);
+//! let users = UserRepositoryRepo::new(&db);
 //! ```
 //!
 //! [`registry()`] lists the drivers compiled in, in the order they are
@@ -45,37 +58,42 @@ mod registry;
 pub use rupa_core as core;
 pub use rupa_dsl_std as dsl_std;
 pub use rupa_macros as macros;
+#[cfg(feature = "migrations")]
+pub use rupa_migrate as migrate;
 pub use rupa_sql as sql;
 
 #[cfg(feature = "dynamic")]
 pub use registry::{connect, registry};
-#[cfg(feature = "async")]
-pub use rupa_core::AsyncTxSession;
-pub use rupa_core::TxError;
 pub use rupa_core::config::{
     DbConfig, DriverConfig, MySqlOptions, PoolConfig, PostgresOptions, SqliteOptions,
 };
+pub use rupa_core::dialect::{
+    Capability, Dialect, DialectId, DynDialect, Memory, MySql, Postgres, Sqlite, Supports,
+};
 #[cfg(feature = "dynamic")]
 pub use rupa_core::erased::{BoxAsyncExecutor, BoxAsyncTx, BoxExecutor, BoxTx};
-pub use rupa_core::error::{ConnectError, DynError};
+pub use rupa_core::error::{
+    ConnectError, DecodeError, DslError, DynError, ResultError, RowError, TxError,
+};
 #[cfg(feature = "async")]
-pub use rupa_core::pool::AsyncPool;
-pub use rupa_core::pool::{Pool, PoolStatus};
+pub use rupa_core::exec::{AsyncExecutor, Awaited, Blocking};
+pub use rupa_core::exec::{ExecError, Executor, Immediate, now};
+#[cfg(feature = "async")]
+pub use rupa_core::pool::{AsyncConnect, AsyncPool, OwnedAsyncTx, SingleConnection};
+pub use rupa_core::pool::{Connect, OwnedTx, Pool, PoolStatus, SyncConnect};
 #[cfg(feature = "dynamic")]
 pub use rupa_core::registry::{Database, Driver, Registry};
 #[cfg(feature = "async")]
 pub use rupa_core::security::AsyncSecureTransactional;
 pub use rupa_core::security::{SecureTransactional, SecureTx, SecurityContext};
 #[cfg(feature = "async")]
-pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional};
-pub use rupa_core::tx::{IsolationLevel, Transaction, Transactional, TxOptions};
+pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxConnection};
+pub use rupa_core::tx::{IsolationLevel, Transaction, Transactional, Tx, TxConnection, TxOptions};
 pub use rupa_core::{
-    Acquire, Column, Deletable, Entity, Executor, Expr, ExprOps, FromRow, Gettable, Insertable,
-    Json, NoKey, Query, Repo, RepoMut, RepoView, Scalar, Shared, TxSession, Updatable, bind, col,
-    delete, get, insert, raw, select, update,
+    Column, Connection, Deletable, DynRepository, Entity, Expr, ExprOps, FromRow, Gettable,
+    Insertable, Json, Keyed, NoKey, Query, Reference, Scalar, SqlType, Updatable, Value, bind,
+    delete, get, insert, json, raw, select, update,
 };
-#[cfg(feature = "async")]
-pub use rupa_core::{AcquireAsync, AsyncExecutor, SharedAsync};
 pub use rupa_macros::{
     Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository,
 };
@@ -121,12 +139,19 @@ pub mod drivers {
 
 /// The names most code needs: `use rupa::prelude::*`.
 pub mod prelude {
-    pub use rupa_core::Repo;
+    pub use rupa_core::error::DynError;
     pub use rupa_core::prelude::*;
     #[cfg(feature = "async")]
     pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional};
     pub use rupa_core::tx::{Transaction, Transactional, TxOptions};
+    pub use rupa_core::{Connection, DbConfig};
     pub use rupa_macros::{
         Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository,
     };
+    #[cfg(feature = "migrations")]
+    #[allow(
+        unused_imports,
+        reason = "empty unless exactly one migration mode is enabled"
+    )]
+    pub use rupa_migrate::prelude::*;
 }

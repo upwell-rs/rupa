@@ -6,7 +6,7 @@
 //! overhead:
 //!
 //! - `executor`: a `SqliteExecutor`, statically dispatched;
-//! - `repo_shared`: an `Arc<dyn Users>` repository over `UsersRepo::shared`;
+//! - `repo_shared`: an `Arc<dyn Users>` repository over one shared executor;
 //! - `repo_database`: the same repository over a type-erased, pooled
 //!   `Database` (what `rupa::connect` returns).
 
@@ -14,7 +14,7 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use rupa::core::exec::{Blocking, Executor};
+use rupa::Blocking;
 use rupa::prelude::*;
 use rupa::{Database, Pool as _, PoolConfig};
 use rupa_bench::{NewUser, SQLITE_DDL, User, Users, UsersRepo, new_users};
@@ -33,7 +33,11 @@ fn seed(exec: &mut SqliteExecutor) {
     exec.connection().execute_batch(SQLITE_DDL).unwrap();
     let users = new_users(ROWS);
     for chunk in users.chunks(100) {
-        exec.run(insert::<User>().values(chunk).affected()).unwrap();
+        insert::<User>()
+            .values(chunk)
+            .affected()
+            .execute(exec)
+            .unwrap();
     }
 }
 
@@ -56,19 +60,19 @@ fn ids() -> impl FnMut() -> i64 {
 fn sqlite(c: &mut Criterion) {
     let mut g = c.benchmark_group("sqlite");
 
-    let mut exec = seeded_sqlite();
+    let exec = seeded_sqlite();
     let mut next = ids();
     g.bench_function("get_by_id/executor", |b| {
-        b.iter(|| exec.run(get::<User>(&next())).unwrap().unwrap())
+        b.iter(|| get::<User>(&next()).execute(&exec).unwrap().unwrap())
     });
     g.bench_function("active_page_50/executor", |b| {
         b.iter(|| {
             let q = select::<User>()
-                .filter(col!(User::active).eq(true))
-                .order_by(col!(User::id).asc())
+                .filter(User::ACTIVE.eq(true))
+                .order_by(User::ID.asc())
                 .limit(50)
                 .all();
-            exec.run(q).unwrap()
+            q.execute(&exec).unwrap()
         })
     });
     let user = NewUser {
@@ -77,8 +81,11 @@ fn sqlite(c: &mut Criterion) {
     };
     g.bench_function("insert_rolled_back/executor", |b| {
         b.iter(|| {
-            let mut tx = exec.begin().unwrap();
-            tx.run(insert::<User>().value(black_box(&user)).affected())
+            let tx = exec.begin().unwrap();
+            insert::<User>()
+                .value(black_box(&user))
+                .affected()
+                .execute(&tx)
                 .unwrap();
             tx.rollback().unwrap();
         })
@@ -88,11 +95,11 @@ fn sqlite(c: &mut Criterion) {
     // caching rendered SQL saves per query.
     rupa::sql::render_cache().set_capacity(0);
     g.bench_function("get_by_id/executor_render_uncached", |b| {
-        b.iter(|| exec.run(get::<User>(&next())).unwrap().unwrap())
+        b.iter(|| get::<User>(&next()).execute(&exec).unwrap().unwrap())
     });
     rupa::sql::render_cache().set_capacity(rupa::sql::cache::DEFAULT_CAPACITY);
 
-    let shared: Arc<dyn Users> = Arc::new(UsersRepo::shared(Blocking(seeded_sqlite())));
+    let shared: Arc<dyn Users> = Arc::new(UsersRepo::new(seeded_sqlite()));
     let mut next = ids();
     g.bench_function("get_by_id/repo_shared", |b| {
         b.iter(|| pollster::block_on(shared.by_id(next())).unwrap().unwrap())
@@ -130,22 +137,29 @@ fn memory(c: &mut Criterion) {
     let mut g = c.benchmark_group("memory");
     let mut db = MemoryDb::new();
     db.register::<User>();
-    db.run(insert::<User>().values(&new_users(ROWS)).affected())
+    insert::<User>()
+        .values(&new_users(ROWS))
+        .affected()
+        .execute(&db)
         .unwrap();
     let mut next = ids();
     g.bench_function("get_by_id", |b| {
-        b.iter(|| db.run(get::<User>(&next())).unwrap().unwrap())
+        b.iter(|| get::<User>(&next()).execute(&db).unwrap().unwrap())
     });
     g.bench_function("insert_rolled_back", |b| {
         b.iter_batched(
             || new_users(1),
             |users| {
-                let mut tx = db.begin().unwrap();
+                let tx = db.begin().unwrap();
                 let user = NewUser {
                     email: "bench@example.com".into(),
                     ..users.into_iter().next().unwrap()
                 };
-                tx.run(insert::<User>().value(&user).affected()).unwrap();
+                insert::<User>()
+                    .value(&user)
+                    .affected()
+                    .execute(&tx)
+                    .unwrap();
                 tx.rollback().unwrap();
             },
             BatchSize::SmallInput,

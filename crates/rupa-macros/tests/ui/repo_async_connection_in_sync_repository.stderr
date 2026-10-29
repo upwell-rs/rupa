@@ -1,0 +1,22 @@
+error[E0599]: the method `all` exists for struct `UsersRepo<&AsyncMemoryDb>`, but its trait bounds were not satisfied
+  --> tests/ui/repo_async_connection_in_sync_repository.rs:19:19
+   |
+10 | #[repository]
+   | ------------- method `all` not found for this struct because it doesn't satisfy `UsersRepo<&AsyncMemoryDb>: Users`
+...
+19 |     let _ = users.all();
+   |                   ^^^ method cannot be called on `UsersRepo<&AsyncMemoryDb>` due to unsatisfied trait bounds
+   |
+note: trait bound `<&AsyncMemoryDb as Connection>::Mode = Immediate` was not satisfied
+  --> tests/ui/repo_async_connection_in_sync_repository.rs:10:1
+   |
+10 | #[repository]
+   | ^^^^^^^^^^^^^
+11 | trait Users {
+   |       ^^^^^
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following traits define an item `all`, perhaps you need to implement one of them:
+           candidate #1: `Users`
+           candidate #2: `Iterator`
+           candidate #3: `futures_util::stream::stream::StreamExt`
+   = note: this error originates in the attribute macro `repository` (in Nightly builds, run with -Z macro-backtrace for more info)

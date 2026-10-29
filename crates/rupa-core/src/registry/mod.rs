@@ -11,13 +11,12 @@
 //!   facade builds one, once, from its cargo features (`rupa::registry()`,
 //!   `rupa::connect(..)`).
 //! - A [`Database`] is the result: a cheaply cloneable, type-erased async
-//!   connection pool (`Arc` inside). It is an [`AcquireAsync`](crate::repo::AcquireAsync) source, so
-//!   repository views run on `Database`, which also opens owned,
-//!   `'static` transactions for request-scoped use.
+//!   connection pool (`Arc` inside). It is a
+//!   [`Connection`](crate::connection::Connection), so repositories run on
+//!   it, and it opens owned, `'static` transactions for request-scoped use.
 //!
 //! Building is always async and fallible (one registry, not mirrored sync
-//! and async ones): sync drivers are served through [`Blocking`](crate::exec::Blocking), as for
-//! repositories.
+//! and async ones): sync drivers are served through [`Blocking`](crate::exec::Blocking).
 //!
 //! # Several databases
 //!
@@ -29,7 +28,7 @@
 //! let registry = rupa::registry();
 //! let primary = registry.connect(&config.primary).await?;
 //! let replica = registry.connect(&config.replica).await?;
-//! let reads = UserRepositoryView::new(&replica);
+//! let reads = UserRepositoryRepo::new(&replica);
 //! ```
 
 mod database;

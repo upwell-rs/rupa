@@ -6,6 +6,9 @@
 /// conversions, [`ExecError`](rupa_core::exec::ExecError) and a conversion
 /// into [`DynError`](rupa_core::DynError).
 ///
+/// Driver-specific variants may follow `Db`; each wraps a typed error that is
+/// displayed transparently and constructed explicitly (no `From` conversion).
+///
 /// The calling crate must depend on `thiserror`.
 ///
 /// ```ignore
@@ -24,7 +27,8 @@ macro_rules! driver_error {
         $(#[$meta:meta])*
         $vis:vis enum $name:ident {
             $(#[$db_meta:meta])*
-            Db($db:ty) $(,)?
+            Db($db:ty)
+            $(, $(#[$extra_meta:meta])* $extra:ident($extra_ty:ty))* $(,)?
         }
     ) => {
         $(#[$meta])*
@@ -50,6 +54,11 @@ macro_rules! driver_error {
             /// No pooled connection could be obtained (e.g. a timeout).
             #[error("connection pool: {0}")]
             Pool(#[source] ::std::boxed::Box<dyn ::std::error::Error + ::std::marker::Send + ::std::marker::Sync>),
+            $(
+                $(#[$extra_meta])*
+                #[error(transparent)]
+                $extra($extra_ty),
+            )*
         }
 
         impl $crate::__private::rupa_core::exec::ExecError for $name {

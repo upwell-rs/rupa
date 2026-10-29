@@ -12,8 +12,9 @@ use std::fmt;
 use rupa_core::MySql;
 use rupa_core::config::{DbConfig, MySqlOptions, PoolConfig};
 use rupa_core::error::{ConnectError, DynError};
+use rupa_core::exec::Immediate;
 use rupa_core::pool::r2d2 as glue;
-use rupa_core::pool::{OwnedTx, Pooled};
+use rupa_core::pool::{Connect, OwnedTx, Pooled, SyncConnect};
 use rupa_core::tx::TxConnection;
 
 use crate::{MySqlError, MySqlExecutor, found_rows};
@@ -21,7 +22,7 @@ use crate::{MySqlError, MySqlExecutor, found_rows};
 /// A connection checked out of a [`MySqlPool`].
 pub type MySqlConn = Pooled<r2d2::PooledConnection<MySqlManager>>;
 
-/// A transaction that owns its pooled connection (see [`Pool::begin`](rupa_core::pool::Pool::begin)).
+/// A transaction that owns its pooled connection (what `begin` on the pool returns).
 pub type MySqlPoolTx = OwnedTx<MySqlConn>;
 
 /// Opens [`MySqlExecutor`]s for `r2d2`.
@@ -79,7 +80,7 @@ impl r2d2::ManageConnection for MySqlManager {
     }
 
     fn has_broken(&self, conn: &mut MySqlExecutor) -> bool {
-        conn.is_dirty() && conn.clean().is_err()
+        holds_migration_state(conn) || (conn.is_dirty() && conn.clean().is_err())
     }
 }
 
@@ -103,9 +104,46 @@ impl MySqlPool {
 
     /// Builds a pool for a `mysql:` URL with the config's [`MySqlOptions`].
     pub fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
-        let opts = mysql::Opts::from_url(&config.url)
-            .map_err(|e| ConnectError::InvalidUrl(e.to_string()))?;
-        let manager = MySqlManager::with_options(opts, config.driver.mysql()?);
-        Self::new(manager, &config.pool).map_err(|e| ConnectError::Connect(DynError::new(e)))
+        Self::new(manager(config)?, &config.pool)
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
     }
+}
+
+impl Connect for MySqlPool {
+    type Completion = Immediate;
+    type Connection = MySqlExecutor;
+}
+
+impl SyncConnect for MySqlPool {
+    fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
+        Self::connect(config)
+    }
+
+    fn connect_one(config: &DbConfig) -> Result<MySqlExecutor, ConnectError> {
+        r2d2::ManageConnection::connect(&manager(config)?)
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
+    }
+}
+
+/// The connection manager `config` describes.
+fn manager(config: &DbConfig) -> Result<MySqlManager, ConnectError> {
+    let opts =
+        mysql::Opts::from_url(&config.url).map_err(|e| ConnectError::InvalidUrl(e.to_string()))?;
+
+    Ok(MySqlManager::with_options(opts, config.driver.mysql()?))
+}
+
+/// Whether a migration run left state on `conn`, so the pool must discard it
+/// instead of handing it out again.
+fn holds_migration_state(conn: &MySqlExecutor) -> bool {
+    #[cfg(feature = "migrations")]
+    let active = conn.migration.is_active();
+    #[cfg(not(feature = "migrations"))]
+    let active = {
+        let _ = conn;
+
+        false
+    };
+
+    active
 }

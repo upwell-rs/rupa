@@ -34,6 +34,8 @@ impl crate::sealed::Sealed for sqlx::Postgres {}
 
 impl Backend for sqlx::Postgres {
     type Dialect = rupa_core::Postgres;
+    #[cfg(feature = "migrations")]
+    type Migration = rupa_migrate::protocol::postgres::State;
     const DRIVER: &'static str = "sqlx-postgres";
     const SCHEMES: &'static [&'static str] = &["postgres", "postgresql"];
 

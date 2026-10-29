@@ -36,7 +36,7 @@ pub fn status<M: r2d2::ManageConnection>(pool: &r2d2::Pool<M>) -> PoolStatus {
 }
 
 /// Declares a sync driver's pool: a newtype over `r2d2::Pool<manager>` that
-/// implements [`Pool`](crate::pool::Pool), with `from_r2d2`, `r2d2` and a
+/// implements [`Pool`](crate::pool::Pool) and the executor traits, with `from_r2d2`, `r2d2` and a
 /// private `build(manager, builder)` that opens one connection first, so a
 /// wrong URL or password fails with the driver's own error (r2d2 would retry
 /// until the acquire timeout and report only that).
@@ -96,12 +96,10 @@ macro_rules! r2d2_pool {
             }
         }
 
+        $crate::pool_executor!(sync, [] $name, |pool| &pool.dialect);
+
         impl $crate::pool::Pool for $name {
             type Conn = $crate::pool::Pooled<$crate::pool::r2d2::__r2d2::PooledConnection<$manager>>;
-
-            fn dialect(&self) -> &$dialect {
-                &self.dialect
-            }
 
             fn get(&self) -> ::std::result::Result<Self::Conn, $error> {
                 self.pool

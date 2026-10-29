@@ -1,0 +1,1019 @@
+# Migrations
+
+Enable `migrations` and a supported driver: `sqlite` (bundled SQLite),
+`sqlite-unbundled` (system SQLite), `postgres-sync` (the sync `postgres`
+crate), `mysql` (the sync `mysql` crate), `postgres` (async, tokio-postgres) or
+an async sqlx driver (`sqlx-postgres`, `sqlx-mysql`, `sqlx-sqlite`,
+`sqlx-sqlite-unbundled`). Sync drivers need neither async nor runtime driver
+selection.
+
+Every driver of an engine runs that engine's one session protocol
+(`rupa_migrate::protocol`, which drivers implement through a small IO trait):
+the same lock identity, reserved tables, checks and policies. So a native and
+a sqlx runner on one database exclude each other and continue each other's
+history, in either mode.
+
+## Execution modes
+
+Execution comes in two modes with identical names, selected by import, as
+with Diesel's sync and async query traits: `rupa::migrate::sync` (feature
+`sync`) and `rupa::migrate::asynchronous` (feature `async`). Each holds
+`Session`, `Migration`, `Context`, `Apply`, `Inspect` and `Recover`; catalogs, plans, metadata,
+errors and reports are shared at `rupa::migrate`. Neither mode is a default:
+sync-only drivers (`sqlite`, `sqlite-unbundled`, `postgres-sync`, `mysql`)
+enable `sync`, async drivers enable `async`, and a crate that only owns
+migrations enables the mode its Rust bodies are written for.
+
+```rust,ignore
+use rupa::migrate::sync::Apply;
+
+let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
+```
+
+```rust,ignore
+use rupa::migrate::asynchronous::Apply;
+
+let report = catalog.apply(connection).await?;
+```
+
+With exactly one mode enabled, its six names are also re-exported at
+`rupa::migrate` and the facade prelude brings `Apply`, `Inspect`, `Recover` and
+`Session` into scope.
+With both enabled, neither is re-exported, so the two `apply` methods can never
+be ambiguous; import from the mode module. Because Cargo unifies features
+across a build, a dependency that enables the other mode removes the root
+names: libraries, and code built in workspaces that enable both, should import
+from the mode modules.
+
+Planned and SQL migrations (`Planned<T>`) and `migration_catalog!` catalogs
+implement every enabled mode. A scripted Rust body implements the mode it is
+written for; implementing both is the same body with `.await` added.
+`Blocking(connection)` runs any sync session through the async contracts with
+no added locking, for async applications on sync-only drivers.
+
+```sh
+cargo run -p rupa-example-app -- primary apply
+cargo run -p rupa-example-app -- primary apply --url app.db
+```
+
+The example in [`examples/migrations`](../examples/migrations) is split like an
+application: `db` owns entities and two migration directories, and `app` runs
+the generated catalogs through the [operator commands](#operator-commands).
+The numbered `migrations/` directory holds a SQL file, a single-file Rust
+migration that normalizes titles through typed queries, a directory migration
+with a private helper, and a planned migration that creates a table from a
+shared entity. The timestamped `reporting/` stream holds a SQL file and an
+imperative Rust migration. Passing a file makes history persist; a second
+invocation skips installed work.
+
+## Discovering a directory
+
+`rupa-build` generates the catalog from file names at build time, so adding a
+migration means adding a file:
+
+```rust,ignore
+// db/build.rs
+fn main() -> Result<(), rupa_build::Error> {
+    rupa_build::Migrations::new("primary").compile()
+}
+
+// db/src/lib.rs
+pub mod migrations {
+    rupa::migrate::include_migrations!("primary");
+}
+
+// app: the catalog is engine-independent and can be applied from any crate
+use rupa::migrate::sync::Apply;
+db::migrations::catalog()?.apply(SqliteExecutor::open("app.db")?)?;
+```
+
+| Entry | Meaning |
+|---|---|
+| `0001_create_notes.sql` | Planned SQL migration, version `1` |
+| `0001_create_notes.down.sql` | Its down script, which makes it [reversible](#reverting) |
+| `0002_normalize_titles.rs` | Scripted Rust migration; exports a unit struct `NormalizeTitles` implementing `Migration<S>` |
+| `0003_add_slugs/mod.rs` (+ helpers) | Scripted Rust migration whose private helper files are part of its checksum |
+| `0004_create_tags.rs` | Planned Rust migration; `CreateTags` implements `PlannedMigration` |
+| `snapshots/0003_notes_with_slugs.sql` | [Snapshot](#initializing-from-a-snapshot) at version `3`; `0003_notes_with_slugs.snapshot.sql` beside the incrementals is the same |
+| `down/0001_create_notes.sql` | Down script of `0001_create_notes.sql`, the same as `0001_create_notes.down.sql` |
+
+A down script lives beside its migration as `.down.sql` or in `down/` with
+the migration's own file name; giving one migration both fails the build. It
+pairs with the SQL migration of the same version and name,
+and both files are inputs of one artifact, so editing either changes its
+checksum. It may start with a description header, but not with frontmatter:
+the migration's settings apply to both directions. A down file without its SQL
+migration, or beside a Rust migration (which declares `down` in code), fails
+the build. A scripted Rust migration is reversible when its `Migration` impl
+defines `down`, and a planned one when its `PlannedMigration` impl does.
+
+A snapshot is any migration shape (SQL, single-file Rust or directory) either
+in `snapshots/` or named `.snapshot.sql` or `.snapshot.rs`. Its version may be
+that of an incremental, but two snapshots may not share one, and a snapshot
+has no down script.
+
+Leading zeros are dropped for numbered versions, so `1_a.sql` and `001_b.sql`
+collide at build time. Leading `--` (SQL) or `//!` (Rust) lines are the
+description; they are excluded from the hashed and executed body, so rewording
+them never changes a checksum. Without a header, the name (`create notes`) is
+used.
+
+From its first line starting with `rupa:`, the header is YAML frontmatter
+instead of description, with the comment markers removed:
+
+```sql
+-- Index titles without blocking writes.
+-- rupa:
+--   policy: nontransactional
+```
+
+The flow form `-- rupa: { policy: nontransactional }` is the same document.
+`policy` is `transactional` (the default) or `nontransactional` (see
+[nontransactional migrations](#nontransactional-migrations)), and is part of
+the checksum. Unknown keys or values and malformed YAML fail the build with the
+parser's location. Only the migration root (its `.sql` file, `.rs` file or
+`mod.rs`) declares frontmatter: a scripted directory migration's `.rs` helper
+with a `rupa:` header fails the build, and a planned directory migration's
+helpers and non-Rust helpers are never header-parsed. Unrecognized entries
+fail the build; dotfiles are ignored. The build reruns
+when the directory changes, so added or removed files never leave a stale catalog.
+
+### Scripted and planned Rust migrations
+
+A Rust migration is one of two kinds, decided by the trait its type
+implements:
+
+- **Scripted** (`sync::Migration<S>` or `asynchronous::Migration<S>`):
+  imperative code with arbitrary steps between queries. It is opaque, so its checksum covers its source files.
+- **Planned** (`PlannedMigration`): a pure `plan()` returning SQL scripts and
+  [schema operations](#schema-operations). The plan is evaluated once when the
+  catalog is built; its checksum covers the plan itself, and exactly that plan
+  is executed.
+
+A migration is frozen history, but application entities keep changing. If a
+scripted migration 2 queried the crate's `Note` and migration 7 later added a
+column to it, migration 2 would select a column that does not yet exist on
+every fresh database, while its checksum still reported no change. `rupa-build`
+therefore rejects scripted migrations that reach outside their own files:
+`crate::` paths, `super::` above the migration root, `#[path]`, out-of-line
+modules in single-file migrations, any `include*!` in a single-file migration,
+and includes that leave a directory migration or name an unhashed dotfile.
+Attribute arguments such as `#[derive(crate::Entity)]` are checked too. Declare
+the row shape a scripted migration needs locally, as a private
+`#[derive(rupa::Entity)]` struct, and keep helpers inside a directory migration.
+
+Planned migrations may use shared entities (`Table::of::<crate::Tag>()`), so
+they are not checked. Drift is caught instead of prevented: if an entity
+change alters an applied migration's plan, its checksum no longer matches and
+`apply` refuses to continue. Replace the entity reference with the literal
+definition it used to produce (`Table::named`, `ColumnDef::new`); the same plan
+keeps the same checksum, whatever source produced it.
+
+External crates such as `rupa` stay available to both kinds; depending on a
+shared crate is an explicit decision. `Context` exposes typed queries, scripts
+and schema operations only, so repositories cannot run inside a migration.
+
+## Schema operations
+
+Schema operations are portable DDL in `rupa::migrate::schema`, rendered for the
+session's dialect when the migration runs:
+
+```rust,ignore
+impl PlannedMigration for CreateTags {
+    fn plan(&self) -> Plan {
+        Plan::new()
+            .create_table(Table::of::<Tag>())
+            .create_table(
+                Table::named("audit")
+                    .column(ColumnDef::new("id", ColumnType::BigInt).identity())
+                    .column(ColumnDef::new("at", ColumnType::TimestampTz)
+                        .default(ColumnDefault::Sql("CURRENT_TIMESTAMP")))
+                    .primary_key(["id"]),
+            )
+            .add_column(Note::SLUG)
+            .create_index(Index::on("notes_slug", Note::SLUG).unique())
+            .sql("UPDATE notes SET slug = lower(title)")
+    }
+}
+```
+
+`Table::of::<E>()` reads the entity's constant metadata: columns and types,
+nullability, the primary key, `#[id(generated)]` identities and
+`#[column(references = ..)]` foreign keys. Adjust it with `.column(..)` (add or
+replace), `.without(..)` and `.foreign_key(..)`. `ColumnDef::of(Note::TITLE)`
+builds one column from a field handle. Operations: create/drop/rename table,
+add/drop/rename column, create/drop index.
+
+Types render as the types each driver binds: for example `Json` is `JSONB`,
+`JSON` and `TEXT`; `Uuid` is `UUID`, `CHAR(36)` and `TEXT`; identity keys are
+`GENERATED BY DEFAULT AS IDENTITY`, `AUTO_INCREMENT` and
+`INTEGER PRIMARY KEY AUTOINCREMENT`. `ColumnType::Custom` names a type per
+dialect. Nothing is approximated; these fail before the target is touched:
+
+- SQLite: adding a `NOT NULL` column without a default, or a `UNIQUE` column;
+  an identity that is not the whole primary key; foreign keys into another
+  attached database.
+- MySQL: primary keys or `UNIQUE` columns over unbounded `Text`, `Bytes` or
+  `Json` (use `VarChar(n)`); text defaults containing a backslash; an identity
+  that is not the whole primary key.
+- Any dialect: a type without a name there, a database-generated column without
+  a default, `CREATE TABLE` keys naming unknown columns, an empty plan.
+
+Indexes and foreign keys name columns without their types, so a MySQL index
+over unbounded text or an index naming an unknown column is rejected by the
+server when the migration runs.
+
+`apply` renders every planned operation for the session's dialect before it
+acquires the target. Scripted migrations run the same operations through
+`Context::schema`. Changes SQLite can only make by rebuilding a table are not
+offered; write them as SQL.
+
+## Applying a catalog
+
+```rust,ignore
+use rupa::migrate::sync::Apply;
+
+let entries = application_migrations();
+let catalog = Catalog::new("primary", VersionScheme::Numbered, &entries)?;
+let report = catalog.apply(SqliteExecutor::open("app.db")?)?;
+
+let client = postgres::Client::connect(url, postgres::NoTls)?;
+let report = catalog.apply(PgExecutor::new(client))?;
+
+let report = catalog.apply(MySqlExecutor::connect(mysql::Opts::from_url(url)?)?)?;
+```
+
+`Catalog::new` validates versions, duplicates, source inputs and checksums without
+opening a database or running a body. Entries are sorted numerically or by
+validated UTC timestamp. `entries()` exposes metadata, checksum and the exact
+plan of planned entries; scripted Rust bodies are explicitly opaque.
+
+`apply` consumes a dedicated native connection and closes it after the run,
+including failure and unwind. Use a separate connection for the runtime pool,
+with separate credentials where supported. Do not wrap application transactions
+or manually assemble runner/session handles. The driver's `Session` trait is a
+control contract for adapters; ordinary application code uses `catalog.apply`.
+Sync and async runs share one runner body, so history, exclusion and failure
+handling are identical in both modes.
+
+A run that ends without returning (a dropped `apply` future, or a panic
+unwinding through it) abandons its session: the runner's drop guard calls the
+non-blocking `Session::abandon`, and a retained session then refuses every
+statement with `StateError::Poisoned` (and a new run with `Error::History`).
+Pools discard a connection a run left in this or any other unfinished state,
+instead of handing it out again. A consumed connection is simply
+closed, which on PostgreSQL rolls back the open transaction and releases the
+lock; the journaled attempt stays running and blocks the next apply until it is
+reconciled. Nothing an abandoned transactional body did is committed.
+
+The apply path is strict: only the policies the session supports
+(`Session::POLICIES`). An unsupported policy is rejected before
+initialization and is never downgraded: SQLite runs `TransactionalRequired`
+only, PostgreSQL also `NonTransactional`, and MySQL `NonTransactional` only,
+because it commits DDL implicitly. A nonempty unmanaged target is refused
+until it is [adopted](#adopting-an-existing-database); absence of a history
+table is not proof of freshness. Changed or missing applied artifacts, late
+arrivals and uncovered artifacts block pending work with `Error::Blocked`,
+whose `Blocker`s name each artifact. There is no silent reordering, checksum
+replacement or automatic body retry.
+
+`ApplyOptions::through` stops an apply at a version: later versions stay
+pending, and a late version above it is left pending rather than refused.
+
+### Late artifacts
+
+A late artifact is a pending version below the newest installed one, such as
+`101` merged after a target installed `100` and `102`. Strict apply, the
+default, refuses it before running anything. An operator who has checked that
+both orders are correct can permit it for one run:
+
+```rust,ignore
+use rupa::migrate::{ApplyOptions, Order, sync::{Apply, Inspect}};
+
+let options = ApplyOptions { order: Order::AllowLate, ..ApplyOptions::DEFAULT };
+
+let plan = catalog.plan_with(connect()?, &options)?;  // plan.late == [101]
+let report = catalog.apply_with(connect()?, &options)?;
+
+assert_eq!(report.late, report.applied);              // [101]
+```
+
+The late version runs after the installed ones and gets a new installation
+rank, so history records `100, 102, 101`. The report lists it in `late`, and a
+plan with the same options lists it in `ApplyPlan::late` instead of as a
+blocker. Once installed, it is no longer late. The permission is per run, not
+per artifact: it makes the operator acknowledge the target's actual order. The
+engine cannot prove two migrations commute; their author answers for both
+orders. It lifts only `Blocker::Late`. Missing, changed and duplicate history,
+interrupted or unresolved attempts, uncovered artifacts, and another stream or
+scheme still refuse the run.
+
+### Initializing from a snapshot
+
+A snapshot creates, on a fresh target, the state of every incremental at or
+below its version, so a new database need not replay the whole history. The
+catalog derives its coverage manifest, every such incremental with its
+checksum, and makes it part of the snapshot's checksum: editing a covered
+incremental, or adding one at or below the snapshot's version, changes the
+snapshot. Adding one above it does not.
+
+On a target that has never been initialized, `apply` runs the
+newest snapshot at or below `ApplyOptions::through` (or the newest of all),
+records its manifest as covered, and then runs only the incrementals above
+it. Without an eligible snapshot it replays the incrementals.
+`Init::FullReplay` always replays them, for operators and for equivalence
+tests:
+
+```rust,ignore
+use rupa::migrate::{ApplyOptions, Init, sync::Apply};
+
+let report = catalog.apply(connect()?)?;
+assert_eq!(report.snapshot, Some(v3));      // ran snapshot 3
+assert_eq!(report.covered, [v1, v2, v3]);   // recorded, never run
+assert_eq!(report.applied, [v4]);           // the tail
+
+let replay = ApplyOptions { init: Init::FullReplay, ..ApplyOptions::DEFAULT };
+catalog.apply_with(connect()?, &replay)?;   // runs 1, 2, 3 and 4
+```
+
+A target is initialized once its journal records a completed installation
+or a coverage claim (`Status::initialized`). A journal of failed or
+rolled-back attempts only is not, so a failed first snapshot runs again on
+the next `apply`. An interrupted one is first recorded rolled back by an
+`apply` that stops with `Error::Reconciled`; the `apply` after it runs the
+snapshot. Reverting every installation does not make a target
+uninitialized, so it replays. A snapshot never runs on an initialized target, even if it is newer
+than everything installed: it describes how to create a database, not how to
+change one. Covered incrementals are not installations. History lists only
+what ran, and `status` reports the claim as `Status::coverage`: its boundary,
+the snapshot's installation rank and checksum, and the covered versions with
+the checksums they stood for. The snapshot and its coverage commit with the
+snapshot's completion. Two runners on one fresh target serialize, and the
+second finds it managed. The covered sources stay in the catalog: a missing
+or changed covered incremental or snapshot blocks every later run. A snapshot
+is not permission to delete its source chain.
+
+An incremental added later at or below the boundary is not covered:
+`Blocker::Uncovered` refuses every run, whatever the order permission, and
+names the artifact and the boundary. Write a corrective migration above the
+boundary instead.
+
+## Reverting
+
+A revert undoes installations with their authored down bodies, newest
+installation first. It is always an explicit operation; nothing reverts
+automatically.
+
+```rust,ignore
+use rupa::migrate::{RevertTarget, sync::{Inspect, Revert}};
+
+// Every installation of a version above 100.
+let plan = catalog.revert_plan(connect()?, RevertTarget::To(v100))?;
+let report = catalog.revert(connect()?, RevertTarget::To(v100))?;
+
+// The newest installation, whatever its version.
+catalog.revert(connect()?, RevertTarget::Last(1))?;
+```
+
+Undo follows installation order, not version order. With history installed as
+`100, 102, 101`, reverting to `100` undoes `101` and then `102`. A version
+target may only undo the newest installations: reverting the same history to
+`101` would undo `102` alone and leave `101` installed on top of it, so it is
+refused with `Blocker::Interleaved(101)`. `RevertTarget::Last(n)` undoes the
+`n` newest installations; asking for more than are installed is refused with
+`Blocker::Exceeds`.
+
+Everything is checked before the first down body runs, under the same
+exclusion as `apply`. History must match the catalog (missing, changed and
+duplicate artifacts refuse a revert as they refuse an apply), and every
+selected installation needs a down body: one without refuses the whole revert
+with `Blocker::Irreversible`. Late artifacts never block a revert. Interrupted
+and unresolved attempts do, and so do uncovered artifacts. A revert reaches a
+snapshot or adoption boundary but never crosses it: the covered incrementals
+never ran individually, so a version target below the boundary is refused
+with `Blocker::Boundary`. Reverting the tail keeps the coverage, so the next
+apply runs the tail again, not the snapshot.
+
+Each down body runs as its own journaled attempt under the artifact's policy,
+and commits on its own. A later failure keeps the earlier undos: the
+`RunError` carries a `RevertReport` whose `reverted` lists them and whose
+`remaining` is the installed stack the failure left. A completed undo appends a
+`down` event and keeps the installation's journal row. Applying the artifact
+again gives it a new installation rank. An undone version below an installed
+one is late, so applying it again needs [late permission](#late-artifacts).
+
+A scripted migration declares its down body by defining `Migration::down`, and
+`rupa-build` marks it reversible when the impl does. A hand-written catalog
+declares it with `MigrationInfo::reversal` returning `Reversal::Imperative`. If
+it declares a down body that its impl does not provide, the revert fails with
+`Error::MissingDown` and rolls the attempt back. A down body is not a promise
+to restore deleted data, only to undo what its migration did to the schema.
+
+## Adopting an existing database
+
+A database that already holds the schema, created before Rupa managed it or
+restored from elsewhere, is unmanaged: `apply` refuses it. Adoption records,
+on the operator's assertion, that it is equivalent to every incremental at or
+below a version. It executes no body and proves nothing for you: compare the
+schema and required data first.
+
+```rust,ignore
+use rupa::migrate::{Adoption, sync::Adopt};
+
+let adoption = Adoption::new(v2, "restored from the legacy schema")
+    .with_evidence("schema diff in INC-1234");
+let report = catalog.adopt(connect()?, &adoption)?;  // report.adopted == [1, 2]
+
+catalog.apply(connect()?)?;                           // runs only 3 and later
+```
+
+Under the same exclusion as `apply`, adoption creates the journal with an
+`adopt` event holding the reason and evidence and the adopted incrementals as
+covered, in one transaction (on MySQL, after the journal's implicitly
+committed creation). It refuses with a typed `AdoptionError` when there is no
+reason, when no incremental is at or below the version, when the target is
+fresh (`apply` creates its schema instead), and when it already has a journal:
+a managed target is never adopted again, and adoption never settles an
+uncertain attempt. After adoption the target is managed: the same coverage
+rules as a snapshot apply, so a later incremental at or below the boundary is
+uncovered, and no revert crosses the boundary.
+
+## Inspecting a target
+
+Three read-only checks answer what `apply` would do before anyone runs it.
+None of them takes exclusion, creates a journal, writes or executes a body.
+
+```rust,ignore
+use rupa::migrate::{Engine, sync::Inspect};
+
+// Offline, in CI: the catalog against what an engine's sessions can execute.
+catalog.validate(Engine::Postgres)?;
+
+// The catalog against a target.
+let status = catalog.status(connect()?)?;
+
+// What apply would run there: the status and every pending step.
+let plan = catalog.plan(connect()?)?;
+```
+
+`validate` runs the checks `apply` runs before it touches a target: supported
+policies, planned scripts that pass the engine's grammar, and schema
+operations that render for it.
+
+`status` classifies the target as `Fresh`, `Managed`, `Unmanaged` or
+`Uncertain` (running attempts or an owner claim). It returns the installed
+history with each entry's provenance, the running attempts, the pending catalog
+entries, and every `Blocker`, each with the version, checksum or attempt it
+concerns:
+
+| blocker | apply would |
+|---|---|
+| `Unmanaged` | refuse the target until it is adopted |
+| `Stream` | refuse a journal of another stream or version scheme |
+| `Locked` | report `Error::Busy`: a live runner holds the PostgreSQL or MySQL lock |
+| `Claimed` | report `Error::Busy` until SQLite's owner claim is released |
+| `Interrupted(attempt)` | record it rolled back and stop with `Error::Reconciled` |
+| `Unresolved(attempt)` | stop with `Error::Uncertain` until it is [recovered](#recovery) |
+| `Missing`, `Changed`, `Duplicate` | refuse history that no longer matches the catalog (`Error::Blocked`) |
+| `Late` | refuse a version below an installed one, unless the run [allows late work](#late-artifacts) |
+| `Uncovered` | refuse an incremental at or below the coverage boundary that the claim does not list |
+
+A [revert plan](#reverting) adds its own: `Irreversible`, `Interleaved`,
+`Exceeds` and `Boundary`.
+
+`apply` runs the pending entries only when there are no blockers. While a
+runner is live, its running attempts are listed but not reported as
+blockers, since they may be in progress.
+
+`plan` returns the status and one `Step` per entry `apply` would run, in
+order, a selected snapshot first (`plan_with` takes the same `ApplyOptions`
+as `apply_with`), and in `covered` what that snapshot covers. A step holds
+the entry's version, checksum, kind and policy, and its `Execution`. A planned body is `Static`, with its exact scripts rendered
+for the session's dialect. A Rust body is `Opaque` until it runs.
+
+The engines read inside a snapshot the server refuses to write through
+(`READ ONLY` on PostgreSQL and MySQL; a deferred read transaction on SQLite).
+They observe exclusion without taking it: the advisory lock in `pg_locks`,
+`IS_USED_LOCK` on MySQL, and the claim column on SQLite. They never wait for
+exclusion. On SQLite in rollback-journal mode, a read waits, up to the
+connection's `busy_timeout`, while a writer holds its exclusive lock to
+commit, and fails if the timeout runs out. WAL readers never wait. A status
+is a snapshot, and a runner may start right after it was read. `apply`
+re-checks everything under exclusion.
+
+## Operator commands
+
+The `migration-commands` feature turns every operation above into a command
+an operator, a deployment script or CI can run. The commands call the same
+engine as the library examples in this guide, and Upwell will use it the same
+way. `migration-cli` adds a clap command line for them. Rupa ships no binary:
+your application's own `main`, or a command line it already has, runs them.
+
+| command | CLI | target access | library call |
+|---|---|---|---|
+| `Create` | `create <name>` | none: writes source files | — |
+| `Validate(engine)` | `validate --engine <engine>` | none | `Catalog::validate` |
+| `Status` | `status` | read only | `Inspect::status` |
+| `Plan(options)` | `plan [--through V] [--allow-late] [--full-replay]` | read only | `Inspect::plan_with` |
+| `RevertPlan(target)` | `revert (--to V \| --last N) --dry-run` | read only | `Inspect::revert_plan` |
+| `Apply(options)` | `apply [--through V] [--allow-late] [--full-replay]` | exclusive | `Apply::apply_with` |
+| `Revert(target)` | `revert (--to V \| --last N)` | exclusive | `Revert::revert` |
+| `Adopt(adoption)` | `adopt --through V --reason R [--evidence E]` | exclusive | `Adopt::adopt` |
+| `Recover(recovery)` | `recover (completed <id> \| restored <id> \| release-claim) --reason R [--evidence E]` | exclusive | `Recover::recover` |
+
+Embed `Migrate` once per stream; each stream needs its own database:
+
+```rust,ignore
+use clap::{Parser, Subcommand};
+use rupa::migrate::commands::cli::{Migrate, sync::execute};
+
+#[derive(Parser)]
+struct App {
+    #[command(subcommand)]
+    stream: Stream,
+}
+
+#[derive(Subcommand)]
+enum Stream {
+    Primary(Migrate),
+    Reporting(Migrate),
+}
+
+fn main() -> std::process::ExitCode {
+    let connect = |url: Option<&str>| SqliteExecutor::open(url.unwrap_or("app.db"));
+
+    match App::parse().stream {
+        Stream::Primary(migrate) => {
+            execute(&migrate, &db::migrations::catalog().expect("valid catalog"), connect)
+        }
+        Stream::Reporting(migrate) => {
+            execute(&migrate, &db::reporting::catalog().expect("valid catalog"), connect)
+        }
+    }
+    .into()
+}
+```
+
+`execute` prints the outcome and returns its `Exit`, which converts into an
+`ExitCode`.
+
+`cli::sync::main(&catalog, connect)` parses the process arguments itself, for
+a program that only runs migrations. Async sessions use `cli::asynchronous`,
+whose `connect` returns a future. Without clap, build a `Command` and call
+`commands::sync::run(&catalog, &command, connect)`, which returns an `Outcome`.
+The CLI passes `--url` (or `DATABASE_URL`) to `connect`, and calls it only for
+commands that touch the target. `create` and `validate` never connect.
+Examples: [`examples/migrations`](../examples/migrations/app/src/main.rs).
+
+`create` never reads the target. A numbered incremental gets the newest
+version in the catalog or the directory plus one, padded like the existing
+file names. A timestamped incremental gets the current UTC second. A snapshot
+(`--snapshot`) gets the newest incremental's version, in `snapshots/`.
+`--as sql|planned|sync|async` picks a `.sql` script, a `PlannedMigration`, or
+an imperative `Migration` in either mode. `--down` adds a `.down.sql` sibling
+or a `down` method. It refuses a name rupa-build would reject and a version
+that is already taken, and it never overwrites a file. Two branches can still
+create the same version. The build then fails on the duplicate, and one
+branch renames its file before merging.
+
+### Reports and exit statuses
+
+`--format human` (the default) prints lines for people: a successful outcome
+to stdout, any other to stderr. `--format json` prints one JSON document to
+stdout, tagged `"format": "rupa-migrate-report/1"`:
+
+```json
+{
+  "format": "rupa-migrate-report/1",
+  "command": "apply",
+  "stream": "primary",
+  "scheme": "numbered",
+  "target": "postgres://app:***@db/app",
+  "exit": { "code": 7, "status": "migration" },
+  "report": { "snapshot": null, "covered": [], "applied": ["4"], "late": [] },
+  "failure": {
+    "status": "migration",
+    "message": "migration 5 failed: …",
+    "causes": ["…"],
+    "migration": "5",
+    "source": "0005_backfill.rs",
+    "blockers": [],
+    "cleanup": []
+  }
+}
+```
+
+`report` holds what the command found or committed. A failed `apply` or
+`revert` still reports what it committed before the failure. `failure` holds
+the error, its source chain, the failed migration with its source file, and
+every blocker, each with a `kind`, its identity and a readable `message`.
+Status entries carry their `source` file too. Version 1 only ever gains
+fields.
+
+| exit | status | meaning |
+|---|---|---|
+| 0 | `success` | done; a status or plan found nothing blocking |
+| 1 | `failed` | the database or filesystem failed, or the target was unreachable |
+| 2 | `usage` | invalid arguments, such as a version the stream's scheme rejects |
+| 3 | `blocked` | refused before changing anything, or a status or plan reports blockers |
+| 4 | `busy` | another runner owns the target, or SQLite's claim is set |
+| 5 | `uncertain` | an unresolved attempt needs [recovery](#recovery) |
+| 6 | `reconciled` | interrupted attempts were rolled back; rerun the interrupted apply or revert |
+| 7 | `migration` | a migration body failed; earlier commits remain |
+
+Every rendered outcome passes through a `Redactor`. The CLI masks the
+password of `--url` (the userinfo password, and any `password`, `pass` or
+`sslpassword` parameter) as written, percent-decoded and JSON-escaped, so a
+driver error that echoes the connection string shows `***`. With `run`, pass
+your own: `outcome.render(Format::Json, &Redactor::new().url(&url).secret(&token))`.
+
+`adopt` and `recover` reports state the assertion they recorded and that
+nothing verified it (`"verified": false`). The journal keeps the reason and
+evidence. [Operating migrations](migrations-runbooks.md) has runbooks for
+recovery, stale SQLite claims, adoption, rollback limits and rolling
+deployments.
+
+### Upwell applications
+
+With the facade's `upwell-database` feature, `rupa::upwell::database!`
+declares a database of an Upwell application: its driver pool, configuration
+path, migration catalog and optional migration command. A repository declares
+the database it is provided over, `#[repository(database = Primary)]`. Like
+`#[component]`, both register themselves at link time. Only the
+migration commands need the `Migrations` plugin, registered once, because Upwell
+discovers components, providers and configuration but not plugins:
+
+```rust,ignore
+#[repository(database = Primary)]     // provided as Arc<dyn NoteRepository>
+pub trait NoteRepository: Send + Sync {
+    #[query(order_by = id)]
+    fn all(&self) -> Result<Vec<Note>, DynError>;
+
+    #[query(insert)]
+    fn add(&self, note: &Note) -> Result<u64, DynError>;
+}
+
+rupa::upwell::database! {
+    /// Notes and tags.
+    pub Primary {
+        pool: SqlitePool,
+        config: "database.primary",
+        migrations: db::migrations,     // the module include_migrations! generated
+        command: "migrate",
+    }
+}
+
+#[component]
+struct Notes {
+    repository: Arc<dyn NoteRepository>,
+    database: Arc<Database<Primary>>,
+}
+
+impl Notes {
+    /// Every note or none: the repository runs on a borrowed transaction.
+    fn import(&self, notes: &[Note]) -> Result<(), DynError> {
+        let tx = self.database.begin()?;
+
+        for note in notes {
+            self.repository.tx(&tx).add(note)?;
+        }
+
+        tx.commit()?;
+
+        Ok(())
+    }
+}
+
+app! {
+    pub app App {
+        name: "app",
+        protocol: Rpc,
+        plugins: [rupa::upwell::Migrations],   // once: every database's command
+    }
+}
+
+#[tokio::main]
+async fn main() -> ExitCode {
+    rupa::upwell::exit_code(App::run().await)
+}
+```
+
+The configuration describes the connection field by field. SQLite takes `path`
+instead of the server fields. A `":memory:"` path needs `startup = "off"`: the
+migration connection and the pool would each open their own private database,
+so `check` and `apply` are refused. `url` replaces the fields with a complete
+URL. Upwell templates it like any value, so it can reference the fields or the
+environment:
+
+```toml
+[database.primary]
+driver  = "sqlite"              # also postgres, postgres-sync, mysql, sqlx-*, memory
+path    = "app.db"
+params  = { mode = "rwc" }
+options = { foreign_keys = true }            # the driver's DbConfig options
+# url   = "sqlite://${APP_DATA:.}/app.db"
+
+[database.primary.pool]
+max_size = 4
+
+[database.primary.migrations]
+startup  = "apply"              # off | check (default) | apply
+```
+
+A server database takes the server fields, and can migrate with credentials
+of its own, so the application's role needs no DDL rights. A `url` replaces
+`params` too, so it repeats `sslmode`; TLS needs rupa's `tls-rustls` feature:
+
+```toml
+[database.reporting]
+driver   = "postgres"
+host     = "db.internal"
+port     = 5432
+user     = "app"
+password = "${DB_PASSWORD}"
+name     = "reporting"
+params   = { sslmode = "require" }
+# url    = "postgres://${database.reporting.user}:${DB_PASSWORD}@${database.reporting.host}/reporting?sslmode=require"
+
+[database.reporting.migrations]
+user     = "migrator"           # optional: credentials for migrations only
+password = "${MIGRATOR_PASSWORD}"
+# url    = "..."                # or a complete migration URL
+```
+
+The settings declare their schema, so Upwell's tooling lists every field.
+
+- **Startup.** `Database<Primary>` is a singleton component holding the pool.
+  - Before its factory opens the pool, it applies or checks the migrations on a
+    connection opened with the migration credentials.
+  - Everything that injects `Arc<Database<Primary>>` or a provided repository
+    is therefore built afterwards.
+  - `check` fails startup, with the status report, while migrations are pending
+    or blocked. Nothing that needs the database is built, and no service starts.
+  - `apply` applies once per target and process. A database rebuilt by a
+    configuration reload only checks, so a speculative reload never migrates.
+  - Sync pools run the gate on a scoped thread outside the async runtime, which
+    the startup task waits for.
+- **Repositories.** Each listed `#[repository]` trait is provided as
+  `Arc<dyn Trait>` over the pool, so services inject it directly.
+  `#[repository(static_dispatch)]` traits aren't dyn-compatible, so they aren't
+  provided; build their `Repo` from the injected `Database`.
+- **Commands.** `app migrate apply` and the other commands run at Upwell's Setup
+  phase: the configuration is loaded, and nothing is built or started.
+  - They connect with the migration settings. `--url` or `DATABASE_URL`
+    replaces the configured URL.
+  - Reports, exit statuses and redaction are the same as on the standalone
+    command line, and `exit_code` turns Upwell's `CliError` into those statuses.
+
+Upwell is a git dependency pinned to a commit until it is released, so this
+feature cannot be published yet. Example:
+[`examples/migrations/upwell`](../examples/migrations/upwell/src/lib.rs).
+
+## Authoring
+
+Use `sql_migration!` for a zero-sized type backed by an explicitly named SQL file,
+then put `Planned<ThatType>` in `migration_catalog!`. An optional
+`policy: NonTransactional,` field (before `up`) declares nontransactional work;
+it defaults to `TransactionalRequired`. An optional `down: "file.down.sql",`
+field (after `up`) makes it reversible. Native SQLite parses scripts,
+so quoted/comment semicolons are not split manually. Planned SQL is normalized
+and checksummed independently of any dialect; `apply` lexically checks it with
+the session dialect's grammar before acquiring the target. SQLite and
+PostgreSQL and MySQL have script grammars; other dialects reject scripts
+explicitly (`ScriptError::Dialect`).
+
+The PostgreSQL grammar assumes `standard_conforming_strings` (the migration
+connection must have it on) and keeps standard and `E''` strings, quoted
+identifiers, nested block comments and dollar-quoted bodies whole. PostgreSQL
+has no client-side authorizer, so statements the runner owns are refused before
+dispatch (`ScriptError::Forbidden` with a `ScriptRule`): transaction control,
+session-level `SET`, `set_config`, `RESET`, `DISCARD`, `LISTEN` and `UNLISTEN`
+(`SET LOCAL`, `SET CONSTRAINTS` and `SET TRANSACTION` are allowed), psql
+backslash commands and `COPY` from stdin or to stdout,
+advisory lock functions, `_rupa_`-prefixed names and `BEGIN ATOMIC` bodies (use a
+dollar-quoted body instead). Typed raw queries are checked by the same grammar.
+Dollar-quoted bodies are opaque to it; the session's lock and transaction checks
+below catch what they do to the runner.
+
+The MySQL grammar assumes `NO_BACKSLASH_ESCAPES` without `ANSI_QUOTES`: for
+the run, the migration session adds the first to its `sql_mode` and removes the
+second (and the composite `ANSI`), restoring the original at release. So a
+backslash in a string is literal and `"…"` is always a string, never an
+identifier that could name a reserved table. It keeps `'…'` and `"…"` strings, backtick identifiers, `#`
+and `-- ` line comments (`--` without following whitespace is two minus signs)
+and `/* */` comments whole. It refuses before dispatch: executable comments
+(`/*! … */`), transaction control including `XA` and `LOCK`/`UNLOCK TABLES`,
+every `SET` and `USE`, the client's `DELIMITER`, `SOURCE` and `LOAD DATA LOCAL`,
+named lock functions, `_rupa_`-prefixed names, and `BEGIN … END` compound
+statements, whose boundaries it cannot know (use single-statement routines).
+Statement text built at run time (`PREPARE … FROM '…'`) is opaque, like a
+PostgreSQL dollar-quoted body.
+
+Without `rupa-build`, a hand-written Rust module exports a type implementing
+`MigrationInfo` and either a mode's `Migration<S>` or `PlannedMigration`. A scripted
+migration's static `Metadata.inputs` must embed the module and every local
+executable helper/input with stable logical paths; a planned one declares no
+inputs, wrapped as `Planned<T>` in the catalog. A reversible scripted one also
+overrides `MigrationInfo::reversal`; a planned one overrides
+`PlannedMigration::down`. Source and helper declarations
+are then an author responsibility, not transitive Rust dependency analysis. The
+shared migration conformance fixtures (`rupa-conformance`) keep such an explicit
+catalog.
+
+A body's `Context` is an engine: `query.execute(context)` runs ordinary typed
+Rupa queries on the runner's transaction (`.await` it in async bodies), failing
+with `Error::Database`. `Context::script` runs SQL on
+the same transaction, and `Context::schema` a rendered schema operation. Neither exposes transaction control, connection extraction
+or pool access. SQLite authorization denies transaction/savepoint control,
+ATTACH/DETACH, PRAGMAs and framework metadata access, with one policy for every
+SQLite driver: rusqlite installs it through its authorizer hook, sqlx (which has
+none) through the raw connection handle. PostgreSQL and MySQL use the grammar
+above. This is an ownership API,
+not a sandbox against trusted Rust independently doing IO or opening connections.
+
+Checksums use `rupa-artifact-v1/sha256`: length-prefixed UTF-8 fields include the
+stream, scheme, kind, version, sync mode, policy, execution style, the ordered
+plan (SQL and canonical schema operation records), sorted named input files
+and, last and only for a reversible artifact, its down body: the ordered down
+plan, or a marker for an imperative one. An irreversible artifact keeps the
+checksum it had before down bodies existed. One leading UTF-8 BOM is removed and CRLF is
+normalized to LF; all other bytes, including comments, remain significant. Lone
+CR and noncanonical logical paths are rejected. Descriptions are diagnostic;
+changing them alone does not change a checksum. Input names remain significant.
+Facade features and the checkout's absolute path do not enter the digest.
+
+An explicit catalog references individual files with `include_str!`, so Rust
+tracks edits and removals, but additions require a new catalog entry; directory
+discovery with `rupa-build` avoids that. Dialect variants of one migration and
+crate-dependency closure records remain later authoring work.
+
+## History and failure
+
+Every engine keeps one reserved table, the journal `_rupa_migrations`. On
+PostgreSQL it lives in the connection's current schema, on MySQL as an InnoDB
+table in the selected database (the owned namespace), and on SQLite in `main`.
+Its definition per engine, with every row kind and status explained, is in
+[`crates/rupa-migrate/sql/`](../crates/rupa-migrate/sql/): `postgres.sql`,
+`mysql.sql` and `sqlite.sql`. These files are what the runner executes on a
+fresh target, so they always describe the real table.
+
+One `init` row records the stream, version scheme and checksum format. Each
+attempt is an `up` row, a `snapshot` row, or a `down` row naming the
+installation it `undoes`, journaled `running` before its body starts and
+finished as `applied`, `failed`, `rolled_back`, `recovered` or `abandoned`.
+Installed history is the applied and recovered `up` rows that no applied or
+recovered `down` row undoes; an installation rank is the row's id, so ranks
+increase in installation order but are not consecutive. A completed snapshot,
+or an `adopt` event, has one `covered` row per incremental it covers, naming
+it in `covered_by`. The
+journal's columns, the header and the stream, scheme and checksum format must
+match before managed execution. Incompatible same-named objects are never
+replaced.
+
+On SQLite the driver atomically claims the target under `BEGIN IMMEDIATE`, then retains a
+durable owner token between separately committed migration transactions. Another
+cooperative runner cannot take over between commits or during first bootstrap.
+The writer-lock timeout is configurable using
+`with_migration_lock_timeout` on the rusqlite or sqlx executor; an existing
+owner fails immediately.
+
+On PostgreSQL (`postgres`, `tokio-postgres` and sqlx), `apply` takes a session advisory lock before creating or
+reading history (standalone `Session::history()` inspection reads without it),
+holds it across the separately committed migration
+transactions and checks it before every write phase. The key is derived from
+the canonical target (`rupa_migrate::Target`: engine, `current_database()`,
+`current_schema()`), never from the driver, credentials or URL, so every runner
+of one schema contends for the same lock and different schemas are independent
+targets. `with_migration_lock_timeout` bounds the wait (zero tries
+once; longer than PostgreSQL's `lock_timeout` maximum is clamped); a timeout
+reports `Error::Busy` with no user work done. A connection that
+loses the lock, or whose artifact transaction was committed or replaced, is
+poisoned instead of recording completion. Closing the connection releases the
+lock, so a dropped or crashed runner leaves only its running attempt behind
+(see [Interruption](#interruption)). A connection already inside an application
+transaction is rejected.
+
+On MySQL (the `mysql` and sqlx drivers), `apply` takes a named session
+lock, `GET_LOCK('rupa:…')` with the first 56 hex digits of the canonical target
+digest (engine, `DATABASE()` as database and namespace), and keeps it across the
+per-artifact commits, checking `IS_USED_LOCK` before every write phase.
+`with_migration_lock_timeout` bounds the wait in whole seconds,
+rounded up; zero tries once. A connection without a selected database, with
+`autocommit` off or inside an open transaction (even an untouched read-only
+snapshot) is rejected: MySQL's implicit DDL commits would otherwise commit the
+caller's work. Creating the journal commits on its own, before its `init` row
+is written, so an interrupted first run can leave a journal without a header,
+which later runs refuse as invalid rather than complete.
+
+Before dispatching a body, its attempt is durable. A transactional body's
+schema/data effects and its attempt's completion commit together.
+If a transactional body fails,
+acknowledged rollback records a failed attempt and releases the claim. Earlier completed
+migrations remain installed. Errors preserve the failed version, typed body or
+driver cause, the versions this invocation already committed (`applied()`), and
+additional cleanup failures. Misusing a migration connection outside a
+runner-owned transaction or body fails with a typed `StateError`
+(`SqliteError::Migration`, `PgError::Migration`, `MySqlError::Migration`).
+
+### Nontransactional migrations
+
+Some statements refuse to run inside a transaction, such as PostgreSQL's
+`CREATE INDEX CONCURRENTLY`. A migration declaring `Policy::NonTransactional`
+runs its whole body without an artifact transaction:
+
+```sql
+-- Index titles without blocking writes.
+-- rupa:
+--   policy: nontransactional
+CREATE INDEX CONCURRENTLY notes_title ON notes (title);
+```
+
+Its attempt is journaled before the body starts. Each statement of a script is
+then sent on its own, because several statements in one PostgreSQL request share
+an implicit transaction (and MySQL commits each DDL statement anyway). The script is split by the same grammar that validated
+it as a whole before the first statement ran (`rupa_migrate::split_script`). After
+the body returns, its attempt is recorded `applied`, still under the session lock. Transactional and
+nontransactional migrations can be mixed in one catalog and run in version order.
+Keep each nontransactional migration small: one artifact cannot mix policies.
+
+Effects are not atomic. A body refused before it sent any statement, such as a
+script the grammar rejects, records an ordinary failed attempt that a corrected
+catalog may replace. Once a statement was sent, statements that already ran stay
+committed. The attempt is therefore **not** recorded as failed, which would
+permit a replay. It stays unresolved, and the run's `RunError::Migration` lists
+`Error::Uncertain(attempt)` among its cleanup errors. The lock is released
+normally, and every later apply fails with `Error::Uncertain` until an
+operator [recovers](#recovery) the attempt. An interrupted body or a lost completion write leaves
+the same state. Write nontransactional statements so an operator can inspect
+what ran (e.g. `CREATE INDEX CONCURRENTLY IF NOT EXISTS`, then checking for an
+invalid index).
+
+### Interruption
+
+A runner that dies mid-run (a crash, a killed process, a dropped future or a
+lost connection) leaves its attempt `running`. There is no timeout takeover.
+
+- **Transactional attempts reconcile themselves.** An attempt's completion
+  commits with its body, so a `running` transactional attempt never committed
+  once its session has ended. The next `apply` finds it under exclusion, records
+  it `rolled_back`, and stops without running anything, failing with
+  `Error::Reconciled(attempts)`. Apply again to run the artifact under a new
+  attempt.
+- **Nontransactional attempts need an operator.** Their statements may have
+  run, so the next `apply` fails with `Error::Uncertain(attempt)` until the
+  attempt is recovered.
+- **SQLite keeps the dead runner's claim.** SQLite has no session locks, so the
+  durable owner claim outlives its runner, and every later run fails with
+  `Error::Busy`. Once you have established that the old runner is stopped,
+  release the claim (below). Its transactional attempt then reconciles on the
+  next `apply`.
+
+### Recovery
+
+Recovery records an operator's assertion about an interrupted run. It requires
+a reason, accepts optional evidence, takes the same exclusion as `apply`, and
+executes no migration body. The catalog checks the assertion:
+
+Each assertion is one invocation on its own dedicated connection, which
+`recover` closes, like `apply`. [`status`](#inspecting-a-target) lists the
+attempt ids. Pick the one that matches what you verified:
+
+```rust,ignore
+use rupa::migrate::{Recovery, RecoveryAction, sync::Recover};
+
+// The effects of uncertain attempt 7 are complete: record its artifact as
+// installed with `Provenance::Recovered`.
+let completed = Recovery::new(RecoveryAction::Completed(7), "index exists and is valid")
+    .with_evidence("INC-1234");
+catalog.recover(connect()?, &completed)?;
+```
+
+```rust,ignore
+// Its effects were undone by hand: the next apply runs it again.
+// For an uncertain undo (`Direction::Down`), `Completed` makes the
+// installation inactive and `Restored` keeps it installed.
+let restored = Recovery::new(RecoveryAction::Restored(7), "dropped the partial index");
+catalog.recover(connect()?, &restored)?;
+```
+
+```rust,ignore
+// SQLite: the runner holding the claim has stopped.
+let release = Recovery::new(RecoveryAction::ReleaseClaim, "pod terminated");
+catalog.recover(connect()?, &release)?;
+```
+
+The reason and evidence are stored on the attempt's journal row; a released
+claim appends a `claim_released` row. Completing an uncertain snapshot attempt
+also records its coverage, as its own completion would have. `Completed` requires the catalog's
+artifact to have the checksum the attempt ran. `Restored` does not, so a
+corrected artifact may replace it. Recovery refuses with a typed
+`RecoveryError` when there is no reason, the attempt is unknown or already
+resolved, the catalog lacks or changed the artifact, or there is no claim to
+release. It fails with `Error::Busy` while another runner owns the target. An
+incorrect assertion is the operator's responsibility: check the database
+effects, and that the old runner is stopped, before asserting anything. Never
+edit the journal by hand.
+
+Dynamic (registry) sessions, transactional work on MySQL and
+nontransactional work on SQLite are not yet implemented. Their accepted
+design is in [the migration contract](design/migrations-contract.md).

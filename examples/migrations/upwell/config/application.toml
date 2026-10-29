@@ -1,0 +1,19 @@
+# Each database is configured field by field; `url` may replace the fields,
+# and goes through Upwell's templating like any value.
+
+[database.primary]
+driver = "sqlite"
+path = "primary.db"
+
+[database.primary.pool]
+max_size = 4
+
+[database.primary.migrations]
+startup = "apply"
+
+[database.reporting]
+driver = "sqlite"
+url = "sqlite://${REPORTING_DATABASE:reporting.db}"
+
+[database.reporting.migrations]
+startup = "check"

@@ -4,62 +4,81 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rupa::core::exec::{Blocking, Executor};
-use rupa::core::tx::TxConnection;
+use std::future::Future;
+
+use rupa::core::exec::{AsyncExecutor, Awaited, Blocking, Engine, Executor, Outcome};
+use rupa::core::ir::Statement;
+use rupa::core::query::Expect;
 use rupa::core::{Dialect, DialectId};
 use rupa::prelude::*;
-use rupa::{
-    AsyncExecutor as _, Database, DbConfig, DriverConfig, Pool, PoolConfig, Registry, SqliteOptions,
-};
+use rupa::{AsyncTransactional, TxConnection};
+use rupa::{Database, DbConfig, DriverConfig, Pool, PoolConfig, Registry, SqliteOptions};
 use rupa_conformance::{NewNote, Note, SQLITE_ATTACH, SQLITE_DDL};
 use rupa_driver_rusqlite::SqliteError;
 use rupa_driver_rusqlite::{SqliteDriver, SqliteManager, SqlitePool, SqliteTarget};
 
 #[repository]
-trait NoteWrites {
+trait Notes {
     #[query(insert)]
     fn add(&self, note: &NewNote) -> Result<u64, rupa::DynError>;
-}
 
-#[repository]
-trait NoteReads {
     #[query(order_by = id)]
     fn all(&self) -> Result<Vec<Note>, rupa::DynError>;
 }
 
 #[repository]
-trait ExclusiveNotes {
+trait AsyncNotes {
     #[query(insert)]
-    fn add(&mut self, note: &NewNote) -> Result<u64, rupa::DynError>;
+    async fn add(&self, note: &NewNote) -> Result<u64, rupa::DynError>;
 
-    #[query(order_by = id)]
-    fn all(&mut self) -> Result<Vec<Note>, rupa::DynError>;
-}
-
-#[repository]
-trait AsyncExclusiveNotes {
-    #[query(insert)]
-    async fn add(&mut self, note: &NewNote) -> Result<u64, rupa::DynError>;
-
-    #[query(order_by = id)]
-    async fn all(&mut self) -> Result<Vec<Note>, rupa::DynError>;
-}
-
-#[repository]
-trait AsyncNoteReads {
     #[query(order_by = id)]
     async fn all(&self) -> Result<Vec<Note>, rupa::DynError>;
+}
+
+fn note(title: &str) -> NewNote {
+    NewNote {
+        title: title.into(),
+        pinned: false,
+    }
 }
 
 /// A native pool with an application policy that rejects transactions.
 struct TransactionsDisabled(Blocking<SqlitePool>);
 
+impl Engine for TransactionsDisabled {
+    type Completion = Awaited;
+}
+
+impl AsyncExecutor for TransactionsDisabled {
+    type Dialect = rupa::Sqlite;
+    type Error = SqliteError;
+
+    fn dialect(&self) -> &rupa::Sqlite {
+        AsyncExecutor::dialect(&self.0)
+    }
+
+    fn execute(
+        &self,
+        statement: &Statement,
+        expect: Expect,
+    ) -> impl Future<Output = Result<Outcome, SqliteError>> + Send {
+        AsyncExecutor::execute(&self.0, statement, expect)
+    }
+}
+
+impl AsyncTransactional for TransactionsDisabled {
+    type Tx<'t> = <Blocking<SqlitePool> as AsyncTransactional>::Tx<'t>;
+
+    async fn begin_with(&self, _: rupa::TxOptions) -> Result<Self::Tx<'_>, SqliteError> {
+        Err(SqliteError::Pool(Box::new(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "transactions disabled",
+        ))))
+    }
+}
+
 impl rupa::AsyncPool for TransactionsDisabled {
     type Conn = <Blocking<SqlitePool> as rupa::AsyncPool>::Conn;
-
-    fn dialect(&self) -> &rupa::core::Sqlite {
-        rupa::AsyncPool::dialect(&self.0)
-    }
 
     async fn get(&self) -> Result<Self::Conn, SqliteError> {
         rupa::AsyncPool::get(&self.0).await
@@ -68,31 +87,17 @@ impl rupa::AsyncPool for TransactionsDisabled {
     fn status(&self) -> rupa::PoolStatus {
         rupa::AsyncPool::status(&self.0)
     }
-
-    async fn begin_with(
-        &self,
-        _: rupa::TxOptions,
-    ) -> Result<rupa::core::OwnedAsyncTx<Self::Conn>, SqliteError> {
-        Err(SqliteError::Pool(Box::new(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "transactions disabled",
-        ))))
-    }
 }
 
 #[test]
-fn dynamic_repository_preserves_native_pool_transaction_policy() {
+fn erased_database_preserves_native_pool_transaction_policy() {
     let file = TempDb::new("repo-native-policy");
     let pool = TransactionsDisabled(Blocking(file.pool(1)));
 
     pollster::block_on(async {
-        let native_error = AsyncNoteReadsView::new(&pool)
-            .begin()
-            .await
-            .err()
-            .expect("native transaction policy");
+        let native_error = pool.begin().await.err().expect("native transaction policy");
         let database = Database::new(pool);
-        let dynamic_error = AsyncNoteReadsView::new(&database)
+        let dynamic_error = database
             .begin()
             .await
             .expect_err("preserve native transaction policy");
@@ -103,123 +108,79 @@ fn dynamic_repository_preserves_native_pool_transaction_policy() {
 }
 
 #[test]
-fn exclusive_repository_borrows_native_transactions() {
-    let note = NewNote {
-        title: "exclusive".into(),
-        pinned: false,
-    };
-
-    let file = TempDb::new("repo-exclusive");
-    let pool = file.pool(1);
-    let mut repository = ExclusiveNotesRepo::new(pool.get().expect("connection"));
-
-    let mut tx = repository.begin().expect("native transaction");
-    let mut notes = ExclusiveNotesView::new(&mut tx);
-    assert_eq!(notes.add(&note).expect("insert"), 1);
-    assert_eq!(notes.all().expect("read own write")[0].title, "exclusive");
-    tx.commit().expect("commit");
-    assert_eq!(repository.all().expect("read committed").len(), 1);
-}
-
-#[test]
-fn blocking_repository_borrows_native_transactions_without_a_session() {
-    let note = NewNote {
-        title: "blocking".into(),
-        pinned: false,
-    };
-
-    let file = TempDb::new("repo-blocking");
-    let pool = file.pool(1);
-    let mut repository = AsyncExclusiveNotesRepo::new(Blocking(pool.get().expect("connection")));
-
-    pollster::block_on(async {
-        let mut tx = repository.begin().await.expect("native transaction");
-        let mut notes = AsyncExclusiveNotesView::new(&mut tx);
-        assert_eq!(notes.add(&note).await.expect("insert"), 1);
-        assert_eq!(
-            notes.all().await.expect("read own write")[0].title,
-            "blocking"
-        );
-        tx.rollback().await.expect("rollback");
-        assert!(
-            repository
-                .all()
-                .await
-                .expect("read after rollback")
-                .is_empty()
-        );
-    });
-}
-
-#[test]
-fn async_owned_and_borrowed_repositories_use_begin() {
-    let file = TempDb::new("repo-async-pool");
-    let pool = Blocking(file.pool(1));
-    let repository = AsyncNoteReadsRepo::new(pool);
-    let view = AsyncNoteReadsView::new(repository.source());
-
-    pollster::block_on(async {
-        repository
-            .begin()
-            .await
-            .expect("owned repository transaction")
-            .rollback()
-            .await
-            .expect("rollback");
-        view.begin_with(rupa::TxOptions::default())
-            .await
-            .expect("borrowed repository transaction")
-            .commit()
-            .await
-            .expect("commit");
-        assert!(view.all().await.expect("query through pool").is_empty());
-    });
-}
-
-#[test]
-fn repository_views_share_one_owned_transaction() {
-    let note = NewNote {
-        title: "committed".into(),
-        pinned: false,
-    };
-
-    let file = TempDb::new("repo-session");
+fn a_repository_branches_into_a_pooled_transaction() {
+    let file = TempDb::new("repo-open-tx");
     let pool = file.pool(2);
-    let session = rupa::TxSession::new(
-        NoteWritesView::new(&pool)
-            .begin()
-            .expect("begin transaction from repository"),
-    );
-    let writes = NoteWritesView::new(&session);
-    let reads = NoteReadsView::new(&session);
+    let notes = NotesRepo::new(&pool);
+    let tx = notes.open_tx(None).expect("transaction opens");
 
-    assert_eq!(std::mem::size_of_val(&writes), std::mem::size_of::<&()>());
-    assert_eq!(std::mem::size_of_val(&reads), std::mem::size_of::<&()>());
-    assert_eq!(writes.add(&note).expect("insert note"), 1);
-    assert_eq!(reads.all().expect("read own write")[0].title, "committed");
-    session.commit().expect("commit transaction");
-    let error = writes.add(&note).expect_err("session is closed");
-    assert!(error.downcast_ref::<SqliteError>().is_some());
+    assert_eq!(std::mem::size_of_val(&notes), std::mem::size_of::<&()>());
+    assert_eq!(tx.add(&note("committed")).expect("insert note"), 1);
+    assert_eq!(tx.all().expect("read own write")[0].title, "committed");
+    assert!(
+        notes.all().expect("read outside").is_empty(),
+        "not visible outside the transaction"
+    );
+    tx.commit().expect("commit transaction");
     assert_eq!(count(&pool), 1);
 }
 
 #[test]
-fn dropped_repository_session_rolls_back() {
-    let note = NewNote {
-        title: "discarded".into(),
-        pinned: false,
-    };
-
+fn a_dropped_repository_transaction_rolls_back() {
     let file = TempDb::new("repo-drop");
     let pool = file.pool(1);
-    let session = rupa::TxSession::new(pool.begin().expect("begin transaction"));
+    let notes = NotesRepo::new(&pool);
 
-    NoteWritesView::new(&session)
-        .add(&note)
+    notes
+        .open_tx(None)
+        .expect("transaction opens")
+        .add(&note("discarded"))
         .expect("insert note");
-    drop(session);
 
     assert_eq!(count(&pool), 0);
+}
+
+#[test]
+fn a_repository_joins_a_transaction_opened_elsewhere() {
+    let file = TempDb::new("repo-join");
+    let pool = file.pool(1);
+    let notes = NotesRepo::new(&pool);
+    let tx = pool.begin().expect("transaction opens");
+
+    notes.tx(&tx).add(&note("joined")).expect("insert note");
+    tx.commit().expect("commit transaction");
+
+    assert_eq!(notes.all().expect("read committed").len(), 1);
+}
+
+#[test]
+fn repositories_run_on_one_executor_and_its_transactions() {
+    let file = TempDb::new("repo-executor");
+    let pool = file.pool(1);
+    let conn = pool.get().expect("connection");
+    let notes = NotesRepo::new(&conn);
+    let tx = notes.open_tx(None).expect("transaction opens");
+
+    tx.add(&note("one")).expect("insert note");
+    tx.commit().expect("commit transaction");
+
+    assert_eq!(notes.all().expect("read committed").len(), 1);
+}
+
+#[test]
+fn async_repositories_branch_into_transactions_on_a_sync_pool() {
+    let file = TempDb::new("repo-async-pool");
+    let pool = file.pool(1);
+    let notes = AsyncNotesRepo::new(&pool);
+
+    pollster::block_on(async {
+        let tx = notes.open_tx(None).await.expect("transaction opens");
+
+        assert_eq!(tx.add(&note("async")).await.expect("insert"), 1);
+        assert_eq!(tx.all().await.expect("read own write")[0].title, "async");
+        tx.rollback().await.expect("rollback");
+        assert!(notes.all().await.expect("read after rollback").is_empty());
+    });
 }
 
 /// A database file, plus a second one attached as the `conformance` schema;
@@ -288,23 +249,23 @@ impl Drop for TempDb {
     }
 }
 
-fn add(conn: &mut impl Executor, title: &str) {
+fn add(conn: &impl Executor, title: &str) {
     let note = NewNote {
         title: title.into(),
         pinned: false,
     };
     assert_eq!(
-        conn.run(insert::<Note>().value(&note).affected()).unwrap(),
+        insert::<Note>()
+            .value(&note)
+            .affected()
+            .execute(conn)
+            .unwrap(),
         1
     );
 }
 
 fn count(pool: &SqlitePool) -> usize {
-    pool.get()
-        .unwrap()
-        .run(select::<Note>().all())
-        .unwrap()
-        .len()
+    select::<Note>().all().execute(pool).unwrap().len()
 }
 
 #[test]
@@ -323,8 +284,8 @@ fn owned_transactions_hold_their_connection() {
     let file = TempDb::new("owned");
     let pool = file.pool(2);
 
-    let mut tx = pool.begin().unwrap();
-    add(&mut tx, "a");
+    let tx = pool.begin().unwrap();
+    add(&tx, "a");
     assert_eq!(pool.status().in_use(), 1);
     tx.commit().unwrap();
     assert_eq!(
@@ -334,8 +295,8 @@ fn owned_transactions_hold_their_connection() {
     );
 
     {
-        let mut tx = pool.begin().unwrap();
-        add(&mut tx, "gone");
+        let tx = pool.begin().unwrap();
+        add(&tx, "gone");
     } // dropped: rolled back, then returned
     assert_eq!(count(&pool), 1);
     assert!(!pool.get().unwrap().is_dirty());
@@ -351,7 +312,7 @@ fn pooled_connections_serve_threads() {
             let pool = shared.clone();
             s.spawn(move || {
                 for i in 0..10 {
-                    add(&mut pool.get().unwrap(), &format!("{t}-{i}"));
+                    add(&*pool, &format!("{t}-{i}"));
                 }
             });
         }
@@ -385,8 +346,13 @@ fn registry_builds_a_pool_from_config() {
     assert_eq!(db.status().max_size, 3);
     assert_eq!(db.dialect().id(), DialectId::Sqlite);
 
-    let mut conn = pollster::block_on(db.get()).unwrap();
-    pollster::block_on(conn.run(raw().sql("CREATE TABLE t (x INTEGER)").execute::<u64>())).unwrap();
+    pollster::block_on(
+        raw()
+            .sql("CREATE TABLE t (x INTEGER)")
+            .execute::<u64>()
+            .execute(&db),
+    )
+    .unwrap();
     let wal = PathBuf::from(format!("{}-wal", file.main.display()));
     assert!(wal.exists(), "journal_mode = wal was applied");
 }
@@ -419,7 +385,7 @@ fn bad_configs_fail_at_connect() {
 fn repeated_queries_hit_the_render_cache() {
     let file = TempDb::new("render-cache");
     let pool = file.pool(1);
-    add(&mut pool.get().unwrap(), "first");
+    add(&pool, "first");
     // The process-wide cache is shared with other tests: count our own hits.
     let before = rupa::sql::render_cache().stats().hits;
     for _ in 0..5 {
@@ -446,10 +412,50 @@ fn statement_cache_size_is_configurable() {
     let mut conn = pool.get().unwrap();
     conn.connection().execute_batch(NOTES_DDL_MAIN).unwrap();
     assert_eq!(
-        conn.run(raw().sql("SELECT 1 FROM notes").rows::<Vec<Note>>())
+        raw()
+            .sql("SELECT 1 FROM notes")
+            .rows::<Vec<Note>>()
+            .execute(&conn)
             .unwrap(),
         []
     );
 }
 
 const NOTES_DDL_MAIN: &str = "CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT, pinned INTEGER NOT NULL)";
+
+#[test]
+fn connect_one_opens_a_connection_outside_the_pool() {
+    let config = DbConfig::new("sqlite::memory:");
+
+    let mut one =
+        <SqlitePool as rupa::SyncConnect>::connect_one(&config).expect("a single connection opens");
+
+    one.connection()
+        .execute_batch(NOTES_DDL_MAIN)
+        .expect("the schema applies");
+
+    let notes = raw()
+        .sql("SELECT * FROM notes")
+        .rows::<Vec<Note>>()
+        .execute(&one)
+        .expect("the query runs on the single connection");
+
+    assert_eq!(notes, []);
+}
+
+#[test]
+fn an_injected_repository_runs_on_a_borrowed_pooled_transaction() {
+    let file = TempDb::new("repo-dyn-tx");
+    let pool = file.pool(2);
+    let notes: std::sync::Arc<dyn Notes> = std::sync::Arc::new(NotesRepo::new(pool.clone()));
+    let tx = pool.begin().expect("transaction opens");
+
+    notes.tx(&tx).add(&note("borrowed")).expect("insert note");
+    assert_eq!(notes.tx(&tx).all().expect("read own write").len(), 1);
+    assert!(
+        notes.all().expect("read outside").is_empty(),
+        "isolated until commit"
+    );
+    tx.commit().expect("commit transaction");
+    assert_eq!(notes.all().expect("read committed").len(), 1);
+}

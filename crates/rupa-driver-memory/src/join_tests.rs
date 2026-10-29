@@ -14,14 +14,7 @@ const USERS: TableRef = TableRef::new("users");
 const ORDERS: TableRef = TableRef::new("orders");
 
 fn meta(name: &'static str, sql_type: SqlType, nullable: bool) -> ColumnMeta {
-    ColumnMeta {
-        field: name,
-        name,
-        kind: ColumnKind::Scalar,
-        sql_type,
-        nullable,
-        generated: false,
-    }
+    ColumnMeta::new(name, name, ColumnKind::Scalar, sql_type, nullable)
 }
 
 fn insert(db: &mut MemoryDb, table: TableRef, columns: &[&'static str], rows: Vec<Vec<Value>>) {
@@ -29,13 +22,14 @@ fn insert(db: &mut MemoryDb, table: TableRef, columns: &[&'static str], rows: Ve
         .into_iter()
         .map(|r| r.into_iter().map(ExprNode::Param).collect())
         .collect();
-    db.run_statement(&Statement::Insert(Insert {
-        table,
-        columns: columns.to_vec(),
-        rows,
-        returning: None,
-    }))
-    .expect("insert");
+    db.store_mut()
+        .run_statement(&Statement::Insert(Insert {
+            table,
+            columns: columns.to_vec(),
+            rows,
+            returning: None,
+        }))
+        .expect("insert");
 }
 
 /// users: 1 ann (manager none), 2 bob (manager 1), 3 cy (manager 1)
@@ -121,7 +115,7 @@ fn select(from: FromClause, projection: Vec<ColumnRef>) -> Select {
 
 fn rows(db: &mut MemoryDb, s: Select) -> Result<Vec<Vec<Value>>, MemoryError> {
     let types: Vec<SqlType> = vec![SqlType::I64; s.projection.len()];
-    let Outcome::Rows(mut cursor) = db.run_statement(&Statement::Select(s))? else {
+    let Outcome::Rows(mut cursor) = db.store_mut().run_statement(&Statement::Select(s))? else {
         panic!("a select yields rows");
     };
     let mut out = Vec::new();
@@ -249,7 +243,11 @@ fn three_way_join_may_refer_to_any_earlier_source() {
 fn exists_over_a_join() {
     let mut s = select(users_orders(JoinKind::Inner), vec![]);
     s.filter = Some(eq(c(0, "id"), ExprNode::Param(Value::I64(3))));
-    let Outcome::Rows(mut cursor) = db().run_statement(&Statement::Exists(s)).unwrap() else {
+    let Outcome::Rows(mut cursor) = db()
+        .store_mut()
+        .run_statement(&Statement::Exists(s))
+        .unwrap()
+    else {
         panic!("exists yields a row");
     };
     let row = cursor.next_row().unwrap().unwrap();
@@ -264,6 +262,7 @@ fn unknown_sources_are_errors() {
         MemoryError::NoSuchSource(SourceId(1))
     );
     let err = db()
+        .store_mut()
         .run_statement(&Statement::Delete(Delete {
             table: USERS,
             filter: Some(eq(c(1, "id"), ExprNode::Param(Value::I64(1)))),

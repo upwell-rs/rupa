@@ -1,0 +1,33 @@
+[package]
+name = "rupa-migrate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Explicit migration catalogs, history and execution for RUPA"
+
+[features]
+# Synchronous sessions, bodies and `apply` (`rupa_migrate::sync`).
+sync = []
+# Asynchronous sessions, bodies and `apply` (`rupa_migrate::asynchronous`).
+async = ["rupa-core/async", "dep:futures-util"]
+# The engine session protocols driver crates implement sessions on, in each
+# enabled mode (alone: only `protocol::SqlState`); not public API.
+protocol = []
+# Operator commands over the same engine (`rupa_migrate::commands`): typed
+# commands, human and JSON reports, exit statuses and secret redaction, in
+# each enabled mode (alone: nothing).
+commands = []
+# The clap command line for those commands (`commands::cli`).
+cli = ["commands", "dep:clap"]
+
+[dependencies]
+rupa-core.workspace = true
+rupa-sql.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+clap = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }

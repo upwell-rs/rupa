@@ -1,8 +1,7 @@
 //! Derived entities and capabilities, end to end on the memory backend.
 
 use chrono::{DateTime, Utc};
-use rupa::core::exec::Executor;
-use rupa::core::{ColumnKind, Entity as _, SqlType, Value};
+use rupa::core::{ColumnKind, Entity as _, Generated, SqlType, Value};
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
 use serde::{Deserialize, Serialize};
@@ -93,7 +92,7 @@ fn entity_metadata() {
         rupa::core::ir::TableRef::with_schema("app", "users")
     );
     assert_eq!(User::ID_COLUMNS, ["id"]);
-    let cols = User::columns();
+    let cols = User::COLUMNS;
     let names: Vec<_> = cols.iter().map(|c| c.name).collect();
     assert_eq!(
         names,
@@ -119,27 +118,35 @@ fn entity_metadata() {
         ColumnKind::Json,
         "#[column(json)] overrides scalar inference"
     );
-    assert!(kind("id").generated && kind("version").generated && !kind("email").generated);
     assert_eq!(
-        col!(User::raw_label).kind(),
-        ColumnKind::Json,
-        "col! respects the override too"
+        (
+            kind("id").generated,
+            kind("version").generated,
+            kind("email").generated
+        ),
+        (Some(Generated::Identity), Some(Generated::Database), None)
     );
-    assert_eq!(col!(User::created_at).name(), "created");
+    assert!(kind("id").primary_key && !kind("email").primary_key);
+    assert_eq!(
+        User::RAW_LABEL.kind(),
+        ColumnKind::Json,
+        "the column handle respects the override too"
+    );
+    assert_eq!(User::CREATED_AT.name(), "created");
 }
 
 #[test]
 fn companion_insert_returns_generated_values() {
-    let mut db = db();
-    let ada: User = db
-        .run(insert::<User>().value(&new_user("ada@x")).returning_one())
+    let db = db();
+    let ada: User = insert::<User>()
+        .value(&new_user("ada@x"))
+        .returning_one()
+        .execute(&db)
         .unwrap();
-    let both: Vec<User> = db
-        .run(
-            insert::<User>()
-                .values(&[new_user("b@x"), new_user("c@x")])
-                .returning_all(),
-        )
+    let both: Vec<User> = insert::<User>()
+        .values(&[new_user("b@x"), new_user("c@x")])
+        .returning_all()
+        .execute(&db)
         .unwrap();
     assert_eq!(ada.id, 1);
     assert_eq!(
@@ -152,7 +159,7 @@ fn companion_insert_returns_generated_values() {
 
 #[test]
 fn one_model_insert_skips_generated_columns() {
-    let mut db = db();
+    let db = db();
     let draft = User {
         id: 0, // ignored: generated
         email: "e@x".into(),
@@ -165,8 +172,10 @@ fn one_model_insert_skips_generated_columns() {
         raw_label: "l".into(),
         version: 0, // ignored: generated
     };
-    let saved = db
-        .run(insert::<User>().value(&draft).returning_one())
+    let saved = insert::<User>()
+        .value(&draft)
+        .returning_one()
+        .execute(&db)
         .unwrap();
     assert_eq!(
         saved,
@@ -180,20 +189,31 @@ fn one_model_insert_skips_generated_columns() {
 
 #[test]
 fn get_update_and_delete() {
-    let mut db = db();
-    let mut user = db
-        .run(insert::<User>().value(&new_user("ada@x")).returning_one())
+    let db = db();
+    let mut user = insert::<User>()
+        .value(&new_user("ada@x"))
+        .returning_one()
+        .execute(&db)
         .unwrap();
-    db.run(insert::<User>().value(&new_user("bob@x")).affected())
+    insert::<User>()
+        .value(&new_user("bob@x"))
+        .affected()
+        .execute(&db)
         .unwrap();
 
-    assert_eq!(db.run(get::<User>(&1)).unwrap().as_ref(), Some(&user));
-    assert_eq!(db.run(get::<User>(&99)).unwrap(), None);
+    assert_eq!(get::<User>(&1).execute(&db).unwrap().as_ref(), Some(&user));
+    assert_eq!(get::<User>(&99).execute(&db).unwrap(), None);
 
     // Full-entity update by id.
     user.email = "ada@new".into();
-    assert_eq!(db.run(update::<User>().one(&user).affected()).unwrap(), 1);
-    assert_eq!(db.run(get::<User>(&1)).unwrap().unwrap().email, "ada@new");
+    assert_eq!(
+        update::<User>().one(&user).affected().execute(&db).unwrap(),
+        1
+    );
+    assert_eq!(
+        get::<User>(&1).execute(&db).unwrap().unwrap().email,
+        "ada@new"
+    );
 
     // Keyed patch: only `Some` fields change.
     let patch = UserPatch {
@@ -201,27 +221,36 @@ fn get_update_and_delete() {
         nickname: Some(Some("ada".into())),
         prefs: None,
     };
-    db.run(update::<User>().one(&patch).affected()).unwrap();
-    let got = db.run(get::<User>(&1)).unwrap().unwrap();
+    update::<User>()
+        .one(&patch)
+        .affected()
+        .execute(&db)
+        .unwrap();
+    let got = get::<User>(&1).execute(&db).unwrap().unwrap();
     assert_eq!(
         (got.nickname.as_deref(), got.prefs.theme.as_str()),
         (Some("ada"), "dark")
     );
 
     // Unkeyed patch: applied to a filter.
-    let n = db.run(
-        update::<User>()
-            .apply(&Rename {
-                email: Some("same@x".into()),
-            })
-            .filter(User::ID.gt(0))
-            .affected(),
-    );
+    let n = update::<User>()
+        .apply(&Rename {
+            email: Some("same@x".into()),
+        })
+        .filter(User::ID.gt(0))
+        .affected()
+        .execute(&db);
     assert_eq!(n.unwrap(), 2);
 
-    assert_eq!(db.run(delete::<User>().one(&got).affected()).unwrap(), 1);
-    assert_eq!(db.run(delete::<User>().by_id(&2).affected()).unwrap(), 1);
-    assert!(!db.run(select::<User>().exists()).unwrap());
+    assert_eq!(
+        delete::<User>().one(&got).affected().execute(&db).unwrap(),
+        1
+    );
+    assert_eq!(
+        delete::<User>().by_id(&2).affected().execute(&db).unwrap(),
+        1
+    );
+    assert!(!select::<User>().exists().execute(&db).unwrap());
 }
 
 #[test]
@@ -235,7 +264,7 @@ fn update_values_follow_the_patch() {
         patch.update_values(),
         [("nickname", Value::Null(SqlType::Text))]
     );
-    assert_eq!(Updatable::<User>::key(&patch), rupa::core::Keyed(3));
+    assert_eq!(Updatable::<User>::key(&patch), rupa::Keyed(3));
     assert_eq!(Rename { email: None }.update_values(), []);
 }
 
@@ -243,7 +272,7 @@ fn update_values_follow_the_patch() {
 fn entities_without_capabilities_are_readable() {
     let mut db = MemoryDb::new();
     db.register::<Audit>();
-    assert_eq!(db.run(select::<Audit>().all()).unwrap().len(), 0);
+    assert_eq!(select::<Audit>().all().execute(&db).unwrap().len(), 0);
 }
 
 #[test]
@@ -251,7 +280,47 @@ fn ui() {
     trybuild::TestCases::new().compile_fail("tests/ui/*.rs");
 }
 
-// `User::ID` used above: a hand-written handle next to the derived ones.
-impl User {
-    const ID: Column<User, i64, Scalar> = Column::scalar("id");
+/// A user scalar type: not recognized by name, so its kind is selected at
+/// compile time through `ScalarColumn`.
+#[derive(Debug, Clone, PartialEq)]
+struct Slug(String);
+
+impl rupa::core::ScalarColumn for Slug {
+    type Base = Slug;
+    const SQL_TYPE: SqlType = SqlType::Text;
+
+    fn to_value(&self) -> Value {
+        Value::Text(self.0.clone())
+    }
+
+    fn from_value(v: Value) -> Result<Self, rupa::DecodeError> {
+        String::from_value(v).map(Slug)
+    }
+}
+
+/// An alias hides the scalar name; the compile-time selection still applies.
+type Label = String;
+
+#[derive(Debug, Entity)]
+#[entity(table = "pages")]
+struct Page {
+    #[id]
+    id: i64,
+    slug: Slug,
+    label: Label,
+    prefs: Option<Prefs>,
+}
+
+#[test]
+fn kinds_resolve_for_named_scalars_user_scalars_aliases_and_json() {
+    let _: Column<Page, i64, Scalar> = Page::ID;
+    let _: Column<Page, Slug, Scalar> = Page::SLUG;
+    let _: Column<Page, Label, Scalar> = Page::LABEL;
+    let _: Column<Page, Option<Prefs>, Json> = Page::PREFS;
+
+    assert_eq!(
+        Page::SLUG.encode(&Slug("a".into())),
+        Value::Text("a".into())
+    );
+    assert_eq!(Page::PREFS.encode(&None), Value::Null(SqlType::Json));
 }

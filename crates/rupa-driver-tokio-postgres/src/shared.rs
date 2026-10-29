@@ -3,7 +3,7 @@
 //! `postgres::Error` are re-exports of tokio-postgres').
 
 use std::error::Error as StdError;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bytes::BytesMut;
 use hashlink::LruCache;
@@ -16,6 +16,9 @@ rupa_sql::driver_error! {
     pub enum PgError {
         /// Postgres (or the connection) reported an error.
         Db(tokio_postgres::Error),
+        /// A migration connection was used outside a runner-owned artifact transaction.
+        #[cfg(feature = "migration-protocol")]
+        Migration(rupa_migrate::StateError),
     }
 }
 
@@ -185,9 +188,12 @@ pub const STATEMENT_CACHE_CAPACITY: usize = 256;
 /// closes it on the server. A statement whose execution failed is evicted too,
 /// since it may be stale (e.g. its table was recreated with other column
 /// types). Keys share the render cache's SQL text, so caching costs no copy.
+///
+/// Used through `&self`, like the client: each call holds an internal lock
+/// only for the lookup or update itself, never across a round trip.
 #[derive(Debug)]
 pub struct StatementCache {
-    statements: LruCache<Arc<str>, tokio_postgres::Statement>,
+    statements: Mutex<LruCache<Arc<str>, tokio_postgres::Statement>>,
 }
 
 impl Default for StatementCache {
@@ -200,49 +206,57 @@ impl StatementCache {
     /// A cache for at most `capacity` statements (`0`: prepare every time).
     pub fn new(capacity: usize) -> Self {
         Self {
-            statements: LruCache::new(capacity),
+            statements: Mutex::new(LruCache::new(capacity)),
         }
     }
 
     /// The cached statement for `sql`, marking it used.
-    pub fn get(&mut self, sql: &str) -> Option<tokio_postgres::Statement> {
-        self.statements.get(sql).cloned()
+    pub fn get(&self, sql: &str) -> Option<tokio_postgres::Statement> {
+        self.lock().get(sql).cloned()
     }
 
     /// Caches `statement` for `sql`.
-    pub fn insert(&mut self, sql: Arc<str>, statement: tokio_postgres::Statement) {
-        self.statements.insert(sql, statement);
+    pub fn insert(&self, sql: Arc<str>, statement: tokio_postgres::Statement) {
+        self.lock().insert(sql, statement);
     }
 
     /// Forgets the statement for `sql`.
-    pub fn evict(&mut self, sql: &str) {
-        self.statements.remove(sql);
+    pub fn evict(&self, sql: &str) {
+        self.lock().remove(sql);
     }
 
     /// Forgets every statement (e.g. after `DISCARD ALL`).
-    pub fn clear(&mut self) {
-        self.statements.clear();
+    pub fn clear(&self) {
+        self.lock().clear();
     }
 
     /// The number of cached statements.
     pub fn len(&self) -> usize {
-        self.statements.len()
+        self.lock().len()
     }
 
     /// Whether nothing is cached.
     pub fn is_empty(&self) -> bool {
-        self.statements.is_empty()
+        self.lock().is_empty()
     }
 
     /// The most statements kept.
     pub fn capacity(&self) -> usize {
-        self.statements.capacity()
+        self.lock().capacity()
     }
 
     /// Changes the capacity, dropping the least recently used statements
     /// that no longer fit.
-    pub fn set_capacity(&mut self, capacity: usize) {
-        self.statements.set_capacity(capacity);
+    pub fn set_capacity(&self, capacity: usize) {
+        self.lock().set_capacity(capacity);
+    }
+
+    /// The cache. Every update is a single map operation, so one that
+    /// panicked leaves a valid map behind and a poisoned lock is still usable.
+    fn lock(&self) -> MutexGuard<'_, LruCache<Arc<str>, tokio_postgres::Statement>> {
+        self.statements
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 }
 

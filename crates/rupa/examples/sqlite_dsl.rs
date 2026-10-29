@@ -5,9 +5,8 @@
 #[path = "support/sqlite.rs"]
 mod sqlite;
 
-use rupa::core::{Dialect, DialectId, DslError};
 use rupa::prelude::*;
-use rupa::{Executor, Pool};
+use rupa::{Dialect, DialectId, DslError};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,27 +43,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = sqlite::open(
         "CREATE TABLE profiles (id INTEGER PRIMARY KEY, name TEXT NOT NULL, settings TEXT NOT NULL)",
     )?;
-    let mut conn = pool.get()?;
-    conn.run(
-        insert::<Profile>()
-            .value(&Profile {
-                id: 1,
-                name: "Ada".into(),
-                settings: Settings {
-                    theme: "dark".into(),
-                },
-            })
-            .affected(),
-    )?;
+    insert::<Profile>()
+        .value(&Profile {
+            id: 1,
+            name: "Ada".into(),
+            settings: Settings {
+                theme: "dark".into(),
+            },
+        })
+        .affected()
+        .execute(&pool)?;
 
     let query = select::<Profile>()
-        .filter(same_name_ci(col!(Profile::name), "ADA"))
-        .filter(col!(Profile::settings).path("theme").text().eq("dark"))
+        .filter(same_name_ci(Profile::NAME, "ADA"))
+        .filter(Profile::SETTINGS.path("theme").text().eq("dark"))
         .all();
-    let rendered = rupa::sql::render_query(&query, &rupa::core::Sqlite)?;
+    let rendered = rupa::sql::render_query(&query, &rupa::Sqlite)?;
     assert_eq!(rendered.params.len(), 2);
     assert!(!rendered.sql.contains("'ADA'"));
-    assert_eq!(conn.run(query)?[0].id, 1);
+    assert_eq!(query.execute(&pool)?[0].id, 1);
 
     println!("custom DSL, JSON path and bound parameters passed");
     Ok(())

@@ -5,6 +5,30 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 license.workspace = true
-description = "Upwell dependency-injection integration for RUPA (in development)"
+description = "Upwell integration for RUPA: configured databases, startup migrations, repositories and migration commands"
+
+[features]
+# Databases declared with `database!`: typed configuration, a singleton pool
+# component gated on its migrations, `Arc<dyn Repository>` providers and the
+# migration commands, for pools of each enabled mode (alone: nothing).
+database = [
+    "dep:rupa-core",
+    "dep:rupa-migrate",
+    "rupa-migrate/cli",
+    "dep:upwell",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:thiserror",
+]
+# Sync pools (rusqlite, postgres, mysql).
+sync = ["rupa-migrate?/sync"]
+# Async pools (tokio-postgres, sqlx).
+async = ["rupa-core?/async", "rupa-migrate?/async"]
 
 [dependencies]
+rupa-core = { workspace = true, optional = true }
+rupa-migrate = { workspace = true, optional = true }
+upwell = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }

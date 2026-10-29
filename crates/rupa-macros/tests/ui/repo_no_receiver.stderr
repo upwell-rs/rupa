@@ -1,4 +1,4 @@
-error: a repository query method takes `&self` for a source or `&mut self` for a native executor
+error: a repository query method takes `&self`; the repository holds its connection
   --> tests/ui/repo_no_receiver.rs:11:5
    |
 11 |     fn a(id: i64) -> Result<Option<User>, DynError>;

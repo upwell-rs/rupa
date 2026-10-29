@@ -11,16 +11,11 @@ use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{DeriveInput, Path};
 
-use crate::model::{self, Field, column_expr, option_inner};
+use crate::model::{self, Field, column_path, option_inner};
 
 /// A field's `(column name, encoded value)` pair, for entity `entity`.
-fn assignment(
-    ms: &TokenStream,
-    entity: &TokenStream,
-    f: &Field,
-    value: TokenStream,
-) -> TokenStream {
-    let c = column_expr(ms, entity, &f.ident, f.span());
+fn assignment(entity: &TokenStream, f: &Field, value: TokenStream) -> TokenStream {
+    let c = column_path(entity, &f.ident);
     quote!({ let column = #c; (column.name(), column.encode(#value)) })
 }
 
@@ -33,19 +28,17 @@ fn checked_assignment(
     ty: &syn::Type,
     value: TokenStream,
 ) -> TokenStream {
-    let c = column_expr(ms, entity, &f.ident, f.span());
-    let fi = &f.ident;
+    let c = column_path(entity, &f.ident);
     // `T` is given explicitly so a mismatch fails the `FieldIs` bound
-    // (our diagnostic) instead of being inferred from the probe's impl.
-    let checked =
-        quote_spanned!(f.span()=> #ms::as_field::<#ty, _>(&<#entity>::__rupa_fields().#fi, #value));
+    // (our diagnostic) instead of being inferred from the column's type.
+    let checked = quote_spanned!(f.span()=> #ms::as_field::<#ty, _>(&#c, #value));
     quote!({ let column = #c; (column.name(), column.encode(#checked)) })
 }
 
 /// Compile-time check that `f` (of type `ty`) is a field of `entity` with that type.
 fn field_check(ms: &TokenStream, entity: &Path, f: &Field, ty: &syn::Type) -> TokenStream {
-    let fi = &f.ident;
-    quote_spanned!(f.span()=> #ms::assert_field_type::<#ty, _>(&<#entity>::__rupa_fields().#fi);)
+    let c = column_path(&quote!(#entity), &f.ident);
+    quote_spanned!(f.span()=> #ms::assert_field_type::<#ty, _>(&#c);)
 }
 
 pub fn gettable(input: DeriveInput) -> syn::Result<TokenStream> {
@@ -93,7 +86,7 @@ pub fn insertable(input: DeriveInput) -> syn::Result<TokenStream> {
         let me = quote!(#ident);
         let pairs = fields.iter().filter(|f| !f.generated).map(|f| {
             let fi = &f.ident;
-            assignment(&ms, &me, f, quote!(&self.#fi))
+            assignment(&me, f, quote!(&self.#fi))
         });
         return Ok(quote! {
             impl #ms::Insertable<#ident> for #ident {
@@ -148,7 +141,7 @@ pub fn updatable(input: DeriveInput) -> syn::Result<TokenStream> {
         let me = quote!(#ident);
         let pairs = fields.iter().filter(|f| !f.id && !f.generated).map(|f| {
             let fi = &f.ident;
-            assignment(&ms, &me, f, quote!(&self.#fi))
+            assignment(&me, f, quote!(&self.#fi))
         });
         return Ok(quote! {
             impl #ms::Updatable<#ident> for #ident {
@@ -209,7 +202,7 @@ pub fn updatable(input: DeriveInput) -> syn::Result<TokenStream> {
             (
                 quote!(#ms::Keyed<<#entity as #ms::Entity>::Id>),
                 quote!(#ms::Keyed(#ms::Clone::clone(&self.#fi))),
-                quote!(if !#ms::same_str(<#entity>::__RUPA_ID_FIELD, #name) { ::core::panic!(#message) }),
+                quote!(if !#ms::is_id_field(<#entity as #ms::Entity>::COLUMNS, #name) { ::core::panic!(#message) }),
             )
         }
         None => (quote!(#ms::NoKey), quote!(#ms::NoKey), quote!()),

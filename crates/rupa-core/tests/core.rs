@@ -8,7 +8,7 @@ use rupa_core::ir::{BinOp, ColumnRef, ExprNode, FromClause, SourceId, Statement}
 use rupa_core::prelude::*;
 use rupa_core::query::Output;
 use rupa_core::row::ValueRows;
-use rupa_core::{ColumnKind, Dialect, Expect, ResultError, SqlType, Src, Value};
+use rupa_core::{Dialect, Expect, ResultError, SqlType, Src, Value};
 
 fn rows(rows: Vec<Vec<Value>>) -> ValueRows {
     ValueRows::new(rows)
@@ -227,23 +227,14 @@ fn decode_errors_name_the_column() {
     assert_eq!(e.column, Some("email"));
 }
 
-// --- column kinds via col! (simulated derive output) ------------------------
+// --- hand-written JSON handles (kind inference is tested on derived entities) --
 
 #[test]
-fn col_macro_infers_kinds() {
-    assert_eq!(col!(User::email).kind(), ColumnKind::Scalar);
-    assert_eq!(col!(User::nickname).kind(), ColumnKind::Scalar);
-    assert_eq!(col!(User::prefs).kind(), ColumnKind::Json);
-    assert_eq!(col!(User::old_prefs).kind(), ColumnKind::Json);
-    assert_eq!(
-        col!(User::old_prefs).encode(&None),
-        Value::Null(SqlType::Json)
-    );
-    // Inferred handles are interchangeable with hand-written ones.
-    let _: Column<User, Prefs, Json> = col!(User::prefs);
+fn hand_written_json_handles_encode_and_filter() {
+    assert_eq!(User::OLD_PREFS.encode(&None), Value::Null(SqlType::Json));
     let _ = select::<User>()
-        .filter(col!(User::email).eq("x"))
-        .filter(col!(User::prefs).path("beta").cast::<bool>().eq(true));
+        .filter(User::EMAIL.eq("x"))
+        .filter(User::PREFS.path("beta").cast::<bool>().eq(true));
 }
 
 // --- dialect capabilities ---------------------------------------------------
@@ -290,10 +281,10 @@ fn join_numbers_sources_and_qualifies_columns() {
     assert_eq!(joins.len(), 1);
     assert_eq!(joins[0].kind, rupa_core::ir::JoinKind::Left);
     // Both sources' columns, in order, each naming its source.
-    assert_eq!(s.projection.len(), 2 * User::columns().len());
+    assert_eq!(s.projection.len(), 2 * User::COLUMNS.len());
     assert_eq!(s.projection[0], ColumnRef::new("id"));
     assert_eq!(
-        s.projection[User::columns().len()],
+        s.projection[User::COLUMNS.len()],
         ColumnRef::of(SourceId(1), "id")
     );
     // The filter before the join (plain columns) is on source 0.
@@ -318,8 +309,8 @@ fn joined_rows_decode_into_tuples_with_none_for_unmatched() {
         .left_join_on::<User>(|(a, b)| b.col(User::ID).eq(a.col(User::ID)))
         .all();
     let user = User::sample();
-    let width = User::columns().len();
-    let unmatched: Vec<Value> = User::columns()
+    let width = User::COLUMNS.len();
+    let unmatched: Vec<Value> = User::COLUMNS
         .iter()
         .map(|c| Value::Null(c.sql_type))
         .collect();
@@ -352,7 +343,7 @@ fn up_to_ten_sources() {
         panic!()
     };
     assert_eq!(s.from.source_count(), 10);
-    assert_eq!(s.projection.len(), 10 * User::columns().len());
+    assert_eq!(s.projection.len(), 10 * User::COLUMNS.len());
     type Ten = (
         User,
         User,

@@ -41,12 +41,18 @@ jobs:
       - run: |
           set -e
           cargo check -p rupa --no-default-features
-          for f in chrono uuid async tokio dynamic postgres postgres-sync sqlite sqlite-unbundled mysql memory sqlx-postgres sqlx-mysql sqlx-sqlite sqlx-sqlite-unbundled tls-rustls full; do
+          for f in migrations chrono uuid sync async tokio dynamic postgres postgres-sync sqlite sqlite-unbundled mysql memory sqlx-postgres sqlx-mysql sqlx-sqlite sqlx-sqlite-unbundled tls-rustls full; do
             echo "::group::rupa/$f"
             cargo check -p rupa --features "$f"
             echo "::endgroup::"
           done
           cargo check -p rupa --no-default-features --features full,tls-rustls
+      # Migration execution modes compile alone and together.
+      - run: |
+          set -e
+          for f in sync async sync,async; do
+            cargo check -p rupa-migrate --all-targets --features "$f"
+          done
       # Each crate must build (with its tests) on its own features, not only
       # through workspace feature unification.
       - run: |
@@ -78,6 +84,15 @@ jobs:
         run: cargo nextest run --profile ci --workspace --features rupa/full
       - if: matrix.toolchain == 'nightly'
         run: cargo nextest run --profile ci --workspace --features rupa/full -E 'not test(ui)'
+      - run: cargo run -p rupa-example-app -- primary apply
+      - run: cargo run -p rupa-example-app -- reporting apply
+      - run: cargo run -p rupa-example-upwell -- --config examples/migrations/upwell/config migrate apply
+      # The facade's runnable examples; `memory_repository_test` runs as a test above.
+      - run: |
+          set -e
+          for e in sqlite_crud sqlite_joins sqlite_dsl sqlite_repository sqlite_repository_tx sqlite_repository_crud; do
+            cargo run -p rupa --example "$e" --features sqlite
+          done
       # nextest doesn't run doctests.
       - run: cargo test --doc --workspace --features rupa/full
       # trybuild's work dir looks like a nested target dir to rust-cache, whose
@@ -96,6 +111,9 @@ jobs:
           toolchain: "1.99"
       - uses: Swatinem/rust-cache@v2
       - run: cargo test -p rupa --features upwell
+      # The migration plugin builds against Upwell pinned to a git commit.
+      - run: cargo test -p rupa-upwell --features database,sync,async
+      - run: cargo test -p rupa-example-upwell
 
   bench:
     name: benchmarks

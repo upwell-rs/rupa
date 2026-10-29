@@ -110,7 +110,7 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-/// A repository trait with a distinct owned type and borrowed view.
+/// A repository trait, and one repository type over any connection.
 ///
 /// ```ignore
 /// #[repository]
@@ -122,12 +122,16 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     fn active(&self, active: bool) -> Result<Vec<User>, DynError>;  // blocks in place
 /// }
 ///
-/// let users = UserRepositoryView::new(&pool);
+/// let users = UserRepositoryRepo::new(&pool);
+/// let tx = users.open_tx(None).await?;   // the same repository, in a transaction
+/// tx.by_email("ada@x").await?;
+/// tx.commit().await?;
 /// ```
 ///
 /// See the `rupa_macros::repository` module docs for the rules on receivers,
-/// sync/async methods, errors and optional `dynamic_dispatch`.
-/// Async methods use unboxed futures by default.
+/// sync/async methods, errors and the options `static_dispatch` and
+/// `database = ..` (an Upwell provider). Async methods
+/// return boxed futures by default, so the trait is dyn-compatible.
 ///
 /// Keep the trait so code using it still resolves; only the
 /// macro's own error is reported.
@@ -158,7 +162,7 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     .join::<Coupon>().left()
 ///     .into::<OrderLine>()
 ///     .all()
-///     .run(&mut db)?;
+///     .execute(&db)?;
 /// ```
 ///
 /// Every field says where it comes from; nothing is matched by name. Only
