@@ -7,8 +7,8 @@ use super::{Harness, Session, catalog};
 use crate::migrations::fixture::{
     Account, NewAccount, Plans, create_accounts_indexed_by_a_foreign_column,
     create_accounts_indexed_by_a_volatile_function, create_accounts_indexed_by_an_aggregate,
-    create_accounts_with_expression_indexes, create_accounts_with_partial_index,
-    create_accounts_with_text_expression,
+    create_accounts_with_expression_indexes, create_accounts_with_float_expression,
+    create_accounts_with_partial_index, create_accounts_with_text_expression,
 };
 
 /// Inserts one account on its own connection, and whether the database
@@ -182,4 +182,23 @@ pub(super) fn case_expressions_ddl_cannot_hold_fail_typed_before_acquisition<H: 
             }
         );
     }
+}
+
+/// A float literal stays a float: `bucket / 2.0` keeps buckets 4 and 5
+/// apart, as it would not if the literal were written as the integer `2`.
+pub(super) fn case_float_literals_in_index_expressions_stay_floats<H: Harness>(h: &mut H) {
+    let entries = [Planned(Plans(
+        planned::<H>("1"),
+        create_accounts_with_float_expression,
+    ))];
+
+    wait!(h, h.connect().apply(&catalog(&entries))).expect("a float expression index applies");
+
+    assert!(add(h, "a@example.com", "a", 4, None));
+    assert!(add(h, "b@example.com", "b", 5, None));
+    assert!(
+        !add(h, "c@example.com", "c", 4, None),
+        "the same bucket still collides"
+    );
+    assert_eq!(accounts(h), 2);
 }

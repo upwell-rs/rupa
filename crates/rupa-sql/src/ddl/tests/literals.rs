@@ -1,0 +1,57 @@
+use rupa_core::ir::ExprNode;
+
+use super::expressions::{column, on_expression, param};
+use super::*;
+
+fn divided_by(value: Value) -> Index {
+    on_expression(ExprNode::RawOp(
+        "/",
+        Box::new(column("n")),
+        Box::new(param(value)),
+    ))
+}
+
+fn rendered(value: Value, dialect: &dyn Dialect) -> String {
+    render_schema(&SchemaOp::CreateIndex(divided_by(value)), dialect).expect("renders")
+}
+
+#[test]
+fn float_literals_always_read_as_floats() {
+    for (value, text) in [
+        (Value::F64(2.0), "2.0"),
+        (Value::F64(-0.0), "-0.0"),
+        (Value::F64(0.5), "0.5"),
+        (Value::F64(f64::MAX), "1.7976931348623157e308"),
+        (Value::F64(1e-300), "1e-300"),
+        (Value::F64(f64::MIN_POSITIVE), "2.2250738585072014e-308"),
+        (Value::F32(3.0), "3.0"),
+        (Value::F32(f32::MAX), "3.4028235e38"),
+    ] {
+        let expected = format!(" / {text}))");
+
+        for dialect in [&Postgres as &dyn Dialect, &MySql, &Sqlite] {
+            assert!(
+                rendered(value.clone(), dialect).ends_with(&expected),
+                "{value:?} on {dialect:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn integers_stay_integer_literals() {
+    for value in [Value::I16(2), Value::I32(2), Value::I64(2)] {
+        assert!(rendered(value, &Postgres).ends_with(r#""n" / 2))"#));
+    }
+}
+
+#[test]
+fn float_defaults_are_written_as_float_literals() {
+    let table = Table::at(NOTES).column(
+        ColumnDef::new("ratio", ColumnType::Double).default(ColumnDefault::Value(Value::F64(1.0))),
+    );
+
+    for sql in ok(&SchemaOp::CreateTable(table)) {
+        assert!(sql.contains("DEFAULT 1.0"), "{sql}");
+    }
+}
