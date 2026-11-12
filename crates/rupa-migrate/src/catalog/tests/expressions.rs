@@ -6,11 +6,11 @@ use rupa_core::schema::{ColumnType, DdlExpr, Index, IndexColumn, IndexExpr, Inde
 use super::plans::{assert_distinct_digests, notes_title, plan_digest};
 use super::*;
 
-fn column(name: &'static str) -> ExprNode {
+pub(super) fn column(name: &'static str) -> ExprNode {
     ExprNode::Column(ColumnRef::new(name))
 }
 
-fn call(name: &'static str, node: ExprNode) -> ExprNode {
+pub(super) fn call(name: &'static str, node: ExprNode) -> ExprNode {
     ExprNode::Call(name, vec![node])
 }
 
@@ -30,14 +30,14 @@ fn expression(node: ExprNode) -> IndexPart {
     .into()
 }
 
-fn on(node: ExprNode) -> Index {
+pub(super) fn on(node: ExprNode) -> Index {
     Index {
         parts: vec![expression(node)],
         ..notes_title()
     }
 }
 
-fn filtered(node: ExprNode) -> Index {
+pub(super) fn filtered(node: ExprNode) -> Index {
     notes_title().filter(DdlExpr::new(node))
 }
 
