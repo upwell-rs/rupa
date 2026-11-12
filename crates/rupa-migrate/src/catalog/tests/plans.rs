@@ -258,7 +258,7 @@ fn with_kind(spec: ColumnSpec) -> Plan {
 
 #[test]
 fn a_column_kinds_rendering_configuration_is_part_of_its_checksum() {
-    let variants: [fn() -> Plan; 12] = [
+    let variants: [fn() -> Plan; 11] = [
         || with_kind(KIND),
         || {
             with_kind(ColumnSpec {
@@ -272,7 +272,6 @@ fn a_column_kinds_rendering_configuration_is_part_of_its_checksum() {
         || with_kind(KIND.postgres(TypeSupport::named("shape"))),
         || with_kind(KIND.postgres(TypeSupport::Unsupported("shape"))),
         || with_kind(KIND.mysql(TypeSupport::named("TEXT"))),
-        || with_kind(KIND.sqlite(TypeSupport::Unsupported("no shapes"))),
         || with_kind(KIND.sqlite(TypeSupport::named("TEXT"))),
         || {
             with_kind(ColumnSpec {
@@ -292,4 +291,29 @@ fn a_column_kinds_rendering_configuration_is_part_of_its_checksum() {
             assert_ne!(a, b, "every rendering setting is part of the identity");
         }
     }
+}
+
+fn plan_digest(plan: fn() -> Plan) -> Checksum {
+    digest(Planned(Fixed(planless(), plan))).expect("valid plan")
+}
+
+#[test]
+fn rewording_an_unsupported_reason_keeps_the_checksum() {
+    let kinds: [fn() -> Plan; 2] = [
+        || with_kind(KIND.sqlite(TypeSupport::Unsupported("SQLite has no shapes"))),
+        || with_kind(KIND.sqlite(TypeSupport::Unsupported("shapes need an extension"))),
+    ];
+    let methods: [fn() -> Plan; 2] = [
+        || {
+            Plan::new()
+                .create_index(notes_title().method(CUSTOM.mysql(IndexSupport::Unsupported("a"))))
+        },
+        || {
+            Plan::new()
+                .create_index(notes_title().method(CUSTOM.mysql(IndexSupport::Unsupported("b"))))
+        },
+    ];
+
+    assert_eq!(plan_digest(kinds[0]), plan_digest(kinds[1]));
+    assert_eq!(plan_digest(methods[0]), plan_digest(methods[1]));
 }

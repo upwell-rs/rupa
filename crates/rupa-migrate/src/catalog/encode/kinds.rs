@@ -7,8 +7,9 @@ use rupa_core::schema::{ColumnSpec, IndexMethod, IndexSupport, TypeSupport};
 use super::Encoder;
 
 impl Encoder<'_> {
-    /// A kind's whole rendering configuration, so changing any of it changes
-    /// the checksum.
+    /// A kind's rendering configuration, so changing any of it changes the
+    /// checksum. The reason a dialect lacks a type is a diagnostic: rewording
+    /// it does not change what is applied.
     pub(super) fn spec(&mut self, spec: ColumnSpec) {
         self.str(spec.name);
 
@@ -23,10 +24,7 @@ impl Encoder<'_> {
                         self.len(*arg as usize);
                     }
                 }
-                TypeSupport::Unsupported(reason) => {
-                    self.str("unsupported");
-                    self.str(reason);
-                }
+                TypeSupport::Unsupported(_) => self.str("unsupported"),
             }
         }
 
@@ -45,10 +43,7 @@ impl Encoder<'_> {
                     self.str("using-method");
                     self.str(method);
                 }
-                IndexSupport::Unsupported(reason) => {
-                    self.str("unsupported");
-                    self.str(reason);
-                }
+                IndexSupport::Unsupported(_) => self.str("unsupported"),
             }
         }
 

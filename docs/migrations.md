@@ -286,10 +286,11 @@ impl IndexableBy<Gin> for Tsvector {}
 
 Parameterized types use const generics: `TypeSupport::with_args("vector", &[N as u32])`
 in `impl<const N: usize> ColumnKind for Vector<N>` renders `vector(3)` for
-`Vector<3>`, and a type with no arguments renders bare. Every field of the
-spec, per-dialect names, arguments and reasons included, is encoded in the
-migration checksum, so changing a kind's rendering changes the checksum of the
-plans that use it. Which index kinds accept the type is opted into with
+`Vector<3>`, and a type with no arguments renders bare. Every rendering-relevant field of the
+spec (per-dialect names and arguments, whether a dialect supports the type, the
+`SqlType`, `bounded`) is encoded in the migration checksum, so changing a kind's
+rendering changes the checksum of the plans that use it; the wording of an
+`Unsupported` reason is a diagnostic and is not. Which index kinds accept the type is opted into with
 `IndexableBy<K>` (a B-tree or hash index comes with `ScalarColumn`); JSON
 columns are unaffected, since a kind is a scalar column. A kind that does not
 declare itself `bounded` is treated like unbounded `Text`: MySQL refuses it in
