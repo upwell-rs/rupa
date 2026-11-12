@@ -9,17 +9,17 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 
-const NOTES: TableRef = TableRef::new("notes");
+pub(super) const NOTES: TableRef = TableRef::new("notes");
 
 /// Planned Rust migrations declare no inputs: their plan is their identity.
-fn planless() -> &'static Metadata {
+pub(super) fn planless() -> &'static Metadata {
     Box::leak(Box::new(Metadata {
         inputs: &[],
         ..*metadata("1", "")
     }))
 }
 
-fn notes() -> Table {
+pub(super) fn notes() -> Table {
     Table::at(NOTES)
         .column(ColumnDef::new("id", ColumnType::BigInt).identity())
         .column(ColumnDef::new("title", ColumnType::Text))
@@ -34,7 +34,7 @@ fn notes() -> Table {
         ))
 }
 
-fn notes_title() -> Index {
+pub(super) fn notes_title() -> Index {
     Index::new(
         "notes_title",
         NOTES,
@@ -42,11 +42,11 @@ fn notes_title() -> Index {
     )
 }
 
-fn plan_digest(plan: fn() -> Plan) -> Checksum {
+pub(super) fn plan_digest(plan: fn() -> Plan) -> Checksum {
     digest(Planned(Fixed(planless(), plan))).expect("valid plan")
 }
 
-fn assert_distinct_digests(variants: &[fn() -> Plan], message: &str) {
+pub(super) fn assert_distinct_digests(variants: &[fn() -> Plan], message: &str) {
     let digests: Vec<_> = variants.iter().map(|plan| plan_digest(*plan)).collect();
 
     for (i, a) in digests.iter().enumerate() {

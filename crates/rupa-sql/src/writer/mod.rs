@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod tests;
 
+mod ddl;
 mod expr;
 mod syntax;
 
@@ -16,6 +17,7 @@ use rupa_core::{Capability, Dialect, SecurityContext};
 
 use crate::{RenderError, Rendered};
 
+pub(crate) use ddl::Mode as DdlMode;
 use expr::prec;
 pub(crate) use syntax::{NullsOrdering, Syntax, common_tx, isolation_sql};
 
@@ -37,6 +39,9 @@ pub(crate) struct Writer<'a> {
     source_count: usize,
     /// Whether columns are qualified by their source's alias (joins).
     qualify: bool,
+    /// Set when rendering an expression of a schema object: values are
+    /// written inline and the expression is restricted.
+    ddl: Option<DdlMode<'a>>,
 }
 
 impl<'a> Writer<'a> {
@@ -50,6 +55,7 @@ impl<'a> Writer<'a> {
             lowering_depth: 0,
             source_count: 1,
             qualify: false,
+            ddl: None,
         }
     }
 
@@ -348,6 +354,8 @@ impl<'a> Writer<'a> {
 
     /// Writes `c`, qualified by its source's alias in a join.
     fn write_column(&self, c: ColumnRef, out: &mut String) -> Result<(), RenderError> {
+        self.check_column(c)?;
+
         if usize::from(c.source.0) >= self.source_count {
             return Err(RenderError::UnknownSource(c.source));
         }

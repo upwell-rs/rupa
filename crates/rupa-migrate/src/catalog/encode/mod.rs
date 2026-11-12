@@ -15,6 +15,7 @@ use rupa_core::schema::{
 use rupa_core::{Generated, Value};
 use sha2::Sha256;
 
+mod expr;
 mod kinds;
 
 use super::checksum::hash_field;
@@ -228,21 +229,24 @@ impl Encoder<'_> {
     /// Column types are not part of an index's identity: they follow the
     /// entity the handles came from, as in `CREATE TABLE`. A B-tree, the
     /// kind every earlier index had, encodes as it always did; any other
-    /// kind adds its whole rendering configuration.
+    /// kind adds its whole rendering configuration. Expressions and a
+    /// predicate are appended last, only when present.
     fn index(&mut self, index: &Index) {
         self.str(index.name);
         self.table_ref(index.table);
-        self.len(index.columns.len());
-
-        for column in &index.columns {
-            self.str(column.name);
-        }
-
+        self.names(
+            &index
+                .columns()
+                .map(|column| column.name)
+                .collect::<Vec<_>>(),
+        );
         self.flag(index.unique);
 
         if index.kind != BTree::METHOD {
             self.method(index.kind);
         }
+
+        self.index_expressions(index);
     }
 
     fn table_ref(&mut self, table: TableRef) {

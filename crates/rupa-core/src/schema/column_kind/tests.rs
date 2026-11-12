@@ -109,5 +109,8 @@ fn kinds_are_entity_field_and_literal_column_types() {
 fn indexes_over_kind_columns_use_the_kinds_opt_in() {
     let index = Gin::on("items_embedding", Item::EMBEDDING).build();
 
-    assert_eq!(index.columns[0].ty, ColumnType::Kind(&Vector::<3>::SPEC));
+    assert_eq!(
+        index.columns().next().expect("one column").ty,
+        ColumnType::Kind(&Vector::<3>::SPEC)
+    );
 }

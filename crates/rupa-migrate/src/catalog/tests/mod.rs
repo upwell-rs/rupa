@@ -1,4 +1,5 @@
 mod down;
+mod expressions;
 mod plans;
 mod snapshots;
 
