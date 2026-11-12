@@ -1,4 +1,4 @@
-error[E0277]: a `String` column cannot be indexed by `Gin`
+error[E0277]: `String` values (a column or an expression result) cannot be indexed by `Gin`
  --> tests/ui/index_kind_rejects_text.rs:7:36
   |
 7 |     let _ = Gin::on("users_email", User::EMAIL);
