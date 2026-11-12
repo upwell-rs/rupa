@@ -4,6 +4,9 @@ use std::borrow::Borrow;
 use std::fmt;
 use std::ops::Deref;
 
+use serde::de::{Deserialize, Deserializer, Error as _};
+use serde::{Serialize, Serializer};
+
 use crate::error::DecodeError;
 use crate::schema::ColumnType;
 use crate::value::{ScalarColumn, SqlType, Value};
@@ -99,6 +102,20 @@ impl<const N: usize> TryFrom<&str> for VarChar<N> {
 
     fn try_from(text: &str) -> Result<Self, TooLong> {
         Self::new(text)
+    }
+}
+
+impl<const N: usize> Serialize for VarChar<N> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
+    }
+}
+
+impl<'de, const N: usize> Deserialize<'de> for VarChar<N> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+
+        Self::new(text).map_err(D::Error::custom)
     }
 }
 

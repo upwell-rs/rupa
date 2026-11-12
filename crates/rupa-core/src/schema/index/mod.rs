@@ -150,8 +150,9 @@ pub trait IndexKind: Sized + 'static {
 )]
 pub trait IndexableBy<K: IndexKind> {}
 
-/// Marks an index kind that indexes JSON documents of any type, such as
-/// `Gin`. JSON columns (any `Serialize + DeserializeOwned` field type) are
+/// Marks an index kind that indexes JSON documents of any type: `BTree`
+/// (whole-document equality and order on PostgreSQL `jsonb` and SQLite text;
+/// MySQL refuses it at preflight) and `Gin`. JSON columns (any `Serialize + DeserializeOwned` field type) are
 /// accepted by exactly the kinds that implement this.
 pub trait JsonIndexKind: IndexKind {}
 
