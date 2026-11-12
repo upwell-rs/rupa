@@ -10,8 +10,8 @@ pub enum SchemaError {
     #[error("table `{0}` has no columns")]
     NoColumns(&'static str),
     /// A `CREATE TABLE` primary or foreign key names a column the table does
-    /// not have. Indexes and alterations of existing tables carry no column
-    /// list to check against; the server rejects those.
+    /// not have. Alterations of existing tables carry no column list to
+    /// check against; the server rejects those.
     #[error("table `{table}` has no column `{column}`")]
     UnknownColumn {
         /// The table.
@@ -85,4 +85,48 @@ pub enum SchemaError {
     /// An index without columns.
     #[error("index `{0}` has no columns")]
     EmptyIndex(&'static str),
+    /// An index this dialect cannot build as declared.
+    #[error("{dialect:?} cannot build index `{index}`: {reason}")]
+    Index {
+        /// The index.
+        index: &'static str,
+        /// The dialect.
+        dialect: DialectId,
+        /// What the dialect refuses.
+        reason: IndexRefusal,
+    },
+}
+
+/// Why a dialect cannot build an index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum IndexRefusal {
+    /// The dialect has no such index kind.
+    #[error("the {kind} kind is unsupported: {reason}")]
+    Kind {
+        /// The kind's name.
+        kind: &'static str,
+        /// Why the dialect lacks it.
+        reason: &'static str,
+    },
+    /// The kind cannot enforce uniqueness.
+    #[error("{kind} indexes cannot be unique")]
+    Unique {
+        /// The kind's name.
+        kind: &'static str,
+    },
+    /// The kind covers one column only.
+    #[error("{kind} indexes cover exactly one column")]
+    MultiColumn {
+        /// The kind's name.
+        kind: &'static str,
+    },
+    /// A column of a type the dialect cannot index without a length.
+    #[error("column `{column}` of type {ty:?} has no length; use `VarChar`")]
+    Unbounded {
+        /// The column.
+        column: &'static str,
+        /// The type.
+        ty: ColumnType,
+    },
 }

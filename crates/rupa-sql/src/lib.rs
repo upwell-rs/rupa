@@ -27,7 +27,7 @@ mod sqlite;
 mod writer;
 
 pub use cache::{CacheStats, CachedSql, RenderCache, render_cache, render_cached};
-pub use ddl::{SchemaError, render_schema};
+pub use ddl::{IndexRefusal, SchemaError, render_schema};
 
 /// SQL text and its parameters, in placeholder order.
 #[derive(Debug, Clone, PartialEq)]

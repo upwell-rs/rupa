@@ -14,10 +14,17 @@
 //! [`ColumnDef::of`]), and adjusted afterwards.
 
 mod build;
+mod index;
 
 use crate::column::{Generated, Reference};
 use crate::ir::TableRef;
 use crate::value::{SqlType, Value};
+
+pub use build::column;
+pub use index::{
+    BTree, Gin, Gist, Hash, Index, IndexBuilder, IndexColumn, IndexKind, IndexMethod, IndexSupport,
+    IndexableBy,
+};
 
 /// One schema change. Deliberately exhaustive: a new operation must break
 /// every renderer's and every checksum encoder's match.
@@ -196,21 +203,6 @@ pub enum ReferentialAction {
     Cascade,
     /// Set the referencing columns to `NULL`.
     SetNull,
-}
-
-/// `CREATE [UNIQUE] INDEX`. It names columns without their types: on MySQL,
-/// index `VarChar` columns rather than unbounded `Text`, which the server
-/// cannot index without a prefix length.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Index {
-    /// The index name.
-    pub name: &'static str,
-    /// The indexed table.
-    pub table: TableRef,
-    /// The indexed columns, in order.
-    pub columns: Vec<&'static str>,
-    /// Whether indexed values must be unique.
-    pub unique: bool,
 }
 
 #[cfg(test)]

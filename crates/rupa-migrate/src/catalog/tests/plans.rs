@@ -1,6 +1,7 @@
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{
-    ColumnDef, ColumnDefault, ColumnType, ForeignKey, Index, ReferentialAction, SchemaOp, Table,
+    ColumnDef, ColumnDefault, ColumnType, ForeignKey, Gin, Index, IndexColumn, IndexKind,
+    ReferentialAction, SchemaOp, Table,
 };
 use rupa_core::{Reference, Value};
 use rupa_sql::SchemaError;
@@ -33,6 +34,14 @@ fn notes() -> Table {
         ))
 }
 
+fn notes_title() -> Index {
+    Index::new(
+        "notes_title",
+        NOTES,
+        [IndexColumn::new("title", ColumnType::Text)],
+    )
+}
+
 #[test]
 fn a_planned_migrations_identity_is_its_plan() {
     let first = digest(Planned(Fixed(planless(), || {
@@ -55,7 +64,7 @@ fn a_planned_migrations_identity_is_its_plan() {
 
 #[test]
 fn every_schema_detail_is_checksummed() {
-    let variants: [fn() -> Plan; 10] = [
+    let variants: [fn() -> Plan; 11] = [
         || Plan::new().create_table(notes()),
         || {
             Plan::new()
@@ -97,8 +106,9 @@ fn every_schema_detail_is_checksummed() {
                 ..notes()
             })
         },
-        || Plan::new().create_index(Index::new("notes_title", NOTES, ["title"])),
-        || Plan::new().create_index(Index::new("notes_title", NOTES, ["title"]).unique()),
+        || Plan::new().create_index(notes_title()),
+        || Plan::new().create_index(notes_title().unique()),
+        || Plan::new().create_index(notes_title().method(Gin::METHOD)),
         || Plan::new().rename_column(NOTES, "title", "name"),
     ];
     let digests: Vec<_> = variants
@@ -125,7 +135,7 @@ fn schema_encoding_is_stable() {
                 ColumnDef::new("pinned", ColumnType::Bool)
                     .default(ColumnDefault::Value(Value::Bool(false))),
             )
-            .create_index(Index::new("notes_title", NOTES, ["title"]).unique())
+            .create_index(notes_title().unique())
     })));
 
     assert_eq!(

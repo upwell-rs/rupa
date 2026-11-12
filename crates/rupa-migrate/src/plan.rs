@@ -86,8 +86,8 @@ impl Plan {
     }
 
     /// `CREATE [UNIQUE] INDEX`.
-    pub fn create_index(self, index: Index) -> Self {
-        self.schema(SchemaOp::CreateIndex(index))
+    pub fn create_index(self, index: impl Into<Index>) -> Self {
+        self.schema(SchemaOp::CreateIndex(index.into()))
     }
 
     /// Drops index `name` of `table`.

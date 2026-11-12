@@ -6,18 +6,20 @@
 //! rules. Operations that need a table rebuild on SQLite are not offered.
 //!
 //! Checks that need column types or names are made where the operation
-//! carries them, in `CREATE TABLE` and `ADD COLUMN`. An index or a foreign
-//! key into an existing table names columns without types, so a MySQL index
-//! over unbounded text or an unknown column is rejected by the server.
+//! carries them: `CREATE TABLE`, `ADD COLUMN` and `CREATE INDEX`, whose
+//! columns and kind are typed. A foreign key into an existing table names
+//! columns without types, so an unknown column is rejected by the server.
 
 mod error;
 mod types;
 
 use rupa_core::ir::TableRef;
-use rupa_core::schema::{ColumnDef, ForeignKey, Index, ReferentialAction, SchemaOp, Table};
+use rupa_core::schema::{
+    ColumnDef, ForeignKey, Index, IndexSupport, ReferentialAction, SchemaOp, Table,
+};
 use rupa_core::{Dialect, DialectId, Generated};
 
-pub use error::SchemaError;
+pub use error::{IndexRefusal, SchemaError};
 
 use crate::writer::Syntax;
 use crate::{RenderError, syntax_for};
@@ -276,9 +278,7 @@ impl Ddl {
     }
 
     fn create_index(&mut self, index: &Index) -> Result<(), SchemaError> {
-        if index.columns.is_empty() {
-            return Err(SchemaError::EmptyIndex(index.name));
-        }
+        let using = self.index_method(index)?;
 
         self.sql.push_str(if index.unique {
             "CREATE UNIQUE INDEX "
@@ -299,11 +299,67 @@ impl Ddl {
             self.table(index.table);
         }
 
+        if let Some(method) = using {
+            self.sql.push_str(" USING ");
+            self.sql.push_str(method);
+        }
+
         self.sql.push_str(" (");
-        self.idents(&index.columns);
+
+        for (i, column) in index.columns.iter().enumerate() {
+            if i > 0 {
+                self.sql.push_str(", ");
+            }
+
+            self.ident(column.name);
+        }
+
         self.sql.push(')');
 
         Ok(())
+    }
+
+    /// Checks `index` against the dialect and returns its `USING` method.
+    fn index_method(&self, index: &Index) -> Result<Option<&'static str>, SchemaError> {
+        let kind = index.kind;
+        let refuse = |reason| SchemaError::Index {
+            index: index.name,
+            dialect: self.dialect,
+            reason,
+        };
+        let using = match kind.support(self.dialect) {
+            IndexSupport::Default => None,
+            IndexSupport::Using(method) => Some(method),
+            IndexSupport::Unsupported(reason) => {
+                return Err(refuse(IndexRefusal::Kind {
+                    kind: kind.name,
+                    reason,
+                }));
+            }
+        };
+
+        if index.columns.is_empty() {
+            return Err(SchemaError::EmptyIndex(index.name));
+        }
+
+        if index.unique && !kind.unique {
+            return Err(refuse(IndexRefusal::Unique { kind: kind.name }));
+        }
+
+        if index.columns.len() > 1 && !kind.multi_column {
+            return Err(refuse(IndexRefusal::MultiColumn { kind: kind.name }));
+        }
+
+        if self.dialect == DialectId::MySql
+            && let Some(column) = index.columns.iter().find(|c| types::mysql_unbounded(c.ty))
+        {
+            return Err(refuse(IndexRefusal::Unbounded {
+                column: column.name,
+                ty: column.ty,
+            }));
+        }
+
+        Ok(using)
     }
 
     /// MySQL cannot key unbounded types.

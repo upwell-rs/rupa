@@ -20,6 +20,7 @@ use serde::de::DeserializeOwned;
 use crate::error::{DecodeError, ResultError};
 use crate::ir::{ColumnRef, SourceId, TableRef};
 use crate::row::Row;
+use crate::schema::ColumnType;
 use crate::value::{ScalarColumn, SqlType, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,6 +62,9 @@ pub struct ColumnMeta {
     pub kind: ColumnKind,
     /// The SQL type values are bound and decoded as.
     pub sql_type: SqlType,
+    /// The column type a schema declares: [`sql_type`](Self::sql_type) with
+    /// its length where the field type has one (`VarChar<N>`).
+    pub column_type: ColumnType,
     /// Whether the column admits `NULL` (an `Option` field).
     pub nullable: bool,
     /// Part of the primary key (`#[id]`).
@@ -86,11 +90,19 @@ impl ColumnMeta {
             name,
             kind,
             sql_type,
+            column_type: ColumnType::from_sql(sql_type),
             nullable,
             primary_key: false,
             generated: None,
             references: None,
         }
+    }
+
+    /// Sets the declared column type.
+    pub const fn column_type(mut self, column_type: ColumnType) -> Self {
+        self.column_type = column_type;
+
+        self
     }
 
     /// Marks the column as part of the primary key.
@@ -183,6 +195,8 @@ pub trait Codec<T> {
     const SQL_TYPE: SqlType;
     /// Whether `NULL` is a valid value.
     const NULLABLE: bool;
+    /// The column type a schema declares for the field.
+    const COLUMN_TYPE: ColumnType = ColumnType::from_sql(Self::SQL_TYPE);
     /// Encodes a field value.
     fn encode(v: &T) -> Value;
     /// Decodes a field value.
@@ -217,6 +231,7 @@ impl<T: ScalarColumn> Codec<T> for ScalarCodec<T> {
     type Kind = Scalar;
     const SQL_TYPE: SqlType = T::SQL_TYPE;
     const NULLABLE: bool = T::NULLABLE;
+    const COLUMN_TYPE: ColumnType = T::COLUMN_TYPE;
     fn encode(v: &T) -> Value {
         v.to_value()
     }
@@ -271,6 +286,7 @@ pub const fn column_meta<T, C: Codec<T>>(field: &'static str, name: &'static str
         C::SQL_TYPE,
         C::NULLABLE,
     )
+    .column_type(C::COLUMN_TYPE)
 }
 
 /// How values of `T` are stored, as a constant: the codec `#[derive(Entity)]`
@@ -278,6 +294,7 @@ pub const fn column_meta<T, C: Codec<T>>(field: &'static str, name: &'static str
 pub struct Encoding<T> {
     kind: ColumnKind,
     sql_type: SqlType,
+    column_type: ColumnType,
     nullable: bool,
     encode: fn(&T) -> Value,
     decode: fn(Value) -> Result<T, DecodeError>,
@@ -297,6 +314,7 @@ impl<T> Encoding<T> {
         Self {
             kind: <C::Kind as KindMarker>::KIND,
             sql_type: C::SQL_TYPE,
+            column_type: C::COLUMN_TYPE,
             nullable: C::NULLABLE,
             encode: C::encode,
             decode: C::decode,
@@ -317,6 +335,7 @@ pub struct Column<E, T, K> {
     name: &'static str,
     source: SourceId,
     sql_type: SqlType,
+    column_type: ColumnType,
     nullable: bool,
     encode: fn(&T) -> Value,
     decode: fn(Value) -> Result<T, DecodeError>,
@@ -346,6 +365,7 @@ impl<E, T, K> Column<E, T, K> {
             name,
             source: SourceId(0),
             sql_type: C::SQL_TYPE,
+            column_type: C::COLUMN_TYPE,
             nullable: C::NULLABLE,
             encode: C::encode,
             decode: C::decode,
@@ -361,6 +381,11 @@ impl<E, T, K> Column<E, T, K> {
     /// The SQL type values are bound and decoded as.
     pub const fn sql_type(&self) -> SqlType {
         self.sql_type
+    }
+
+    /// The column type a schema declares, with its length for bounded text.
+    pub const fn column_type(&self) -> ColumnType {
+        self.column_type
     }
 
     /// Whether the column admits `NULL`.
@@ -410,6 +435,7 @@ impl<E, T, K> Column<E, T, K> {
         K: KindMarker,
     {
         ColumnMeta::new(field, self.name, K::KIND, self.sql_type, self.nullable)
+            .column_type(self.column_type)
     }
 }
 
@@ -429,6 +455,7 @@ impl<E, T, K: KindMarker> Column<E, T, K> {
             name,
             source: SourceId(0),
             sql_type: encoding.sql_type,
+            column_type: encoding.column_type,
             nullable: encoding.nullable,
             encode: encoding.encode,
             decode: encoding.decode,

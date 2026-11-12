@@ -1,5 +1,6 @@
 //! Migration bodies shared by the cases and by driver-specific migration tests.
 
+use rupa::VarChar;
 use rupa::migrate::schema::SchemaOp;
 use rupa::migrate::schema::{ColumnDef, ColumnDefault, ColumnType, Index, Table};
 use rupa::migrate::{
@@ -252,15 +253,23 @@ pub struct Post {
     pub author_id: i64,
     pub title: String,
     pub body: Option<String>,
+    pub slug: Option<VarChar<64>>,
 }
 
-/// Creates the author and post tables with an author index. The indexed
-/// column is bounded, so MySQL can key it.
+/// Creates the author and post tables with an author index and a unique
+/// index over the bounded slug, which every dialect can build.
 pub fn create_tables() -> Plan {
     Plan::new()
         .create_table(Table::of::<Author>())
         .create_table(Table::of::<Post>())
         .create_index(Index::on("posts_author", Post::AUTHOR_ID))
+        .create_index(Index::on("posts_slug", Post::SLUG).unique())
+}
+
+/// [`create_tables`] with an index over the unbounded `title` text, which
+/// PostgreSQL and SQLite build and MySQL refuses.
+pub fn create_tables_with_text_index() -> Plan {
+    create_tables().create_index(Index::on("posts_title", Post::TITLE))
 }
 
 /// Adds a defaulted column to posts, then inserts a post.
