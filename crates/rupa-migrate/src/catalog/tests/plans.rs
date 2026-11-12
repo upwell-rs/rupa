@@ -125,6 +125,7 @@ fn every_schema_detail_is_checksummed() {
         || Plan::new().create_index(notes_title().method(Gin::METHOD)),
         || Plan::new().rename_column(NOTES, "title", "name"),
     ];
+
     assert_distinct_digests(&variants, "plan variants must not share a checksum");
 }
 
@@ -238,6 +239,7 @@ fn an_index_methods_rendering_configuration_is_part_of_its_checksum() {
                 .create_index(notes_title().method(CUSTOM.mysql(IndexSupport::Using("BTREE"))))
         },
     ];
+
     assert_distinct_digests(&variants, "every rendering setting is part of the identity");
 }
 
@@ -277,6 +279,7 @@ fn a_column_kinds_rendering_configuration_is_part_of_its_checksum() {
         },
         || with_kind(KIND.bounded()),
     ];
+
     assert_distinct_digests(&variants, "every rendering setting is part of the identity");
 }
 

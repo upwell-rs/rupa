@@ -2,9 +2,10 @@
 //!
 //! Part of [`CHECKSUM_FORMAT`](super::CHECKSUM_FORMAT): every field is a
 //! length-prefixed record in a fixed order, behind a tag naming its variant.
-//! Changing any encoding changes applied checksums, so it requires a new
-//! format identity. The exhaustive matches make every new IR variant decide
-//! its encoding.
+//! Changing any encoding changes applied checksums. From the first release
+//! on, that requires a new format identity; before it, the change must be
+//! declared as breaking in its commit. The exhaustive matches make every new
+//! IR variant decide its encoding.
 
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{
