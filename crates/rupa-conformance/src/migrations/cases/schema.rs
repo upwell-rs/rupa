@@ -6,8 +6,8 @@ use rupa::sql::{IndexRefusal, RenderError, SchemaError};
 use super::support::{dialect, planned, script};
 use super::{Harness, Session, catalog};
 use crate::migrations::fixture::{
-    Plans, Post, Scripted, add_pinned, create_tables, create_tables_with_gin_index,
-    create_tables_with_text_index,
+    Plans, Post, Scripted, add_pinned, create_tables, create_tables_with_explicit_method,
+    create_tables_with_gin_index, create_tables_with_text_index,
 };
 
 pub(super) fn case_planned_schema_creates_entity_tables<H: Harness>(h: &mut H) {
@@ -104,6 +104,18 @@ pub(super) fn case_gin_indexes_build_on_postgres_and_fail_typed_elsewhere<H: Har
     );
     assert!(!h.table_exists("_rupa_migrations"));
     assert!(!h.table_exists("posts"));
+}
+
+/// Each dialect writes an explicit index method in its own position.
+pub(super) fn case_explicit_index_methods_use_each_dialects_syntax<H: Harness>(h: &mut H) {
+    let entries = [Planned(Plans(
+        planned::<H>("1"),
+        create_tables_with_explicit_method,
+    ))];
+
+    wait!(h, h.connect().apply(&catalog(&entries))).expect("explicit index method applies");
+
+    assert_eq!(h.count("SELECT count(*) FROM posts"), 0);
 }
 
 pub(super) fn case_changed_plan_is_reported_as_changed_history<H: Harness>(h: &mut H) {

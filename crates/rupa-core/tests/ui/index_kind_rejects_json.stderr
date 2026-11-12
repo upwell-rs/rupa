@@ -1,0 +1,19 @@
+error[E0277]: the trait bound `BTree: JsonIndexKind` is not satisfied
+ --> tests/ui/index_kind_rejects_json.rs:7:38
+  |
+7 |     let _ = BTree::on("users_prefs", User::PREFS);
+  |             ---------                ^^^^^^^^^^^ the trait `JsonIndexKind` is not implemented for `BTree`
+  |             |
+  |             required by a bound introduced by this call
+  |
+help: the trait `JsonIndexKind` is implemented for `Gin`
+ --> src/schema/index/kinds.rs
+  |
+  | impl JsonIndexKind for Gin {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = note: required for `rupa_core::Json` to implement `IndexableColumn<BTree, Prefs>`
+note: required by a bound in `rupa_core::schema::IndexKind::on`
+ --> src/schema/index/mod.rs
+  |
+  |     fn on<E: Entity, T, C: IndexableColumn<Self, T>>(
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `IndexKind::on`

@@ -10,7 +10,7 @@ mod kinds;
 use std::marker::PhantomData;
 
 use super::{ColumnDef, ColumnType};
-use crate::column::Column;
+use crate::column::{Column, Json, Scalar};
 use crate::dialect::DialectId;
 use crate::entity::Entity;
 use crate::ir::TableRef;
@@ -130,7 +130,7 @@ pub trait IndexKind: Sized + 'static {
 
     /// An index of this kind over one column of entity `E`, which must hold
     /// a type the kind accepts.
-    fn on<E: Entity, T: IndexableBy<Self>, C>(
+    fn on<E: Entity, T, C: IndexableColumn<Self, T>>(
         name: &'static str,
         column: Column<E, T, C>,
     ) -> IndexBuilder<Self, E> {
@@ -149,6 +149,25 @@ pub trait IndexKind: Sized + 'static {
     note = "implement `IndexableBy<{K}>` for the type if the kind can index it"
 )]
 pub trait IndexableBy<K: IndexKind> {}
+
+/// Marks an index kind that indexes JSON documents of any type, such as
+/// `Gin`. JSON columns (any `Serialize + DeserializeOwned` field type) are
+/// accepted by exactly the kinds that implement this.
+pub trait JsonIndexKind: IndexKind {}
+
+/// Whether a column handle of kind `Self` ([`Scalar`] or [`Json`]) holding
+/// `T` can be indexed by `K`: scalar columns through [`IndexableBy`], JSON
+/// columns through [`JsonIndexKind`].
+#[diagnostic::on_unimplemented(
+    message = "a `{T}` column of kind `{Self}` cannot be indexed by `{K}`",
+    label = "not accepted by this index kind",
+    note = "scalar types need `IndexableBy<{K}>`; JSON columns need `{K}: JsonIndexKind`"
+)]
+pub trait IndexableColumn<K: IndexKind, T> {}
+
+impl<K: IndexKind, T: IndexableBy<K>> IndexableColumn<K, T> for Scalar {}
+
+impl<K: JsonIndexKind, T> IndexableColumn<K, T> for Json {}
 
 /// An indexed column: its name and type, so rendering can check the type
 /// against the dialect.
@@ -212,7 +231,7 @@ impl Index {
     }
 
     /// A B-tree index named `name` over one entity column.
-    pub fn on<E: Entity, T: IndexableBy<BTree>, C>(
+    pub fn on<E: Entity, T, C: IndexableColumn<BTree, T>>(
         name: &'static str,
         column: Column<E, T, C>,
     ) -> Self {
@@ -244,7 +263,7 @@ pub struct IndexBuilder<K, E> {
 
 impl<K: IndexKind, E: Entity> IndexBuilder<K, E> {
     /// Adds a column the kind accepts.
-    pub fn and<T: IndexableBy<K>, C>(mut self, column: Column<E, T, C>) -> Self {
+    pub fn and<T, C: IndexableColumn<K, T>>(mut self, column: Column<E, T, C>) -> Self {
         self.index.columns.push(IndexColumn::of(column));
 
         self

@@ -1,7 +1,7 @@
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{
     ColumnDef, ColumnDefault, ColumnType, ForeignKey, Gin, Index, IndexColumn, IndexKind,
-    ReferentialAction, SchemaOp, Table,
+    IndexMethod, IndexSupport, ReferentialAction, SchemaOp, Table,
 };
 use rupa_core::{Reference, Value};
 use rupa_sql::SchemaError;
@@ -207,4 +207,40 @@ fn json_defaults_are_checksummed_canonically() {
         encode(second),
         "key order is not part of a JSON default's identity"
     );
+}
+
+const CUSTOM: IndexMethod = IndexMethod::new("custom").postgres(IndexSupport::Using("hash"));
+
+#[test]
+fn an_index_methods_rendering_configuration_is_part_of_its_checksum() {
+    let variants: [fn() -> Plan; 6] = [
+        || Plan::new().create_index(notes_title().method(CUSTOM)),
+        || {
+            Plan::new().create_index(
+                notes_title()
+                    .method(IndexMethod::new("custom").postgres(IndexSupport::Using("gin"))),
+            )
+        },
+        || {
+            Plan::new().create_index(
+                notes_title().method(IndexMethod::new("custom").postgres(IndexSupport::Default)),
+            )
+        },
+        || Plan::new().create_index(notes_title().method(CUSTOM.supports_unique())),
+        || Plan::new().create_index(notes_title().method(CUSTOM.single_column())),
+        || {
+            Plan::new()
+                .create_index(notes_title().method(CUSTOM.mysql(IndexSupport::Using("BTREE"))))
+        },
+    ];
+    let digests: Vec<_> = variants
+        .iter()
+        .map(|plan| digest(Planned(Fixed(planless(), *plan))).expect("valid plan"))
+        .collect();
+
+    for (i, a) in digests.iter().enumerate() {
+        for b in &digests[i + 1..] {
+            assert_ne!(a, b, "every rendering setting is part of the identity");
+        }
+    }
 }

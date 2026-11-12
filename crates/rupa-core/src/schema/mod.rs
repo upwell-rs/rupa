@@ -23,7 +23,7 @@ use crate::value::{SqlType, Value};
 pub use build::column;
 pub use index::{
     BTree, Gin, Gist, Hash, Index, IndexBuilder, IndexColumn, IndexKind, IndexMethod, IndexSupport,
-    IndexableBy,
+    IndexableBy, IndexableColumn, JsonIndexKind,
 };
 
 /// One schema change. Deliberately exhaustive: a new operation must break

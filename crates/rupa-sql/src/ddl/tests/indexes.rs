@@ -109,3 +109,34 @@ fn mysql_refuses_unbounded_index_columns_but_others_accept_them() {
         Ok("CREATE INDEX `notes_body` ON `app`.`notes` (`body`)")
     );
 }
+
+#[test]
+fn the_method_clause_follows_each_dialects_syntax() {
+    use rupa_core::schema::{IndexMethod, IndexSupport};
+
+    let kind = IndexMethod::new("custom")
+        .postgres(IndexSupport::Using("hash"))
+        .mysql(IndexSupport::Using("BTREE"))
+        .sqlite(IndexSupport::Using("anything"));
+    let op = SchemaOp::CreateIndex(index("notes_id", kind, [("id", ColumnType::BigInt)]));
+
+    assert_eq!(
+        render_schema(&op, &Postgres).as_deref(),
+        Ok(r#"CREATE INDEX "notes_id" ON "app"."notes" USING hash ("id")"#)
+    );
+    assert_eq!(
+        render_schema(&op, &MySql).as_deref(),
+        Ok("CREATE INDEX `notes_id` USING BTREE ON `app`.`notes` (`id`)")
+    );
+    assert_eq!(
+        render_schema(&op, &Sqlite),
+        Err(refusal(
+            "notes_id",
+            DialectId::Sqlite,
+            IndexRefusal::Kind {
+                kind: "custom",
+                reason: "SQLite has no index methods"
+            }
+        ))
+    );
+}

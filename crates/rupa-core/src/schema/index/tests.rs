@@ -14,6 +14,9 @@ impl Doc {
     const SLUG: Column<Doc, VarChar<64>, Scalar> = Column::scalar("slug");
     const OWNER: Column<Doc, Option<i64>, Scalar> = Column::scalar("owner");
     const META: Column<Doc, serde_json::Value, crate::column::Json> = Column::json("meta");
+    const TAGS: Column<Doc, Vec<String>, crate::column::Json> = Column::json("tags");
+    const NOTE: Column<Doc, Option<Vec<String>>, crate::column::Json> =
+        Column::nullable_json("note");
 }
 
 impl FromRow for Doc {
@@ -120,5 +123,23 @@ fn literal_columns_come_from_definitions() {
     assert_eq!(
         IndexColumn::from(&column),
         IndexColumn::new("email", ColumnType::VarChar(32))
+    );
+}
+
+#[test]
+fn json_columns_of_any_type_are_accepted_by_json_kinds() {
+    let index = Gin::on("docs_tags", Doc::TAGS)
+        .and(Doc::META)
+        .and(Doc::NOTE)
+        .build();
+
+    assert_eq!(index.kind, Gin::METHOD);
+    assert_eq!(
+        index.columns,
+        [
+            IndexColumn::new("tags", ColumnType::Json),
+            IndexColumn::new("meta", ColumnType::Json),
+            IndexColumn::new("note", ColumnType::Json),
+        ]
     );
 }

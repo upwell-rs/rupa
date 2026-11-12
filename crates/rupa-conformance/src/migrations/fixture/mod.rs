@@ -10,8 +10,8 @@ use rupa::{raw, select};
 mod schema;
 
 pub use schema::{
-    Author, Post, add_pinned, create_tables, create_tables_with_gin_index,
-    create_tables_with_text_index,
+    Author, Meta, Post, add_pinned, create_tables, create_tables_with_explicit_method,
+    create_tables_with_gin_index, create_tables_with_text_index,
 };
 
 /// Declares a fixture's metadata with its own source as the artifact closure.

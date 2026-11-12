@@ -2,7 +2,10 @@
 
 use rupa::VarChar;
 use rupa::migrate::Plan;
-use rupa::migrate::schema::{ColumnDef, ColumnDefault, ColumnType, Gin, Index, IndexKind, Table};
+use rupa::migrate::schema::{
+    ColumnDef, ColumnDefault, ColumnType, Gin, Index, IndexKind, IndexMethod, IndexSupport,
+    IndexableBy, Table,
+};
 
 /// The author shape the schema migrations below create.
 #[derive(Debug, rupa::Entity)]
@@ -11,6 +14,12 @@ pub struct Author {
     #[id(generated)]
     pub id: i64,
     pub name: String,
+}
+
+/// A typed JSON document stored on posts.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Meta {
+    pub tags: Vec<String>,
 }
 
 /// A post referencing its author.
@@ -24,7 +33,7 @@ pub struct Post {
     pub title: String,
     pub body: Option<String>,
     pub slug: Option<VarChar<64>>,
-    pub meta: Option<serde_json::Value>,
+    pub meta: Option<Meta>,
 }
 
 /// Creates the author and post tables with an author index and a unique
@@ -47,6 +56,25 @@ pub fn create_tables_with_text_index() -> Plan {
 /// only PostgreSQL builds.
 pub fn create_tables_with_gin_index() -> Plan {
     create_tables().create_index(Gin::on("posts_meta", Post::META))
+}
+
+/// A B-tree that names its method where the dialect allows: `USING btree` on
+/// PostgreSQL, `USING BTREE` on MySQL, nothing on SQLite.
+pub struct ExplicitBTree;
+
+impl IndexKind for ExplicitBTree {
+    const METHOD: IndexMethod = IndexMethod::new("explicit-btree")
+        .postgres(IndexSupport::Using("btree"))
+        .mysql(IndexSupport::Using("BTREE"))
+        .sqlite(IndexSupport::Default)
+        .supports_unique();
+}
+
+impl IndexableBy<ExplicitBTree> for i64 {}
+
+/// [`create_tables`] with an explicit-method index over the author id.
+pub fn create_tables_with_explicit_method() -> Plan {
+    create_tables().create_index(ExplicitBTree::on("posts_author_using", Post::AUTHOR_ID))
 }
 
 /// Adds a defaulted column to posts, then inserts a post.
