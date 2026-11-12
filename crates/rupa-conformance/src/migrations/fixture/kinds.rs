@@ -16,7 +16,8 @@ impl ColumnKind for BigText {
         .sqlite(TypeSupport::named("CLOB"));
 }
 
-/// A text-search document, which only PostgreSQL stores.
+/// A text-search document, which only PostgreSQL stores. Its values need a
+/// cast the query IR cannot write yet (#91): the fixture only declares it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tsvector(pub String);
 
@@ -51,11 +52,18 @@ macro_rules! text_kind_column {
 text_kind_column!(BigText, Tsvector);
 
 /// A note whose body is a [`BigText`] column.
-#[derive(Debug, rupa::Entity)]
+#[derive(Debug, PartialEq, rupa::Entity)]
 #[entity(table = "kind_notes")]
 pub struct KindNote {
     #[id(generated)]
     pub id: i64,
+    pub body: BigText,
+}
+
+/// Typed insert input for [`KindNote`]: no id.
+#[derive(Debug, Clone, rupa::Insertable)]
+#[insertable(entity = KindNote)]
+pub struct NewKindNote {
     pub body: BigText,
 }
 

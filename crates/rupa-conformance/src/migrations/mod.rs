@@ -94,6 +94,7 @@ macro_rules! all_cases {
             ],
             kinds: [
                 case_a_kind_stored_everywhere_applies_on_every_dialect,
+                case_a_kind_round_trips_through_an_entity_on_every_dialect,
                 case_a_postgres_only_kind_fails_typed_elsewhere_before_acquisition,
             ],
             exclusion: [

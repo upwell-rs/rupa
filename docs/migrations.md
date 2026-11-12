@@ -258,14 +258,50 @@ checksum), the type each dialect stores it as, the `SqlType` drivers bind and
 decode with, and whether MySQL can key it (`bounded`). A dialect without a
 type says why with `TypeSupport::Unsupported(reason)`; the plan then fails at
 preflight with `SchemaError::UnsupportedType`, before the target is acquired.
-`ColumnType::Kind(&SPEC)` (a reference, which keeps `ColumnType` small; `SPEC.column_type()` builds it) is the type a literal table uses; the entity field
-type also implements `ScalarColumn`, pointing its `COLUMN_TYPE` at the spec,
-so `Table::of::<E>()`, `ColumnDef::of(..)` and `schema::column::<T>(name)`
-pick the kind up. Both impls are written by hand: the codec cannot be derived
-from the spec.
+`ColumnType::Kind(&SPEC)` (a reference, which keeps `ColumnType` small;
+`SPEC.column_type()` builds it) is the type a literal table uses. Which index
+kinds accept the type is opted into with `IndexableBy<K>` (a B-tree or hash
+index comes with `ScalarColumn`). A kind that does not declare itself
+`bounded` is treated like unbounded `Text`: MySQL refuses it in keys, `UNIQUE`
+columns and indexes.
+
+Kinds are supported in DDL and indexes. Their values round-trip through
+entities only when every driver can bind the spec's `sql_type` directly into the
+native type and decode it back. That holds for a text-like kind such as
+`BigText` (`TEXT`, `MEDIUMTEXT`, `CLOB` with a text codec): implement
+`ScalarColumn` next to `ColumnKind`, pointing `COLUMN_TYPE` at the spec, and
+the type is an entity field, so `Table::of::<E>()`, `ColumnDef::of(..)`,
+`schema::column::<T>(name)`, inserts, equality filters and selects all work.
+Both impls are written by hand: the codec cannot be derived from the spec.
 
 ```rust,ignore
-struct Tsvector(String);
+struct BigText(String);
+
+impl ColumnKind for BigText {
+    const SPEC: ColumnSpec = ColumnSpec::new("big-text", SqlType::Text)
+        .postgres(TypeSupport::named("TEXT"))
+        .mysql(TypeSupport::named("MEDIUMTEXT"))
+        .sqlite(TypeSupport::named("CLOB"));
+}
+
+impl ScalarColumn for BigText {
+    type Base = Self;
+    const SQL_TYPE: SqlType = Self::SPEC.sql_type;
+    const COLUMN_TYPE: ColumnType = Self::SPEC.column_type();
+    // to_value / from_value
+}
+```
+
+A kind whose native type needs a cast does not round-trip yet: PostgreSQL infers
+a `tsvector` or `vector(N)` parameter, which a text bind is rejected for, and a
+text decode rejects the column. Such a kind is declared and indexed like any
+other, but is not an entity field type (no `ScalarColumn`); write and read its
+values with raw SQL, casting through text, until
+[#91](https://github.com/upwell-rs/rupa/issues/91) lets the query IR cast kind
+columns:
+
+```rust,ignore
+struct Tsvector;
 
 impl ColumnKind for Tsvector {
     const SPEC: ColumnSpec = ColumnSpec::new("tsvector", SqlType::Text)
@@ -274,27 +310,26 @@ impl ColumnKind for Tsvector {
         .sqlite(TypeSupport::Unsupported("SQLite has no tsvector type"));
 }
 
-impl ScalarColumn for Tsvector {
-    type Base = Self;
-    const SQL_TYPE: SqlType = Self::SPEC.sql_type;
-    const COLUMN_TYPE: ColumnType = Self::SPEC.column_type();
-    // to_value / from_value
-}
-
 impl IndexableBy<Gin> for Tsvector {}
+
+// DDL and indexes: ColumnDef::new("terms", Tsvector::SPEC.column_type())
+// values: a raw query with an explicit cast through text
+raw()
+    .sql("INSERT INTO docs (terms) VALUES (CAST(CAST(")
+    .bind(text)
+    .sql(" AS text) AS tsvector))")
+    .execute::<u64>()
+    .execute(&conn)?;
 ```
 
 Parameterized types use const generics: `TypeSupport::with_args("vector", &[N as u32])`
 in `impl<const N: usize> ColumnKind for Vector<N>` renders `vector(3)` for
-`Vector<3>`, and a type with no arguments renders bare. Every rendering-relevant field of the
-spec (per-dialect names and arguments, whether a dialect supports the type, the
+`Vector<3>`, and a type with no arguments renders bare. Like `Tsvector`, it
+needs a cast for values. Every rendering-relevant field of the spec
+(per-dialect names and arguments, whether a dialect supports the type, the
 `SqlType`, `bounded`) is encoded in the migration checksum, so changing a kind's
 rendering changes the checksum of the plans that use it; the wording of an
-`Unsupported` reason is a diagnostic and is not. Which index kinds accept the type is opted into with
-`IndexableBy<K>` (a B-tree or hash index comes with `ScalarColumn`); JSON
-columns are unaffected, since a kind is a scalar column. A kind that does not
-declare itself `bounded` is treated like unbounded `Text`: MySQL refuses it in
-keys, `UNIQUE` columns and indexes.
+`Unsupported` reason is a diagnostic and is not.
 
 `apply` renders every planned operation for the session's dialect before it
 acquires the target. Scripted migrations run the same operations through

@@ -118,26 +118,34 @@ impl ColumnSpec {
 /// A column kind: a Rust value type that names the SQL type it is stored as
 /// on each dialect, even when the type is parameterized by const generics.
 ///
-/// A kind that is also an entity field needs the scalar codec, whose
-/// `COLUMN_TYPE` points back at the spec. Index support is opted into per
-/// index kind through [`IndexableBy`](super::IndexableBy).
+/// A kind is always supported in DDL (`CREATE TABLE`, `ADD COLUMN`) and in
+/// indexes, where [`IndexableBy`](super::IndexableBy) opts it into index
+/// kinds. Its values round-trip through entities only when every driver can
+/// bind the spec's [`sql_type`](ColumnSpec::sql_type) directly into the
+/// native type and decode it back: `BigText` below is stored as `TEXT`,
+/// `MEDIUMTEXT` and `CLOB`, so a text codec works. A kind whose native type
+/// needs a cast (PostgreSQL `tsvector`, `vector(N)`) is not an entity field
+/// type yet: write and read its values with raw SQL until
+/// [#91](https://github.com/upwell-rs/rupa/issues/91) adds casts to the
+/// query IR.
+///
+/// An entity field type implements the scalar codec next to the kind, whose
+/// `COLUMN_TYPE` points back at the spec.
 ///
 /// ```
-/// use rupa_core::schema::{
-///     ColumnKind, ColumnSpec, ColumnType, Gin, IndexableBy, TypeSupport,
-/// };
+/// use rupa_core::schema::{ColumnKind, ColumnSpec, ColumnType, TypeSupport};
 /// use rupa_core::{DecodeError, ScalarColumn, SqlType, Value};
 ///
-/// struct Tsvector(String);
+/// struct BigText(String);
 ///
-/// impl ColumnKind for Tsvector {
-///     const SPEC: ColumnSpec = ColumnSpec::new("tsvector", SqlType::Text)
-///         .postgres(TypeSupport::named("TSVECTOR"))
-///         .mysql(TypeSupport::Unsupported("MySQL has no tsvector type"))
-///         .sqlite(TypeSupport::Unsupported("SQLite has no tsvector type"));
+/// impl ColumnKind for BigText {
+///     const SPEC: ColumnSpec = ColumnSpec::new("big-text", SqlType::Text)
+///         .postgres(TypeSupport::named("TEXT"))
+///         .mysql(TypeSupport::named("MEDIUMTEXT"))
+///         .sqlite(TypeSupport::named("CLOB"));
 /// }
 ///
-/// impl ScalarColumn for Tsvector {
+/// impl ScalarColumn for BigText {
 ///     type Base = Self;
 ///     const SQL_TYPE: SqlType = Self::SPEC.sql_type;
 ///     const COLUMN_TYPE: ColumnType = Self::SPEC.column_type();
@@ -154,9 +162,29 @@ impl ColumnSpec {
 ///     }
 /// }
 ///
+/// assert_eq!(BigText::SPEC.column_type(), <BigText as ScalarColumn>::COLUMN_TYPE);
+/// ```
+///
+/// A kind that needs a cast is declared and indexed, without the codec:
+///
+/// ```
+/// use rupa_core::schema::{ColumnDef, ColumnKind, ColumnSpec, Gin, IndexableBy, TypeSupport};
+/// use rupa_core::SqlType;
+///
+/// struct Tsvector;
+///
+/// impl ColumnKind for Tsvector {
+///     const SPEC: ColumnSpec = ColumnSpec::new("tsvector", SqlType::Text)
+///         .postgres(TypeSupport::named("TSVECTOR"))
+///         .mysql(TypeSupport::Unsupported("MySQL has no tsvector type"))
+///         .sqlite(TypeSupport::Unsupported("SQLite has no tsvector type"));
+/// }
+///
 /// impl IndexableBy<Gin> for Tsvector {}
 ///
-/// assert_eq!(Tsvector::SPEC.column_type(), <Tsvector as ScalarColumn>::COLUMN_TYPE);
+/// let terms = ColumnDef::new("terms", Tsvector::SPEC.column_type());
+///
+/// assert_eq!(terms.name, "terms");
 /// ```
 ///
 /// Const generics become structured arguments:
