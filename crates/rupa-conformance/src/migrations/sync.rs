@@ -38,6 +38,8 @@ mod commands_cases;
 mod control;
 #[path = "cases/exclusion.rs"]
 mod exclusion;
+#[path = "cases/expressions.rs"]
+mod expressions;
 #[path = "cases/history.rs"]
 mod history;
 #[path = "cases/inspection.rs"]
