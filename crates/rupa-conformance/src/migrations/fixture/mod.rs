@@ -7,9 +7,16 @@ use rupa::migrate::{
 };
 use rupa::{raw, select};
 
+mod expressions;
 mod kinds;
 mod schema;
 
+pub use expressions::{
+    Account, NewAccount, create_accounts_indexed_by_a_foreign_column,
+    create_accounts_indexed_by_a_volatile_function, create_accounts_indexed_by_an_aggregate,
+    create_accounts_with_expression_indexes, create_accounts_with_partial_index,
+    create_accounts_with_text_expression,
+};
 pub use kinds::{
     BigText, KindDocument, KindNote, NewKindNote, Tsvector, create_big_text_table,
     create_tsvector_table,

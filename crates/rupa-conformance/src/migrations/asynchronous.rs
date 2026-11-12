@@ -89,6 +89,9 @@ mod control {
 mod exclusion {
     include!("cases/exclusion.rs");
 }
+mod expressions {
+    include!("cases/expressions.rs");
+}
 mod history {
     include!("cases/history.rs");
 }

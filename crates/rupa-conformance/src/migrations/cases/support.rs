@@ -1,6 +1,8 @@
 use rupa::migrate::{
-    ApplyOptions, Blocker, Error, Init, Order, Policy, RunError, Version, VersionScheme,
+    ApplyOptions, Blocker, Error, Init, Order, Policy, RunError, ValidationError, Version,
+    VersionScheme,
 };
+use rupa::sql::{RenderError, SchemaError};
 use rupa::{Dialect, DialectId};
 
 use super::{Connection, Harness, Session};
@@ -59,6 +61,23 @@ pub(super) fn blocked<E: std::error::Error, M: std::error::Error, R: std::fmt::D
         }) => blockers,
         Err(other) => panic!("expected blockers, got {other}"),
         Ok(_) => panic!("expected blockers, but the run went ahead"),
+    }
+}
+
+/// The schema error a run refused its plan with, at preflight.
+pub(super) fn schema_refusal<E: std::error::Error, M: std::error::Error, R: std::fmt::Debug>(
+    result: Result<impl Sized, RunError<E, M, R>>,
+) -> SchemaError {
+    match result {
+        Err(RunError::Infrastructure {
+            source: Error::Validation(ValidationError::Schema(error)),
+            ..
+        }) => match *error {
+            RenderError::Schema(schema) => *schema,
+            other => panic!("expected a schema error, got {other}"),
+        },
+        Err(other) => panic!("expected a preflight schema error, got {other}"),
+        Ok(_) => panic!("expected a preflight schema error, but the run went ahead"),
     }
 }
 

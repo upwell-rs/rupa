@@ -92,6 +92,12 @@ macro_rules! all_cases {
                 case_scripted_migrations_run_schema_operations,
                 case_ordinary_renames_and_indexes_work,
             ],
+            expressions: [
+                case_expression_unique_indexes_enforce_on_every_engine,
+                case_text_expression_indexes_work_or_fail_typed_before_acquisition,
+                case_partial_indexes_work_or_fail_typed_before_acquisition,
+                case_expressions_ddl_cannot_hold_fail_typed_before_acquisition,
+            ],
             kinds: [
                 case_a_kind_stored_everywhere_applies_on_every_dialect,
                 case_a_kind_round_trips_through_an_entity_on_every_dialect,
