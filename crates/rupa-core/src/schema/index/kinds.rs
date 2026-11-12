@@ -1,6 +1,5 @@
 use super::{IndexKind, IndexMethod, IndexSupport, IndexableBy};
 use crate::value::ScalarColumn;
-use crate::varchar::VarChar;
 
 /// The portable ordered index: the default method of every dialect.
 #[derive(Debug, Clone, Copy)]
@@ -11,13 +10,16 @@ pub struct BTree;
 #[derive(Debug, Clone, Copy)]
 pub struct Hash;
 
-/// A generalized inverted index (`USING gin`), for full-text search and
-/// containment over documents. PostgreSQL only.
+/// A generalized inverted index (`USING gin`) over JSON documents, using
+/// PostgreSQL's default `jsonb_ops` class. PostgreSQL only. Text needs an
+/// operator class (`gin_trgm_ops`, `to_tsvector`), so no text type is
+/// accepted here.
 #[derive(Debug, Clone, Copy)]
 pub struct Gin;
 
-/// A generalized search tree (`USING gist`), for trigram and similarity
-/// search over text. PostgreSQL only.
+/// A generalized search tree (`USING gist`). PostgreSQL only. No built-in
+/// column type has a default GiST operator class, so no type is accepted
+/// until a column type implements [`IndexableBy`] for it.
 #[derive(Debug, Clone, Copy)]
 pub struct Gist;
 
@@ -54,17 +56,6 @@ impl IndexKind for Gist {
 impl<T: ScalarColumn> IndexableBy<BTree> for T {}
 
 impl<T: ScalarColumn> IndexableBy<Hash> for T {}
-
-macro_rules! text_kinds {
-    ($($kind:ty),*) => {$(
-        impl IndexableBy<$kind> for String {}
-        impl IndexableBy<$kind> for Option<String> {}
-        impl<const N: usize> IndexableBy<$kind> for VarChar<N> {}
-        impl<const N: usize> IndexableBy<$kind> for Option<VarChar<N>> {}
-    )*};
-}
-
-text_kinds!(Gin, Gist);
 
 impl IndexableBy<Gin> for serde_json::Value {}
 

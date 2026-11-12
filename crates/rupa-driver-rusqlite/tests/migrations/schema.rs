@@ -34,7 +34,7 @@ fn planned_schema_migrations_create_entity_tables_keys_and_indexes() {
             &mut runner,
             "SELECT name FROM pragma_table_info('posts') ORDER BY cid"
         ),
-        ["id", "author_id", "title", "body", "slug", "pinned"]
+        ["id", "author_id", "title", "body", "slug", "meta", "pinned"]
     );
     assert_eq!(
         rows(

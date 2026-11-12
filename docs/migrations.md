@@ -230,11 +230,14 @@ is acquired, with `SchemaError::Index { reason: IndexRefusal::Unbounded { .. }, 
 ### Index kinds
 
 `Index::on(name, column)` is a B-tree. Other kinds are types implementing
-`IndexKind`: `Hash`, `Gin` and `Gist` ship with rupa, and you can add your
-own (`impl IndexKind for Brin`). `Kind::on(name, column)` returns a builder
+`IndexKind`: `Hash`, `Gin` (JSON columns, PostgreSQL's default `jsonb_ops`)
+and `Gist` ship with rupa, and you can add your own (`impl IndexKind for Brin`). `Kind::on(name, column)` returns a builder
 that adds columns with `.and(..)` and converts into an `Index`; the column
-types must implement `IndexableBy<Kind>`, so a GIN index over an integer does
-not compile. Kinds follow PostgreSQL (`CREATE INDEX .. USING gin (..)`). A
+types must implement `IndexableBy<Kind>`, so a GIN index over an integer or a
+text column does not compile: PostgreSQL has no default GIN or GiST operator
+class for text, and no built-in type is accepted by `Gist`. Operator classes
+(`gin_trgm_ops`, `btree_gist`, full-text expressions) are not offered yet;
+write those indexes as SQL. Kinds follow PostgreSQL (`CREATE INDEX .. USING gin (..)`). A
 dialect that cannot build a kind (MySQL and SQLite have no GIN, GiST or hash
 indexes), a unique `Hash`/`Gin`/`Gist` index or a multi-column `Hash` index
 fails at preflight with a typed `SchemaError::Index`. Literal tables use

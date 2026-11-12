@@ -13,6 +13,7 @@ impl Doc {
     const TITLE: Column<Doc, String, Scalar> = Column::scalar("title");
     const SLUG: Column<Doc, VarChar<64>, Scalar> = Column::scalar("slug");
     const OWNER: Column<Doc, Option<i64>, Scalar> = Column::scalar("owner");
+    const META: Column<Doc, serde_json::Value, crate::column::Json> = Column::json("meta");
 }
 
 impl FromRow for Doc {
@@ -74,7 +75,7 @@ fn builders_add_checked_columns_and_become_indexes() {
         ]
     );
     assert!(index.unique);
-    assert_eq!(Gin::on("docs_title", Doc::TITLE).build().kind, Gin::METHOD);
+    assert_eq!(Gin::on("docs_meta", Doc::META).build().kind, Gin::METHOD);
 }
 
 #[test]
