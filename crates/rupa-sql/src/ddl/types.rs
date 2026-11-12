@@ -8,7 +8,7 @@
 
 use std::fmt::Write as _;
 
-use rupa_core::schema::{ColumnDef, ColumnDefault, ColumnType};
+use rupa_core::schema::{ColumnDef, ColumnDefault, ColumnSpec, ColumnType, TypeSupport};
 use rupa_core::{DialectId, Value};
 
 use super::SchemaError;
@@ -20,19 +20,7 @@ pub(super) fn type_name(column: &ColumnDef, dialect: DialectId) -> Result<String
         ty: column.ty,
     };
     let name = match (column.ty, dialect) {
-        (ColumnType::Custom(custom), _) => {
-            let name = match dialect {
-                DialectId::Postgres => custom.postgres,
-                DialectId::MySql => custom.mysql,
-                DialectId::Sqlite => custom.sqlite,
-                _ => None,
-            };
-
-            return name.map(str::to_owned).ok_or(SchemaError::CustomType {
-                column: column.name,
-                dialect,
-            });
-        }
+        (ColumnType::Kind(spec), _) => return kind_name(column, *spec, dialect),
         (ColumnType::VarChar(0), _) => return Err(invalid()),
         (ColumnType::Decimal { precision, scale }, _)
             if precision == 0 || precision > 65 || scale > precision =>
@@ -56,6 +44,32 @@ pub(super) fn type_name(column: &ColumnDef, dialect: DialectId) -> Result<String
     Ok(name.to_owned())
 }
 
+/// A kind's type on `dialect`: `name(arg, ..)`, or `name` without arguments.
+fn kind_name(
+    column: &ColumnDef,
+    spec: ColumnSpec,
+    dialect: DialectId,
+) -> Result<String, SchemaError> {
+    let (name, args) = match spec.support(dialect) {
+        TypeSupport::Named { name, args } => (name, args),
+        TypeSupport::Unsupported(reason) => {
+            return Err(SchemaError::UnsupportedType {
+                column: column.name,
+                kind: spec.name,
+                dialect,
+                reason,
+            });
+        }
+    };
+    let args = args.iter().map(u32::to_string).collect::<Vec<_>>();
+
+    if args.is_empty() {
+        return Ok(name.to_owned());
+    }
+
+    Ok(format!("{name}({})", args.join(", ")))
+}
+
 fn postgres(ty: ColumnType) -> &'static str {
     match ty {
         ColumnType::Bool => "BOOLEAN",
@@ -72,7 +86,7 @@ fn postgres(ty: ColumnType) -> &'static str {
         ColumnType::Timestamp => "TIMESTAMP",
         ColumnType::TimestampTz => "TIMESTAMPTZ",
         ColumnType::Json => "JSONB",
-        ColumnType::Decimal { .. } | ColumnType::VarChar(_) | ColumnType::Custom(_) => {
+        ColumnType::Decimal { .. } | ColumnType::VarChar(_) | ColumnType::Kind(_) => {
             unreachable!("handled by type_name")
         }
     }
@@ -93,7 +107,7 @@ fn mysql(ty: ColumnType) -> &'static str {
         ColumnType::Time => "TIME(6)",
         ColumnType::Timestamp | ColumnType::TimestampTz => "DATETIME(6)",
         ColumnType::Json => "JSON",
-        ColumnType::Decimal { .. } | ColumnType::VarChar(_) | ColumnType::Custom(_) => {
+        ColumnType::Decimal { .. } | ColumnType::VarChar(_) | ColumnType::Kind(_) => {
             unreachable!("handled by type_name")
         }
     }
@@ -113,7 +127,7 @@ fn sqlite(ty: ColumnType) -> &'static str {
         | ColumnType::Timestamp
         | ColumnType::TimestampTz
         | ColumnType::Json => "TEXT",
-        ColumnType::Custom(_) => unreachable!("handled by type_name"),
+        ColumnType::Kind(_) => unreachable!("handled by type_name"),
     }
 }
 
@@ -128,7 +142,10 @@ pub(super) fn is_integer(ty: ColumnType) -> bool {
 /// MySQL cannot key or index these without a prefix length, and needs an
 /// expression (parenthesized) default for them.
 pub(super) fn mysql_unbounded(ty: ColumnType) -> bool {
-    matches!(ty, ColumnType::Text | ColumnType::Bytes | ColumnType::Json)
+    match ty {
+        ColumnType::Kind(spec) => !spec.bounded,
+        ty => matches!(ty, ColumnType::Text | ColumnType::Bytes | ColumnType::Json),
+    }
 }
 
 /// The `DEFAULT` clause value of `column`.

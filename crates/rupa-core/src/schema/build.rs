@@ -1,8 +1,6 @@
 //! Builders for schema definitions, from literals or from entities.
 
-use super::{
-    ColumnDef, ColumnDefault, ColumnType, CustomType, ForeignKey, ReferentialAction, Table,
-};
+use super::{ColumnDef, ColumnDefault, ColumnType, ForeignKey, ReferentialAction, Table};
 use crate::column::{Column, ColumnMeta, Generated, Reference};
 use crate::entity::Entity;
 use crate::ir::TableRef;
@@ -120,38 +118,6 @@ impl ColumnType {
             SqlType::TimestampTz => Self::TimestampTz,
             SqlType::Json => Self::Json,
         }
-    }
-}
-
-impl CustomType {
-    /// No dialect has a name yet.
-    pub const fn new() -> Self {
-        Self {
-            postgres: None,
-            mysql: None,
-            sqlite: None,
-        }
-    }
-
-    /// The PostgreSQL type name.
-    pub const fn postgres(mut self, name: &'static str) -> Self {
-        self.postgres = Some(name);
-
-        self
-    }
-
-    /// The MySQL type name.
-    pub const fn mysql(mut self, name: &'static str) -> Self {
-        self.mysql = Some(name);
-
-        self
-    }
-
-    /// The SQLite type name.
-    pub const fn sqlite(mut self, name: &'static str) -> Self {
-        self.sqlite = Some(name);
-
-        self
     }
 }
 

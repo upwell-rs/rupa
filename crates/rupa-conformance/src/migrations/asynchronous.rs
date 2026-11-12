@@ -95,6 +95,9 @@ mod history {
 mod inspection {
     include!("cases/inspection.rs");
 }
+mod kinds {
+    include!("cases/kinds.rs");
+}
 mod nontransactional {
     include!("cases/nontransactional.rs");
 }

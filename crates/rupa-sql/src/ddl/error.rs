@@ -19,13 +19,17 @@ pub enum SchemaError {
         /// The missing column.
         column: &'static str,
     },
-    /// A custom type without a name for this dialect.
-    #[error("column `{column}` has no {dialect:?} type")]
-    CustomType {
+    /// A column kind this dialect cannot store.
+    #[error("{dialect:?} cannot store column `{column}` of kind {kind}: {reason}")]
+    UnsupportedType {
         /// The column.
         column: &'static str,
+        /// The kind's name.
+        kind: &'static str,
         /// The dialect.
         dialect: DialectId,
+        /// Why the dialect lacks it.
+        reason: &'static str,
     },
     /// `VarChar(0)` or an impossible decimal.
     #[error("column `{column}` has an invalid type {ty:?}")]

@@ -8,11 +8,13 @@
 
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{
-    BTree, ColumnDef, ColumnDefault, ColumnType, ForeignKey, Index, IndexKind, IndexMethod,
-    IndexSupport, ReferentialAction, SchemaOp, Table,
+    BTree, ColumnDef, ColumnDefault, ColumnType, ForeignKey, Index, IndexKind, ReferentialAction,
+    SchemaOp, Table,
 };
 use rupa_core::{Generated, Value};
 use sha2::Sha256;
+
+mod kinds;
 
 use super::checksum::hash_field;
 
@@ -129,12 +131,9 @@ impl Encoder<'_> {
             ColumnType::Timestamp => self.str("timestamp"),
             ColumnType::TimestampTz => self.str("timestamptz"),
             ColumnType::Json => self.str("json"),
-            ColumnType::Custom(custom) => {
-                self.str("custom");
-
-                for name in [custom.postgres, custom.mysql, custom.sqlite] {
-                    self.opt(name);
-                }
+            ColumnType::Kind(spec) => {
+                self.str("kind");
+                self.spec(*spec);
             }
         }
     }
@@ -243,28 +242,6 @@ impl Encoder<'_> {
         if index.kind != BTree::METHOD {
             self.method(index.kind);
         }
-    }
-
-    fn method(&mut self, kind: IndexMethod) {
-        self.str("using");
-        self.str(kind.name);
-
-        for support in [kind.postgres, kind.mysql, kind.sqlite] {
-            match support {
-                IndexSupport::Default => self.str("default"),
-                IndexSupport::Using(method) => {
-                    self.str("using-method");
-                    self.str(method);
-                }
-                IndexSupport::Unsupported(reason) => {
-                    self.str("unsupported");
-                    self.str(reason);
-                }
-            }
-        }
-
-        self.flag(kind.unique);
-        self.flag(kind.multi_column);
     }
 
     fn table_ref(&mut self, table: TableRef) {

@@ -42,6 +42,8 @@ mod exclusion;
 mod history;
 #[path = "cases/inspection.rs"]
 mod inspection;
+#[path = "cases/kinds.rs"]
+mod kinds;
 #[path = "cases/nontransactional.rs"]
 mod nontransactional;
 #[path = "cases/ordering.rs"]

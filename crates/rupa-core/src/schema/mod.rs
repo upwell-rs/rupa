@@ -14,13 +14,16 @@
 //! [`ColumnDef::of`]), and adjusted afterwards.
 
 mod build;
+mod column_kind;
 mod index;
 
-use crate::column::{Generated, Reference};
+use crate::column::Generated;
 use crate::ir::TableRef;
 use crate::value::{SqlType, Value};
 
+pub use crate::column::Reference;
 pub use build::column;
+pub use column_kind::{ColumnKind, ColumnSpec, TypeSupport};
 pub use index::{
     BTree, Gin, Gist, Hash, Index, IndexBuilder, IndexColumn, IndexKind, IndexMethod, IndexSupport,
     IndexableBy, IndexableColumn, JsonIndexKind,
@@ -117,26 +120,14 @@ pub enum ColumnType {
     TimestampTz,
     /// A JSON document.
     Json,
-    /// A dialect-specific type, written verbatim where given.
-    Custom(CustomType),
+    /// An extensible type: see [`ColumnKind`].
+    Kind(&'static ColumnSpec),
 }
 
 impl From<SqlType> for ColumnType {
     fn from(ty: SqlType) -> Self {
         Self::from_sql(ty)
     }
-}
-
-/// Per-dialect type names for [`ColumnType::Custom`]. A dialect without one
-/// rejects the operation rather than guessing.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct CustomType {
-    /// The PostgreSQL type.
-    pub postgres: Option<&'static str>,
-    /// The MySQL type.
-    pub mysql: Option<&'static str>,
-    /// The SQLite type.
-    pub sqlite: Option<&'static str>,
 }
 
 /// A column's default.

@@ -7,8 +7,12 @@ use rupa::migrate::{
 };
 use rupa::{raw, select};
 
+mod kinds;
 mod schema;
 
+pub use kinds::{
+    BigText, KindDocument, KindNote, Tsvector, create_big_text_table, create_tsvector_table,
+};
 pub use schema::{
     Author, Meta, Post, add_pinned, create_tables, create_tables_with_explicit_method,
     create_tables_with_gin_index, create_tables_with_text_index,
