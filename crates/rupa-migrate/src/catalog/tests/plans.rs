@@ -42,6 +42,20 @@ fn notes_title() -> Index {
     )
 }
 
+fn plan_digest(plan: fn() -> Plan) -> Checksum {
+    digest(Planned(Fixed(planless(), plan))).expect("valid plan")
+}
+
+fn assert_distinct_digests(variants: &[fn() -> Plan], message: &str) {
+    let digests: Vec<_> = variants.iter().map(|plan| plan_digest(*plan)).collect();
+
+    for (i, a) in digests.iter().enumerate() {
+        for b in &digests[i + 1..] {
+            assert_ne!(a, b, "{message}");
+        }
+    }
+}
+
 #[test]
 fn a_planned_migrations_identity_is_its_plan() {
     let first = digest(Planned(Fixed(planless(), || {
@@ -111,16 +125,7 @@ fn every_schema_detail_is_checksummed() {
         || Plan::new().create_index(notes_title().method(Gin::METHOD)),
         || Plan::new().rename_column(NOTES, "title", "name"),
     ];
-    let digests: Vec<_> = variants
-        .iter()
-        .map(|plan| digest(Planned(Fixed(planless(), *plan))).expect("valid plan"))
-        .collect();
-
-    for (i, a) in digests.iter().enumerate() {
-        for b in &digests[i + 1..] {
-            assert_ne!(a, b, "plan variants must not share a checksum");
-        }
-    }
+    assert_distinct_digests(&variants, "plan variants must not share a checksum");
 }
 
 /// Changing this value changes every applied schema checksum: it needs a new
@@ -233,16 +238,7 @@ fn an_index_methods_rendering_configuration_is_part_of_its_checksum() {
                 .create_index(notes_title().method(CUSTOM.mysql(IndexSupport::Using("BTREE"))))
         },
     ];
-    let digests: Vec<_> = variants
-        .iter()
-        .map(|plan| digest(Planned(Fixed(planless(), *plan))).expect("valid plan"))
-        .collect();
-
-    for (i, a) in digests.iter().enumerate() {
-        for b in &digests[i + 1..] {
-            assert_ne!(a, b, "every rendering setting is part of the identity");
-        }
-    }
+    assert_distinct_digests(&variants, "every rendering setting is part of the identity");
 }
 
 const KIND: ColumnSpec = ColumnSpec::new("shape", SqlType::Text)
@@ -281,20 +277,7 @@ fn a_column_kinds_rendering_configuration_is_part_of_its_checksum() {
         },
         || with_kind(KIND.bounded()),
     ];
-    let digests: Vec<_> = variants
-        .iter()
-        .map(|plan| digest(Planned(Fixed(planless(), *plan))).expect("valid plan"))
-        .collect();
-
-    for (i, a) in digests.iter().enumerate() {
-        for b in &digests[i + 1..] {
-            assert_ne!(a, b, "every rendering setting is part of the identity");
-        }
-    }
-}
-
-fn plan_digest(plan: fn() -> Plan) -> Checksum {
-    digest(Planned(Fixed(planless(), plan))).expect("valid plan")
+    assert_distinct_digests(&variants, "every rendering setting is part of the identity");
 }
 
 #[test]
@@ -316,4 +299,18 @@ fn rewording_an_unsupported_reason_keeps_the_checksum() {
 
     assert_eq!(plan_digest(kinds[0]), plan_digest(kinds[1]));
     assert_eq!(plan_digest(methods[0]), plan_digest(methods[1]));
+}
+
+/// Pins the encodings that `schema_encoding_is_stable` cannot reach: a
+/// non-B-tree index method and a column kind. Changing this value changes
+/// applied checksums: it needs a new `CHECKSUM_FORMAT`, never an updated
+/// expectation.
+#[test]
+fn index_method_and_column_kind_encoding_is_stable() {
+    let checksum = plan_digest(|| with_kind(KIND).create_index(notes_title().method(Gin::METHOD)));
+
+    assert_eq!(
+        checksum.to_string(),
+        "c9eb36a3cc58a891fa32d164acd735725ba53e04624be1b1286fe4074cd1d311"
+    );
 }
