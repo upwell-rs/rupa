@@ -9,6 +9,8 @@ mod alterations;
 mod expressions;
 mod indexes;
 mod kinds;
+mod literals;
+mod scalar_calls;
 mod tables;
 
 const NOTES: TableRef = TableRef::with_schema("app", "notes");
