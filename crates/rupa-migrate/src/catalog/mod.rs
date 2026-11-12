@@ -13,7 +13,8 @@ use crate::{
     Version, VersionError, VersionScheme,
 };
 
-/// Canonical artifact encoding and digest algorithm identity.
+/// Canonical artifact encoding and digest algorithm identity. Frozen from the
+/// first release: any later encoding change needs a new identity.
 pub const CHECKSUM_FORMAT: &str = "rupa-artifact-v1/sha256";
 
 /// A SHA-256 digest of the versioned canonical artifact closure.
