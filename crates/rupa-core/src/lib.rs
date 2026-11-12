@@ -32,6 +32,7 @@ pub mod security;
 pub mod sem;
 pub mod tx;
 pub mod value;
+pub mod varchar;
 
 #[doc(hidden)]
 pub use column::__private;
@@ -108,6 +109,7 @@ pub use security::{SecureTransactional, SecureTx, SecurityContext};
 pub use tx::{AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxConnection};
 pub use tx::{IsolationLevel, Transaction, Transactional, Tx, TxConnection, TxOptions};
 pub use value::{ScalarColumn, SqlType, Value};
+pub use varchar::{TooLong, VarChar};
 
 /// The names most code needs: `use rupa_core::prelude::*`.
 pub mod prelude {

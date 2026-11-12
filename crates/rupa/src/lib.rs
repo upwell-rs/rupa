@@ -91,8 +91,8 @@ pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxCo
 pub use rupa_core::tx::{IsolationLevel, Transaction, Transactional, Tx, TxConnection, TxOptions};
 pub use rupa_core::{
     Column, Connection, Deletable, DynRepository, Entity, Expr, ExprOps, FromRow, Gettable,
-    Insertable, Json, Keyed, NoKey, Query, Reference, Scalar, SqlType, Updatable, Value, bind,
-    delete, get, insert, json, raw, select, update,
+    Insertable, Json, Keyed, NoKey, Query, Reference, Scalar, SqlType, TooLong, Updatable, Value,
+    VarChar, bind, delete, get, insert, json, raw, select, update,
 };
 pub use rupa_macros::{
     Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository,

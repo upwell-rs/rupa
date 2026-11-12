@@ -34,7 +34,7 @@ fn planned_schema_migrations_create_entity_tables_keys_and_indexes() {
             &mut runner,
             "SELECT name FROM pragma_table_info('posts') ORDER BY cid"
         ),
-        ["id", "author_id", "title", "body", "pinned"]
+        ["id", "author_id", "title", "body", "slug", "pinned"]
     );
     assert_eq!(
         rows(
@@ -48,7 +48,7 @@ fn planned_schema_migrations_create_entity_tables_keys_and_indexes() {
             &mut runner,
             "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'posts' AND sql IS NOT NULL"
         ),
-        ["posts_author"]
+        ["posts_author", "posts_slug"]
     );
     assert_eq!(
         rows(&mut runner, "SELECT title || ':' || pinned FROM posts"),
@@ -61,7 +61,7 @@ fn schema_operations_the_dialect_cannot_express_fail_before_bootstrap() {
     let entries = [Planned(Plans(planned("1"), || {
         create_tables().add_column_to(
             <Post as rupa::Entity>::TABLE,
-            ColumnDef::new("slug", ColumnType::Text),
+            ColumnDef::new("subtitle", ColumnType::Text),
         )
     }))];
     let catalog =

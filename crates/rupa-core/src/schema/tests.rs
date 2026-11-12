@@ -3,6 +3,7 @@ use crate::column::{Column, ColumnKind, ColumnMeta, Scalar, ScalarCodec, column_
 use crate::entity::{Entity, FromRow};
 use crate::error::ResultError;
 use crate::row::Row;
+use crate::varchar::VarChar;
 
 /// A hand-written entity with an identity key and a foreign key.
 struct Post {
@@ -12,6 +13,7 @@ struct Post {
 impl Post {
     const TITLE: Column<Post, String, Scalar> = Column::scalar("title");
     const AUTHOR: Column<Post, Option<i64>, Scalar> = Column::scalar("author_id");
+    const SLUG: Column<Post, VarChar<40>, Scalar> = Column::scalar("slug");
 }
 
 const AUTHORS: Reference = Reference {
@@ -94,23 +96,10 @@ fn entity_tables_can_be_adjusted() {
 }
 
 #[test]
-fn column_handles_and_indexes_name_their_entity() {
+fn column_handles_describe_their_columns() {
     assert_eq!(
         ColumnDef::of(Post::AUTHOR),
         ColumnDef::new("author_id", ColumnType::BigInt).nullable()
-    );
-    assert_eq!(
-        Index::on("posts_title", Post::TITLE).unique(),
-        Index {
-            name: "posts_title",
-            table: Post::TABLE,
-            columns: vec!["title"],
-            unique: true,
-        }
-    );
-    assert_eq!(
-        Index::of::<Post>("posts_author_title", ["author_id", "title"]).columns,
-        ["author_id", "title"]
     );
     assert_eq!(
         ForeignKey::to::<Post>(["post_id"])
@@ -121,4 +110,22 @@ fn column_handles_and_indexes_name_their_entity() {
             columns: &["id"],
         }
     );
+}
+
+#[test]
+fn bounded_text_declares_its_length() {
+    assert_eq!(
+        column::<VarChar<256>>("email"),
+        ColumnDef::new("email", ColumnType::VarChar(256))
+    );
+    assert_eq!(
+        column::<Option<VarChar<16>>>("code"),
+        ColumnDef::new("code", ColumnType::VarChar(16)).nullable()
+    );
+    assert_eq!(
+        ColumnDef::of(Post::SLUG),
+        ColumnDef::new("slug", ColumnType::VarChar(40))
+    );
+    assert_eq!(Post::SLUG.meta("slug").column_type, ColumnType::VarChar(40));
+    assert_eq!(column::<String>("title").ty, ColumnType::Text);
 }

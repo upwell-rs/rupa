@@ -1,0 +1,22 @@
+error[E0277]: a `i64` column cannot be indexed by `Gin`
+ --> tests/ui/index_kind_rejects_column_type.rs:7:33
+  |
+7 |     let _ = Gin::on("users_id", User::ID);
+  |             -------             ^^^^^^^^ not accepted by this index kind
+  |             |
+  |             required by a bound introduced by this call
+  |
+  = help: the trait `IndexableBy<Gin>` is not implemented for `i64`
+  = note: implement `IndexableBy<Gin>` for the type if the kind can index it
+  = help: the following other types implement trait `IndexableBy<K>`:
+            String
+            rupa_core::VarChar<N>
+            serde_json::value::Value
+            std::option::Option<String>
+            std::option::Option<rupa_core::VarChar<N>>
+            std::option::Option<serde_json::value::Value>
+note: required by a bound in `rupa_core::schema::IndexKind::on`
+ --> src/schema/index/mod.rs
+  |
+  |     fn on<E: Entity, T: IndexableBy<Self>, C>(
+  |                         ^^^^^^^^^^^^^^^^^ required by this bound in `IndexKind::on`

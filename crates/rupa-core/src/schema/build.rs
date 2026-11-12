@@ -1,11 +1,12 @@
 //! Builders for schema definitions, from literals or from entities.
 
 use super::{
-    ColumnDef, ColumnDefault, ColumnType, CustomType, ForeignKey, Index, ReferentialAction, Table,
+    ColumnDef, ColumnDefault, ColumnType, CustomType, ForeignKey, ReferentialAction, Table,
 };
 use crate::column::{Column, ColumnMeta, Generated, Reference};
 use crate::entity::Entity;
 use crate::ir::TableRef;
+use crate::value::ScalarColumn;
 
 impl ColumnDef {
     /// A `NOT NULL` column of type `ty`.
@@ -21,18 +22,28 @@ impl ColumnDef {
     }
 
     /// The column an entity field handle describes: its name, its type
-    /// (from the field's SQL type) and its nullability.
+    /// (with the length of a `VarChar<N>` field) and its nullability.
     pub const fn of<E, T, K>(column: Column<E, T, K>) -> Self {
-        let mut def = Self::new(column.name(), ColumnType::from_sql(column.sql_type()));
+        let mut def = Self::new(column.name(), column.column_type());
 
         def.nullable = column.nullable();
 
         def
     }
 
+    /// A column named `name` that stores `T`: its type (`VarChar<256>` is
+    /// `VARCHAR(256)`) and its nullability (`Option<T>` admits `NULL`).
+    pub const fn typed<T: ScalarColumn>(name: &'static str) -> Self {
+        let mut def = Self::new(name, T::COLUMN_TYPE);
+
+        def.nullable = T::NULLABLE;
+
+        def
+    }
+
     /// The column an entity's metadata describes, including generation.
     pub const fn from_meta(meta: &ColumnMeta) -> Self {
-        let mut def = Self::new(meta.name, ColumnType::from_sql(meta.sql_type));
+        let mut def = Self::new(meta.name, meta.column_type);
 
         def.nullable = meta.nullable;
         def.generated = meta.generated;
@@ -81,6 +92,11 @@ impl ColumnDef {
 
         self
     }
+}
+
+/// A column named `name` that stores `T`: [`ColumnDef::typed`].
+pub const fn column<T: ScalarColumn>(name: &'static str) -> ColumnDef {
+    ColumnDef::typed::<T>(name)
 }
 
 impl ColumnType {
@@ -241,42 +257,6 @@ impl ForeignKey {
     /// Sets what deleting a referenced row does.
     pub fn on_delete(mut self, action: ReferentialAction) -> Self {
         self.on_delete = action;
-
-        self
-    }
-}
-
-impl Index {
-    /// An index named `name` over `columns` of `table`.
-    pub fn new(
-        name: &'static str,
-        table: TableRef,
-        columns: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self {
-            name,
-            table,
-            columns: columns.into_iter().collect(),
-            unique: false,
-        }
-    }
-
-    /// An index named `name` over one entity column.
-    pub fn on<E: Entity, T, K>(name: &'static str, column: Column<E, T, K>) -> Self {
-        Self::new(name, E::TABLE, [column.name()])
-    }
-
-    /// An index named `name` over `columns` of entity `E`'s table.
-    pub fn of<E: Entity>(
-        name: &'static str,
-        columns: impl IntoIterator<Item = &'static str>,
-    ) -> Self {
-        Self::new(name, E::TABLE, columns)
-    }
-
-    /// Makes indexed values unique.
-    pub fn unique(mut self) -> Self {
-        self.unique = true;
 
         self
     }

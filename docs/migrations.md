@@ -213,15 +213,34 @@ dialect. Nothing is approximated; these fail before the target is touched:
 - SQLite: adding a `NOT NULL` column without a default, or a `UNIQUE` column;
   an identity that is not the whole primary key; foreign keys into another
   attached database.
-- MySQL: primary keys or `UNIQUE` columns over unbounded `Text`, `Bytes` or
-  `Json` (use `VarChar(n)`); text defaults containing a backslash; an identity
+- MySQL: primary keys, `UNIQUE` columns or indexes over unbounded `Text`,
+  `Bytes` or `Json` (use `VarChar(n)`); text defaults containing a backslash; an identity
   that is not the whole primary key.
 - Any dialect: a type without a name there, a database-generated column without
   a default, `CREATE TABLE` keys naming unknown columns, an empty plan.
 
-Indexes and foreign keys name columns without their types, so a MySQL index
-over unbounded text or an index naming an unknown column is rejected by the
-server when the migration runs.
+Entity fields can be bounded with `VarChar<N>` (`email: VarChar<255>`), which
+stores `VARCHAR(N)` and rejects longer text in `VarChar::<N>::new(..)`. Literal
+tables use `ColumnDef::typed::<VarChar<255>>("email")` or
+`schema::column::<VarChar<255>>("email")`. Because the column handle carries
+the length, `Index::on("users_email", User::EMAIL)` builds on MySQL too, while
+the same index over a plain `String` field is refused there before the target
+is acquired, with `SchemaError::Index { reason: IndexRefusal::Unbounded { .. }, .. }`.
+
+### Index kinds
+
+`Index::on(name, column)` is a B-tree. Other kinds are types implementing
+`IndexKind`: `Hash`, `Gin` and `Gist` ship with rupa, and you can add your
+own (`impl IndexKind for Brin`). `Kind::on(name, column)` returns a builder
+that adds columns with `.and(..)` and converts into an `Index`; the column
+types must implement `IndexableBy<Kind>`, so a GIN index over an integer does
+not compile. Kinds follow PostgreSQL (`CREATE INDEX .. USING gin (..)`). A
+dialect that cannot build a kind (MySQL and SQLite have no GIN, GiST or hash
+indexes), a unique `Hash`/`Gin`/`Gist` index or a multi-column `Hash` index
+fails at preflight with a typed `SchemaError::Index`. Literal tables use
+`Index::new(name, table, [IndexColumn::new("title", ColumnType::VarChar(80))])`
+and `.method(Gin::METHOD)`. Expression and partial indexes are not offered;
+write them as SQL.
 
 `apply` renders every planned operation for the session's dialect before it
 acquires the target. Scripted migrations run the same operations through

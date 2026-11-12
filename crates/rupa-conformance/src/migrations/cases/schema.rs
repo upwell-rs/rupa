@@ -1,10 +1,13 @@
 use rupa::DialectId;
 use rupa::migrate::schema::Index;
-use rupa::migrate::{Blocker, Error, Planned, RunError};
+use rupa::migrate::{Blocker, Error, Planned, RunError, ValidationError};
+use rupa::sql::{IndexRefusal, RenderError, SchemaError};
 
 use super::support::{dialect, planned, script};
 use super::{Harness, Session, catalog};
-use crate::migrations::fixture::{Plans, Post, Scripted, add_pinned, create_tables};
+use crate::migrations::fixture::{
+    Plans, Post, Scripted, add_pinned, create_tables, create_tables_with_text_index,
+};
 
 pub(super) fn case_planned_schema_creates_entity_tables<H: Harness>(h: &mut H) {
     let entries = [
@@ -20,10 +23,51 @@ pub(super) fn case_planned_schema_creates_entity_tables<H: Harness>(h: &mut H) {
     );
 }
 
+/// PostgreSQL and SQLite index unbounded text. MySQL cannot, and says so at
+/// preflight: nothing is acquired or created, so the target stays unmanaged.
+pub(super) fn case_text_indexes_work_or_fail_typed_before_acquisition<H: Harness>(h: &mut H) {
+    let entries = [Planned(Plans(
+        planned::<H>("1"),
+        create_tables_with_text_index,
+    ))];
+    let result = wait!(h, h.connect().apply(&catalog(&entries)));
+
+    if dialect(h) != DialectId::MySql {
+        result.expect("unbounded text indexes where the dialect supports them");
+
+        assert_eq!(h.count("SELECT count(*) FROM posts"), 0);
+
+        return;
+    }
+
+    assert!(
+        matches!(
+            result,
+            Err(RunError::Infrastructure {
+                source: Error::Validation(ValidationError::Schema(ref error)),
+                ..
+            }) if matches!(
+                **error,
+                RenderError::Schema(ref schema) if matches!(
+                    **schema,
+                    SchemaError::Index {
+                        index: "posts_title",
+                        dialect: DialectId::MySql,
+                        reason: IndexRefusal::Unbounded { column: "title", .. },
+                    }
+                )
+            )
+        ),
+        "{result:?}"
+    );
+    assert!(!h.table_exists("_rupa_migrations"));
+    assert!(!h.table_exists("posts"));
+}
+
 pub(super) fn case_changed_plan_is_reported_as_changed_history<H: Harness>(h: &mut H) {
     let original = [Planned(Plans(planned::<H>("1"), create_tables))];
     let changed = [Planned(Plans(planned::<H>("1"), || {
-        create_tables().create_index(Index::on("posts_body", Post::BODY))
+        create_tables().create_index(Index::on("posts_author_again", Post::AUTHOR_ID).unique())
     }))];
 
     let mut session = h.connect();
