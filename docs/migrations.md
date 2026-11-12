@@ -294,8 +294,10 @@ impl ScalarColumn for BigText {
 
 A kind whose native type needs a cast does not round-trip yet: PostgreSQL infers
 a `tsvector` or `vector(N)` parameter, which a text bind is rejected for, and a
-text decode rejects the column. Such a kind is declared and indexed like any
-other, but is not an entity field type (no `ScalarColumn`); write and read its
+text decode rejects the column. Such a kind is declared like any other, but is not
+an entity field type (no `ScalarColumn`), so it has no column handle: write its
+columns and indexes literally (`Index::new` with `IndexColumn`, then
+`.method(..)`), which are not checked against `IndexableBy`. Write and read its
 values with raw SQL, casting through text, until
 [#91](https://github.com/upwell-rs/rupa/issues/91) lets the query IR cast kind
 columns:
@@ -310,9 +312,15 @@ impl ColumnKind for Tsvector {
         .sqlite(TypeSupport::Unsupported("SQLite has no tsvector type"));
 }
 
-impl IndexableBy<Gin> for Tsvector {}
+// DDL: a literal column and a literal GIN index
+let terms = ColumnDef::new("terms", Tsvector::SPEC.column_type());
+let index = Index::new(
+    "docs_terms",
+    TableRef::new("docs"),
+    [IndexColumn::new("terms", Tsvector::SPEC.column_type())],
+)
+.method(Gin::METHOD);
 
-// DDL and indexes: ColumnDef::new("terms", Tsvector::SPEC.column_type())
 // values: a raw query with an explicit cast through text
 raw()
     .sql("INSERT INTO docs (terms) VALUES (CAST(CAST(")
