@@ -1,4 +1,4 @@
-error[E0277]: a `i64` column cannot be indexed by `Gin`
+error[E0277]: `i64` values (a column or an expression result) cannot be indexed by `Gin`
  --> tests/ui/index_kind_rejects_column_type.rs:7:33
   |
 7 |     let _ = Gin::on("users_id", User::ID);

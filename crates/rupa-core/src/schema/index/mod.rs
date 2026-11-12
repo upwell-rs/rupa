@@ -164,7 +164,7 @@ pub trait IndexKind: Sized + 'static {
 /// Marks a column type `Self` as indexable by kind `K`: `GIN` over an
 /// integer, for one, does not compile.
 #[diagnostic::on_unimplemented(
-    message = "a `{Self}` column cannot be indexed by `{K}`",
+    message = "`{Self}` values (a column or an expression result) cannot be indexed by `{K}`",
     label = "not accepted by this index kind",
     note = "implement `IndexableBy<{K}>` for the type if the kind can index it"
 )]
