@@ -1,0 +1,16 @@
+[package]
+name = "rupa-example-upwell"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Example Upwell application running the db crate's migration commands"
+
+[dependencies]
+db = { package = "rupa-example-db", path = "../db" }
+rupa = { path = "../../../crates/rupa", default-features = false, features = ["upwell-database", "sqlite", "sqlx-sqlite"] }
+upwell.workspace = true
+# Upwell's generated command line names `::clap`.
+clap.workspace = true
+tokio.workspace = true

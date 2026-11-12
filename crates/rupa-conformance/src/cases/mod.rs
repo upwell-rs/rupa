@@ -10,23 +10,23 @@ pub use dsl::*;
 pub use select::*;
 pub use write::*;
 
-pub(super) async fn seed<E: AsyncExecutor>(e: &mut E) {
+pub(super) async fn seed<E: AsyncExecutor>(e: &E) {
     let all = items();
-    let n = e
-        .run(insert::<Item>().values(&all).affected())
+    let n = insert::<Item>()
+        .values(&all)
+        .affected()
+        .execute(e)
         .await
         .expect("seed");
     assert_eq!(n, all.len() as u64);
 }
 
-pub(super) async fn ids<E: AsyncExecutor>(e: &mut E, cond: Expr<bool>) -> Vec<i64> {
-    let rows = e
-        .run(
-            select::<Item>()
-                .filter(cond)
-                .order_by(col!(Item::id).asc())
-                .all(),
-        )
+pub(super) async fn ids<E: AsyncExecutor>(e: &E, cond: Expr<bool>) -> Vec<i64> {
+    let rows = select::<Item>()
+        .filter(cond)
+        .order_by(Item::ID.asc())
+        .all()
+        .execute(e)
         .await
         .expect("select");
     rows.into_iter().map(|i| i.id).collect()
@@ -46,27 +46,29 @@ pub(super) fn returning<E: AsyncExecutor>(e: &E) -> bool {
 }
 
 /// Inserts notes and returns them as stored (with generated ids).
-pub(super) async fn insert_notes<E: AsyncExecutor>(e: &mut E, notes: &[NewNote]) -> Vec<Note> {
+pub(super) async fn insert_notes<E: AsyncExecutor>(e: &E, notes: &[NewNote]) -> Vec<Note> {
     if returning(e) {
-        return e
-            .run(insert::<Note>().values(notes).returning_all())
+        return insert::<Note>()
+            .values(notes)
+            .returning_all()
+            .execute(e)
             .await
             .unwrap();
     }
 
-    let n = e
-        .run(insert::<Note>().values(notes).affected())
+    let n = insert::<Note>()
+        .values(notes)
+        .affected()
+        .execute(e)
         .await
         .unwrap() as usize;
-    let mut newest = e
-        .run(
-            select::<Note>()
-                .order_by(col!(Note::id).desc())
-                .limit(n as u64)
-                .all(),
-        )
-        .await
-        .unwrap();
+    let mut newest = (select::<Note>()
+        .order_by(Note::ID.desc())
+        .limit(n as u64)
+        .all())
+    .execute(e)
+    .await
+    .unwrap();
     newest.reverse();
     newest
 }

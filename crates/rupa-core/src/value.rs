@@ -3,6 +3,7 @@
 //! and renderers always emit them as bound parameters.
 
 use crate::error::DecodeError;
+use crate::schema::ColumnType;
 
 /// SQL-level type tag. Used for typed nulls, casts and as a decode hint for drivers.
 /// Deliberately exhaustive so every renderer and driver must map new variants.
@@ -116,6 +117,9 @@ pub trait ScalarColumn: Sized + 'static {
     const SQL_TYPE: SqlType;
     /// Whether the type admits `NULL` (`Option<T>`).
     const NULLABLE: bool = false;
+    /// The column type a schema declares: [`SQL_TYPE`](Self::SQL_TYPE),
+    /// unless the type carries a length (`VarChar<N>`).
+    const COLUMN_TYPE: ColumnType = ColumnType::from_sql(Self::SQL_TYPE);
     /// The value to bind.
     fn to_value(&self) -> Value;
     /// Decodes a column value.
@@ -161,6 +165,7 @@ impl<T: ScalarColumn> ScalarColumn for Option<T> {
     type Base = T::Base;
     const SQL_TYPE: SqlType = T::SQL_TYPE;
     const NULLABLE: bool = true;
+    const COLUMN_TYPE: ColumnType = T::COLUMN_TYPE;
     fn to_value(&self) -> Value {
         match self {
             Some(v) => v.to_value(),

@@ -44,7 +44,7 @@ impl ToSql for Param<'_> {
 }
 
 /// Converts a stored value to the requested SQL type.
-fn from_sql(v: &SqlValue, want: SqlType, index: usize) -> Result<Value, RowError> {
+pub(crate) fn from_sql(v: &SqlValue, want: SqlType, index: usize) -> Result<Value, RowError> {
     let bad = || RowError::Driver(format!("column {index}: cannot read {v:?} as {want:?}"));
     let int = |n: i64| -> Result<Value, RowError> {
         Ok(match want {

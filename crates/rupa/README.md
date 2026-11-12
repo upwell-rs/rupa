@@ -19,7 +19,7 @@ rupa = { version = "0.1", features = ["full"] }              # every driver + ru
 use rupa::prelude::*;
 
 let pool = rupa::drivers::sqlite::SqlitePool::connect(&DbConfig::new("sqlite://app.db"))?;
-let users = UsersView::new(&pool);
+let users = UsersRepo::new(&pool);
 ```
 
 For runnable, server-free examples, start with the [SQLite example guide](../../README.md#examples).
@@ -46,5 +46,9 @@ paths macro output refers to.
 | `memory` | the in-memory backend |
 | `sqlx-postgres`, `sqlx-mysql`, `sqlx-sqlite`, `sqlx-sqlite-unbundled` | async drivers on sqlx + deadpool (imply `async`) |
 | `tls-rustls` | TLS on rustls (ring) for every enabled networked driver |
-| `full` | every driver, plus `dynamic` |
-| `upwell` | the Upwell DI integration (in development) |
+| `migrations` | explicit SQL/Rust migrations, applied on every enabled SQLite, PostgreSQL and MySQL driver, native or sqlx ([guide](../../docs/migrations.md)) |
+| `migration-commands` | `migrations` plus operator commands (`rupa::migrate::commands`): typed commands, human/JSON reports, exit statuses, redaction ([guide](../../docs/migrations.md#operator-commands)) |
+| `migration-cli` | `migration-commands` plus the embeddable clap command line (`rupa::migrate::commands::cli`) |
+| `full` | every driver, plus `dynamic` and `migrations` |
+| `upwell` | the Upwell integration (`rupa::upwell`; in development) |
+| `upwell-database` | `upwell` and `migration-cli` plus `rupa::upwell::database!`: configured databases in an Upwell application, gated on their migrations, with `Arc<dyn Repository>` providers and migration commands ([guide](../../docs/migrations.md#upwell-applications)); Upwell is a pinned git dependency until it is released |

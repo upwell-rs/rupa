@@ -54,8 +54,8 @@ impl User {
     }
 }
 
-static USER_COLUMNS: [ColumnMeta; 7] = [
-    column_meta::<i64, ScalarCodec<i64>>("id", "id"),
+const USER_COLUMNS: [ColumnMeta; 7] = [
+    column_meta::<i64, ScalarCodec<i64>>("id", "id").primary_key(),
     column_meta::<String, ScalarCodec<String>>("email", "email"),
     column_meta::<Option<String>, ScalarCodec<Option<String>>>("nickname", "nickname"),
     column_meta::<bool, ScalarCodec<bool>>("active", "active"),
@@ -82,10 +82,7 @@ impl Entity for User {
     type Id = i64;
     const TABLE: TableRef = TableRef::with_schema("app", "users");
     const ID_COLUMNS: &'static [&'static str] = &["id"];
-
-    fn columns() -> &'static [ColumnMeta] {
-        &USER_COLUMNS
-    }
+    const COLUMNS: &'static [ColumnMeta] = &USER_COLUMNS;
 
     fn id(&self) -> &i64 {
         &self.id
@@ -104,33 +101,13 @@ impl Entity for User {
     }
 }
 
-/// What `#[derive(Entity)]` will emit for `col!` (kinds left to inference).
-pub struct UserFields {
-    pub email: rupa_core::__private::Probe<User, String>,
-    pub nickname: rupa_core::__private::Probe<User, Option<String>>,
-    pub prefs: rupa_core::__private::Probe<User, Prefs>,
-    pub old_prefs: rupa_core::__private::Probe<User, Option<Prefs>>,
-}
-
-impl User {
-    pub const fn __rupa_fields() -> UserFields {
-        use rupa_core::__private::Probe;
-        UserFields {
-            email: Probe::new("email"),
-            nickname: Probe::new("nickname"),
-            prefs: Probe::new("prefs"),
-            old_prefs: Probe::new("old_prefs"),
-        }
-    }
-}
-
 // Capabilities, written by hand.
 
 impl Gettable<User> for User {}
 
 impl Insertable<User> for User {
     fn insert_values(&self) -> Vec<(&'static str, Value)> {
-        User::columns()
+        User::COLUMNS
             .iter()
             .map(|c| c.name)
             .zip(self.to_values())

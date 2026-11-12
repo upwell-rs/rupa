@@ -1,5 +1,7 @@
 # Milestone 1: spike report, open decisions, design note
 
+> **Superseded (#39):** the derive no longer infers kinds with autoref specialization. It selects each field's encoding in a constant through associated-constant shadowing, and emits typed handle constants (`User::EMAIL`) and a constant `Entity::COLUMNS`. See `rupa-core/src/column/__private.rs`.
+
 Status: **implemented.** All open questions in section 5 were accepted as proposed (2026-10-03).
 License: `MIT OR Apache-2.0`. Releases: release-plz, with one `version_group` for all crates.
 

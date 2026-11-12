@@ -6,8 +6,9 @@ use rupa_core::Value;
 use rupa_core::column::ColumnMeta;
 use rupa_core::ir::{ColumnRef, FromClause, SourceId, TableRef};
 
+use crate::MemoryError;
 use crate::eval::Scope;
-use crate::{MemoryDb, MemoryError};
+use crate::store::Store;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Table {
@@ -80,7 +81,7 @@ pub(crate) type JoinedRow<'a> = Vec<Option<&'a Vec<Value>>>;
 pub(crate) struct Sources<'a>(pub(crate) Vec<&'a Table>);
 
 impl<'a> Sources<'a> {
-    pub(crate) fn new(db: &'a MemoryDb, from: &FromClause) -> Result<Self, MemoryError> {
+    pub(crate) fn new(db: &'a Store, from: &FromClause) -> Result<Self, MemoryError> {
         let tables = match from {
             FromClause::Table(t) => vec![db.table(*t)?],
             FromClause::Join { base, joins } => std::iter::once(*base)

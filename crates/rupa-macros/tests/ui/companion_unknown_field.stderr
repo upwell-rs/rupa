@@ -1,10 +1,12 @@
-error[E0609]: no field `mail` on type `__RupaFieldsUser`
+error[E0599]: no associated function or constant named `MAIL` found for struct `User` in the current scope
  --> tests/ui/companion_unknown_field.rs:7:33
   |
+4 | struct User { #[id(generated)] id: i64, email: String }
+  | ----------- associated function or constant `MAIL` not found for this struct
+5 | #[derive(Insertable)]
+  |          ---------- in this derive macro expansion
+6 | #[insertable(entity = User)]
 7 | struct NewUser { email: String, mail: String }
-  |                                 ^^^^ unknown field
+  |                                 ^^^^ associated function or constant not found in `User`
   |
-help: a field with a similar name exists
-  |
-7 | struct NewUser { email: String, email: String }
-  |                                 +
+  = note: this error originates in the derive macro `Insertable` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -6,7 +6,6 @@
 mod sqlite;
 
 use rupa::prelude::*;
-use rupa::{Executor, Pool};
 
 #[derive(Debug, Clone, PartialEq, Entity, Insertable)]
 #[entity(table = "authors")]
@@ -39,33 +38,34 @@ fn books_by(name: &str) -> Vec<BookWithAuthor>;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = sqlite::open("CREATE TABLE authors (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")?;
-    let mut conn = pool.get()?;
-    conn.run(raw().sql("CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER NOT NULL, title TEXT NOT NULL)").execute::<u64>())?;
-    conn.run(
-        insert::<Author>()
-            .values(&[
-                Author {
-                    id: 1,
-                    name: "Ada".into(),
-                },
-                Author {
-                    id: 2,
-                    name: "Grace".into(),
-                },
-            ])
-            .affected(),
-    )?;
-    conn.run(
-        insert::<Book>()
-            .value(&Book {
-                id: 10,
-                author_id: 1,
-                title: "Notes".into(),
-            })
-            .affected(),
-    )?;
+    raw().sql("CREATE TABLE books (id INTEGER PRIMARY KEY, author_id INTEGER NOT NULL, title TEXT NOT NULL)").execute::<u64>().execute(&pool)?;
+    insert::<Author>()
+        .values(&[
+            Author {
+                id: 1,
+                name: "Ada".into(),
+            },
+            Author {
+                id: 2,
+                name: "Grace".into(),
+            },
+        ])
+        .affected()
+        .execute(&pool)?;
+    insert::<Book>()
+        .value(&Book {
+            id: 10,
+            author_id: 1,
+            title: "Notes".into(),
+        })
+        .affected()
+        .execute(&pool)?;
 
-    let joined = conn.run(select::<Author>().join::<Book>().left().all())?;
+    let joined = select::<Author>()
+        .join::<Book>()
+        .left()
+        .all()
+        .execute(&pool)?;
     assert_eq!(joined.len(), 2);
     assert_eq!(
         joined[0].1.as_ref().map(|book| book.title.as_str()),
@@ -73,15 +73,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     assert!(joined[1].1.is_none());
 
-    let reverse = conn.run(
-        select::<Book>()
-            .join::<Author>()
-            .inner_via(Book::author())
-            .all(),
-    )?;
+    let reverse = select::<Book>()
+        .join::<Author>()
+        .inner_via(Book::author())
+        .all()
+        .execute(&pool)?;
     assert_eq!(reverse[0].1.name, "Ada");
 
-    let by_ada = conn.run(books_by("Ada"))?;
+    let by_ada = books_by("Ada").execute(&pool)?;
     assert_eq!(
         by_ada,
         [BookWithAuthor {
@@ -90,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }]
     );
 
-    let sql = rupa::sql::render_query(&books_by("Ada"), &rupa::core::Sqlite)?;
+    let sql = rupa::sql::render_query(&books_by("Ada"), &rupa::Sqlite)?;
     assert!(sql.sql.contains("JOIN"));
     assert!(!sql.sql.contains("'Ada'"));
     assert_eq!(sql.params.len(), 1);

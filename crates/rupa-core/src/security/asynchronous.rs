@@ -19,7 +19,7 @@ impl<T: AsyncExecutor> AsyncExecutor for SecureTx<T> {
     }
 
     fn execute(
-        &mut self,
+        &self,
         statement: &Statement,
         expect: Expect,
     ) -> impl Future<Output = Result<Outcome, T::Error>> + Send {
@@ -44,7 +44,7 @@ impl<T: AsyncTransactional> AsyncTransactional for SecureTx<T> {
         Self: 's;
 
     fn begin_with(
-        &mut self,
+        &self,
         options: TxOptions,
     ) -> impl Future<Output = Result<T::Tx<'_>, T::Error>> + Send {
         self.tx.begin_with(options)
@@ -56,7 +56,7 @@ pub trait AsyncSecureTransactional: AsyncTransactional {
     /// Opens a transaction with `context` applied; see
     /// [`SecureTransactional::begin_with_security`](crate::security::SecureTransactional::begin_with_security).
     fn begin_with_security(
-        &mut self,
+        &self,
         options: TxOptions,
         context: SecurityContext,
     ) -> impl Future<Output = Result<SecureTx<Self::Tx<'_>>, Self::Error>> + Send
@@ -72,7 +72,7 @@ pub trait AsyncSecureTransactional: AsyncTransactional {
     /// Async counterpart of
     /// [`SecureTransactional::try_begin_with_security`](crate::security::SecureTransactional::try_begin_with_security): checked at run time.
     fn try_begin_with_security(
-        &mut self,
+        &self,
         options: TxOptions,
         context: SecurityContext,
     ) -> impl Future<Output = Result<SecureTx<Self::Tx<'_>>, Self::Error>> + Send
@@ -92,7 +92,7 @@ impl<E: AsyncTransactional + ?Sized> AsyncSecureTransactional for E {}
 /// Applies `context` inside the freshly opened `tx`. On failure `tx` is
 /// dropped, which rolls it back.
 pub async fn apply_security<T: AsyncExecutor>(
-    mut tx: T,
+    tx: T,
     context: SecurityContext,
 ) -> Result<SecureTx<T>, T::Error> {
     if !context.is_empty() {

@@ -1,0 +1,23 @@
+error[E0277]: a `String` column cannot be indexed by `Gin`
+ --> tests/ui/index_kind_rejects_text.rs:7:36
+  |
+7 |     let _ = Gin::on("users_email", User::EMAIL);
+  |             -------                ^^^^^^^^^^^ not accepted by this index kind
+  |             |
+  |             required by a bound introduced by this call
+  |
+  = help: the trait `IndexableBy<Gin>` is not implemented for `String`
+  = note: implement `IndexableBy<Gin>` for the type if the kind can index it
+help: the trait `IndexableColumn<K, T>` is conditionally implemented for `rupa_core::Scalar`
+ --> src/schema/index/mod.rs
+  |
+  | impl<K: IndexKind, T: IndexableBy<K>> IndexableColumn<K, T> for Scalar {}
+  | ^^^^^^^^^^^^^^^^^^^^^^--------------^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |                       |
+  |                       unsatisfied requirement introduced here: `String: IndexableBy<Gin>`
+  = note: required for `rupa_core::Scalar` to implement `IndexableColumn<Gin, String>`
+note: required by a bound in `rupa_core::schema::IndexKind::on`
+ --> src/schema/index/mod.rs
+  |
+  |     fn on<E: Entity, T, C: IndexableColumn<Self, T>>(
+  |                            ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `IndexKind::on`

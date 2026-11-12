@@ -3,7 +3,7 @@
 //! Run: `cargo run -p rupa --example sqlite_config --features sqlite,dynamic`
 
 use rupa::prelude::*;
-use rupa::{AsyncExecutor, DbConfig, DynError};
+use rupa::{DbConfig, DynError};
 
 #[derive(Debug, Clone, Entity, Insertable)]
 #[entity(table = "notes")]
@@ -23,25 +23,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pollster::block_on(async {
         let config = DbConfig::new("sqlite::memory:");
         let db = rupa::connect(&config).await?;
-        let mut conn = db.get().await?;
-        conn.run(
-            raw()
-                .sql("CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
-                .execute::<u64>(),
-        )
-        .await?;
-        conn.run(
-            insert::<Note>()
-                .value(&Note {
-                    id: 1,
-                    title: "pooled".into(),
-                })
-                .affected(),
-        )
-        .await?;
-        drop(conn);
+        raw()
+            .sql("CREATE TABLE notes (id INTEGER PRIMARY KEY, title TEXT NOT NULL)")
+            .execute::<u64>()
+            .execute(&db)
+            .await?;
+        insert::<Note>()
+            .value(&Note {
+                id: 1,
+                title: "pooled".into(),
+            })
+            .affected()
+            .execute(&db)
+            .await?;
 
-        let notes = NotesView::new(&db);
+        let notes = NotesRepo::new(&db);
         let found = notes.by_id(1).await?.expect("note 1 exists");
         assert_eq!(found.title, "pooled");
         assert_eq!(db.status().max_size, 1);

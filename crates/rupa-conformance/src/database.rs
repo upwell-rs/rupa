@@ -8,19 +8,23 @@
 
 use std::sync::Arc;
 
-use rupa::core::error::TxError;
-use rupa::core::exec::AsyncExecutor;
-use rupa::core::tx::{AsyncTransaction, AsyncTransactional};
+use rupa::AsyncExecutor;
+use rupa::AsyncSecureTransactional;
+use rupa::TxError;
 use rupa::core::{Capability, Dialect};
 use rupa::prelude::*;
+use rupa::{AsyncTransaction, AsyncTransactional};
 use rupa::{BoxAsyncExecutor, Database, DynError, SecurityContext, TxOptions};
 
 use crate::{Harness, NewNote, Note};
 
 /// Runs DDL scripts statement by statement through a boxed executor.
-pub async fn run_script<E: AsyncExecutor>(e: &mut E, script: &'static str) {
+pub async fn run_script<E: AsyncExecutor>(e: &E, script: &'static str) {
     for statement in script.split(';').map(str::trim).filter(|s| !s.is_empty()) {
-        e.run(raw().sql(statement).execute::<u64>())
+        raw()
+            .sql(statement)
+            .execute::<u64>()
+            .execute(e)
             .await
             .unwrap_or_else(|err| panic!("DDL `{statement}` failed: {err}"));
     }
@@ -46,7 +50,7 @@ impl Harness for DatabaseHarness {
     type Exec = BoxAsyncExecutor;
 
     async fn reset(&mut self) {
-        run_script(&mut self.conn, self.ddl).await;
+        run_script(&self.conn, self.ddl).await;
     }
 
     fn exec(&mut self) -> &mut BoxAsyncExecutor {
@@ -56,7 +60,7 @@ impl Harness for DatabaseHarness {
 
 /// A dyn-compatible repository over the pool (`Arc<dyn Notes>`), as a DI
 /// container would hold it.
-#[rupa::repository(dynamic_dispatch)]
+#[rupa::repository]
 pub trait Notes: Send + Sync {
     #[query(insert)]
     async fn add(&self, note: &NewNote) -> Result<u64, DynError>;
@@ -77,7 +81,7 @@ pub async fn run_database(db: &Database, ddl: &'static str) {
         crate::run_transactions(&mut h).await;
     }
     run_pool_cases(async || {
-        run_script(&mut db.get().await.unwrap(), ddl).await;
+        run_script(&db.get().await.unwrap(), ddl).await;
         db.clone()
     })
     .await;
@@ -102,8 +106,8 @@ pub async fn run_pool_cases(mut fresh: impl AsyncFnMut() -> Database) {
     );
 }
 
-async fn add<E: AsyncExecutor>(e: &mut E, note: &NewNote) {
-    let n = e.run(insert::<Note>().value(note).affected()).await;
+async fn add<E: AsyncExecutor>(e: &E, note: &NewNote) {
+    let n = insert::<Note>().value(note).affected().execute(e).await;
     assert_eq!(n.unwrap(), 1);
 }
 
@@ -127,14 +131,14 @@ async fn titles(db: &Database) -> Vec<String> {
 
 /// Nested savepoints work on owned transactions too.
 async fn db_owned_tx_commits_and_rolls_back(db: &Database) {
-    let mut tx = db.begin().await.unwrap();
-    add(&mut tx, &note("kept")).await;
+    let tx = db.begin().await.unwrap();
+    add(&tx, &note("kept")).await;
     tx.commit().await.unwrap();
 
-    let mut tx = db.begin().await.unwrap();
-    add(&mut tx, &note("gone")).await;
-    let mut inner = tx.begin().await.unwrap();
-    add(&mut inner, &note("inner")).await;
+    let tx = db.begin().await.unwrap();
+    add(&tx, &note("gone")).await;
+    let inner = tx.begin().await.unwrap();
+    add(&inner, &note("inner")).await;
     inner.commit().await.unwrap();
     tx.rollback().await.unwrap();
 
@@ -145,11 +149,11 @@ async fn db_owned_tx_commits_and_rolls_back(db: &Database) {
 /// rollback, which must happen before anyone else uses it.
 async fn db_dropped_owned_tx_rolls_back_before_reuse(db: &Database) {
     {
-        let mut tx = db.begin().await.unwrap();
-        add(&mut tx, &note("gone")).await;
+        let tx = db.begin().await.unwrap();
+        add(&tx, &note("gone")).await;
     }
-    let mut tx = db.begin().await.unwrap();
-    add(&mut tx, &note("next")).await;
+    let tx = db.begin().await.unwrap();
+    add(&tx, &note("next")).await;
     tx.commit().await.unwrap();
     assert_eq!(titles(db).await, ["next"]);
 }

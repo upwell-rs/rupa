@@ -6,7 +6,6 @@
 mod sqlite;
 
 use rupa::prelude::*;
-use rupa::{Executor, Pool};
 
 #[derive(Debug, Clone, Entity, Insertable)]
 #[entity(table = "messages")]
@@ -30,24 +29,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = sqlite::open(
         "CREATE TABLE messages (id INTEGER PRIMARY KEY, body TEXT NOT NULL, read BOOLEAN NOT NULL)",
     )?;
-    pool.get()?.run(
-        insert::<Message>()
-            .values(&[
-                Message {
-                    id: 1,
-                    body: "hello".into(),
-                    read: false,
-                },
-                Message {
-                    id: 2,
-                    body: "bye".into(),
-                    read: true,
-                },
-            ])
-            .affected(),
-    )?;
+    insert::<Message>()
+        .values(&[
+            Message {
+                id: 1,
+                body: "hello".into(),
+                read: false,
+            },
+            Message {
+                id: 2,
+                body: "bye".into(),
+                read: true,
+            },
+        ])
+        .affected()
+        .execute(&pool)?;
 
-    let messages = MessagesView::new(&pool);
+    let messages = MessagesRepo::new(&pool);
     let first = messages.by_id(1)?.expect("message 1 exists");
     assert_eq!(first.body, "hello");
     assert_eq!(messages.with_read_state(true)?[0].id, 2);

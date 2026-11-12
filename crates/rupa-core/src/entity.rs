@@ -36,13 +36,12 @@ pub trait Entity: FromRow + 'static {
     const TABLE: TableRef;
     /// Id column names. A slice so that composite ids need no trait change.
     const ID_COLUMNS: &'static [&'static str];
-
     /// All columns, in the order used for projection, `to_values` and `from_row`.
-    fn columns() -> &'static [ColumnMeta];
+    const COLUMNS: &'static [ColumnMeta];
 
     /// This entity's id.
     fn id(&self) -> &Self::Id;
 
-    /// Field values in `columns()` order.
+    /// Field values in `COLUMNS` order.
     fn to_values(&self) -> Vec<Value>;
 }

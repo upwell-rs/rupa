@@ -29,15 +29,12 @@ pub(crate) fn count_param(n: u64) -> ExprNode {
 // SELECT
 // ---------------------------------------------------------------------------
 
-/// Starts a select of `E` rows (every column, in `E::columns()` order).
+/// Starts a select of `E` rows (every column, in `E::COLUMNS` order).
 pub fn select<E: Entity>() -> SelectBuilder<E> {
     SelectBuilder {
         select: Select {
             from: FromClause::Table(E::TABLE),
-            projection: E::columns()
-                .iter()
-                .map(|c| ColumnRef::new(c.name))
-                .collect(),
+            projection: E::COLUMNS.iter().map(|c| ColumnRef::new(c.name)).collect(),
             filter: None,
             order_by: Vec::new(),
             limit: None,
@@ -242,12 +239,7 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
     /// Returns the inserted rows as `E`, including database-generated values.
     /// Requires a dialect with `RETURNING`; others fail when rendered.
     pub fn returning<R: RowsResult<Item = E>>(mut self) -> Query<R> {
-        self.insert.returning = Some(
-            E::columns()
-                .iter()
-                .map(|c| ColumnRef::new(c.name))
-                .collect(),
-        );
+        self.insert.returning = Some(E::COLUMNS.iter().map(|c| ColumnRef::new(c.name)).collect());
         Query::new(Statement::Insert(self.insert), R::EXPECT)
     }
 

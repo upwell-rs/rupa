@@ -18,8 +18,9 @@ use postgres::{NoTls, Socket};
 use rupa_core::Postgres;
 use rupa_core::config::{DbConfig, PoolConfig};
 use rupa_core::error::{ConnectError, DynError};
+use rupa_core::exec::Immediate;
 use rupa_core::pool::r2d2 as glue;
-use rupa_core::pool::{OwnedTx, Pooled};
+use rupa_core::pool::{Connect, OwnedTx, Pooled, SyncConnect};
 use rupa_core::tx::TxConnection;
 
 use crate::{PgError, PgExecutor};
@@ -27,7 +28,7 @@ use crate::{PgError, PgExecutor};
 /// A connection checked out of a [`PgPool`].
 pub type PgConn = Pooled<r2d2::PooledConnection<PgManager>>;
 
-/// A transaction that owns its pooled connection (see [`Pool::begin`](rupa_core::pool::Pool::begin)).
+/// A transaction that owns its pooled connection (what `begin` on the pool returns).
 pub type PgPoolTx = OwnedTx<PgConn>;
 
 type ConnectFn =
@@ -104,7 +105,9 @@ impl r2d2::ManageConnection for PgManager {
     }
 
     fn has_broken(&self, conn: &mut PgExecutor) -> bool {
-        conn.client().is_closed() || (conn.is_dirty() && conn.clean().is_err())
+        conn.client().is_closed()
+            || holds_migration_state(conn)
+            || (conn.is_dirty() && conn.clean().is_err())
     }
 }
 
@@ -129,14 +132,50 @@ impl PgPool {
     /// Builds a pool for a `postgres:` URL with the config's
     /// [`PostgresOptions`](rupa_core::config::PostgresOptions), without TLS.
     pub fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
-        let (pg, statement_cache_size) = rupa_driver_tokio_postgres::shared::pg_config(config)?;
-        let pg = postgres::Config::from(pg);
-        #[cfg(feature = "tls-rustls")]
-        let manager = PgManager::with_tls(pg, rupa_driver_tokio_postgres::shared::rustls()?);
-        #[cfg(not(feature = "tls-rustls"))]
-        let manager = PgManager::new(pg);
-        let manager = manager.statement_cache_size(statement_cache_size);
-
-        Self::new(manager, &config.pool).map_err(|e| ConnectError::Connect(DynError::new(e)))
+        Self::new(manager(config)?, &config.pool)
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
     }
+}
+
+impl Connect for PgPool {
+    type Completion = Immediate;
+    type Connection = PgExecutor;
+}
+
+impl SyncConnect for PgPool {
+    fn connect(config: &DbConfig) -> Result<Self, ConnectError> {
+        Self::connect(config)
+    }
+
+    fn connect_one(config: &DbConfig) -> Result<PgExecutor, ConnectError> {
+        r2d2::ManageConnection::connect(&manager(config)?)
+            .map_err(|e| ConnectError::Connect(DynError::new(e)))
+    }
+}
+
+/// The connection manager `config` describes.
+fn manager(config: &DbConfig) -> Result<PgManager, ConnectError> {
+    let (pg, statement_cache_size) = rupa_driver_tokio_postgres::shared::pg_config(config)?;
+    let pg = postgres::Config::from(pg);
+    #[cfg(feature = "tls-rustls")]
+    let manager = PgManager::with_tls(pg, rupa_driver_tokio_postgres::shared::rustls()?);
+    #[cfg(not(feature = "tls-rustls"))]
+    let manager = PgManager::new(pg);
+
+    Ok(manager.statement_cache_size(statement_cache_size))
+}
+
+/// Whether a migration run left state on `conn`, so the pool must discard it
+/// instead of handing it out again.
+fn holds_migration_state(conn: &PgExecutor) -> bool {
+    #[cfg(feature = "migrations")]
+    let active = conn.migration.is_active();
+    #[cfg(not(feature = "migrations"))]
+    let active = {
+        let _ = conn;
+
+        false
+    };
+
+    active
 }

@@ -138,6 +138,10 @@ pub enum TxError {
     /// transaction; nested transactions are savepoints.
     #[error("transaction options (isolation, read-only) cannot be set on a nested transaction")]
     OptionsOnNested,
+    /// A transaction or savepoint is already open at this depth on the
+    /// connection; open a nested one on the innermost transaction instead.
+    #[error("a transaction is already open at this depth; nest inside the innermost one")]
+    AlreadyOpen,
     /// The dialect lacks a capability the transaction needs, e.g.
     /// `NativeRls` for `try_begin_with_security`.
     #[error("dialect {dialect:?} does not support {capability:?}")]

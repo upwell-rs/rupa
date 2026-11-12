@@ -1,0 +1,5 @@
+error: a repository query method takes `&self`; the repository holds its connection
+  --> tests/ui/repo_mut_receiver.rs:11:5
+   |
+11 |     fn a(&mut self, id: i64) -> Result<Option<User>, DynError>;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

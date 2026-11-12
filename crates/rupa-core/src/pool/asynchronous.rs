@@ -3,92 +3,60 @@
 
 use std::fmt;
 use std::future::Future;
-use std::ops::DerefMut;
+use std::ops::Deref;
 use std::sync::Arc;
 
-use super::{ConnError, Pool, PoolStatus, Pooled};
-use crate::dialect::{Supports, caps};
-use crate::exec::{AsyncExecutor, Blocking, Executor, Outcome};
+use super::{Pool, PoolStatus, Pooled};
+use crate::error::TxError;
+use crate::exec::{AsyncExecutor, Blocking, Outcome};
 use crate::ir::{Statement, TxStatement};
 use crate::query::Expect;
-use crate::repo::AcquireAsync;
-use crate::security::{SecureTx, SecurityContext, apply_security};
-use crate::tx::{AsyncTx, AsyncTxConnection, TxOptions};
+use crate::tx::{AsyncTransactional, AsyncTx, AsyncTxConnection, TxOptions, TxSlot};
 
-/// An async transaction that owns its pooled connection; see
-/// [`AsyncPool::begin`].
+/// An async transaction that owns its pooled connection; what `begin` on an
+/// [`AsyncPool`] returns.
 pub type OwnedAsyncTx<C> = AsyncTx<Box<C>>;
 
-type AsyncConnError<C> = <C as AsyncExecutor>::Error;
-
-/// A pool of async connections; see [`Pool`].
-pub trait AsyncPool: Send + Sync + 'static {
+/// A pool of async connections; see [`Pool`]. It is an async executor
+/// itself, implemented with [`pool_executor!`](crate::pool_executor).
+pub trait AsyncPool: AsyncTransactional<Error: From<TxError>> + 'static {
     /// A pooled connection; usually [`Pooled`]`<the pool's guard>`.
-    type Conn: AsyncTxConnection + 'static;
-
-    /// The connections' dialect.
-    fn dialect(&self) -> &<Self::Conn as AsyncExecutor>::Dialect;
+    type Conn: AsyncTxConnection<Dialect = Self::Dialect, Error = Self::Error>
+        + AsyncTransactional
+        + 'static;
 
     /// Checks a connection out, waiting up to the pool's acquire timeout.
-    fn get(&self) -> impl Future<Output = Result<Self::Conn, AsyncConnError<Self::Conn>>> + Send;
+    fn get(&self) -> impl Future<Output = Result<Self::Conn, Self::Error>> + Send;
 
     /// The pool's current occupancy.
     fn status(&self) -> PoolStatus;
-
-    /// Opens a transaction on a pooled connection it owns. The connection
-    /// returns to the pool when the transaction ends or is dropped (dirty, if
-    /// it was dropped while open; the pool cleans it).
-    fn begin_with(
-        &self,
-        options: TxOptions,
-    ) -> impl Future<Output = Result<OwnedAsyncTx<Self::Conn>, AsyncConnError<Self::Conn>>> + Send
-    {
-        async move { AsyncTx::begin(Box::new(self.get().await?), options).await }
-    }
-
-    /// [`begin_with`](Self::begin_with) default options.
-    fn begin(
-        &self,
-    ) -> impl Future<Output = Result<OwnedAsyncTx<Self::Conn>, AsyncConnError<Self::Conn>>> + Send
-    {
-        self.begin_with(TxOptions::default())
-    }
-
-    /// Opens an owned transaction with `context` applied (see
-    /// [`crate::security`]). Only compiles for dialects with native
-    /// row-level security.
-    fn begin_with_security(
-        &self,
-        options: TxOptions,
-        context: SecurityContext,
-    ) -> impl Future<Output = Result<SecureTx<OwnedAsyncTx<Self::Conn>>, AsyncConnError<Self::Conn>>>
-    + Send
-    where
-        <Self::Conn as AsyncExecutor>::Dialect: Supports<caps::NativeRls>,
-    {
-        async move { apply_security(self.begin_with(options).await?, context).await }
-    }
 }
 
-impl<P: AsyncPool> AcquireAsync for P {
-    type Dialect = <P::Conn as AsyncExecutor>::Dialect;
-    type Error = AsyncConnError<P::Conn>;
-    type Conn<'a> = P::Conn;
+/// Runs `statement` on a connection checked out of `pool`. Not public API.
+#[doc(hidden)]
+pub async fn execute_async<P: AsyncPool>(
+    pool: &P,
+    statement: &Statement,
+    expect: Expect,
+) -> Result<Outcome, P::Error> {
+    pool.get().await?.execute(statement, expect).await
+}
 
-    fn acquire(&self) -> impl Future<Output = Result<P::Conn, Self::Error>> + Send {
-        self.get()
-    }
+/// Opens a transaction that owns a connection checked out of `pool`. Not
+/// public API.
+#[doc(hidden)]
+pub async fn begin_async<P: AsyncPool>(
+    pool: &P,
+    options: TxOptions,
+) -> Result<OwnedAsyncTx<P::Conn>, P::Error> {
+    AsyncTx::begin(Box::new(pool.get().await?), options).await
 }
 
 /// A sync pool used from async code; see the [module docs](crate::pool).
 impl<P: Pool> AsyncPool for Blocking<P> {
     type Conn = Blocking<P::Conn>;
 
-    fn dialect(&self) -> &<P::Conn as Executor>::Dialect {
-        self.0.dialect()
-    }
-
-    fn get(&self) -> impl Future<Output = Result<Blocking<P::Conn>, ConnError<P::Conn>>> + Send {
+    fn get(&self) -> impl Future<Output = Result<Blocking<P::Conn>, P::Error>> + Send {
         std::future::ready(self.0.get().map(Blocking))
     }
 
@@ -97,7 +65,7 @@ impl<P: Pool> AsyncPool for Blocking<P> {
     }
 }
 
-impl<G: DerefMut<Target: AsyncExecutor> + Send> AsyncExecutor for Pooled<G> {
+impl<G: Deref<Target: AsyncExecutor> + Send + Sync> AsyncExecutor for Pooled<G> {
     type Dialect = <G::Target as AsyncExecutor>::Dialect;
     type Error = <G::Target as AsyncExecutor>::Error;
 
@@ -106,7 +74,7 @@ impl<G: DerefMut<Target: AsyncExecutor> + Send> AsyncExecutor for Pooled<G> {
     }
 
     fn execute(
-        &mut self,
+        &self,
         statement: &Statement,
         expect: Expect,
     ) -> impl Future<Output = Result<Outcome, Self::Error>> + Send {
@@ -114,15 +82,15 @@ impl<G: DerefMut<Target: AsyncExecutor> + Send> AsyncExecutor for Pooled<G> {
     }
 }
 
-impl<G: DerefMut<Target: AsyncTxConnection> + Send> AsyncTxConnection for Pooled<G> {
+impl<G: Deref<Target: AsyncTxConnection> + Send + Sync> AsyncTxConnection for Pooled<G> {
     fn control(
-        &mut self,
+        &self,
         statement: TxStatement,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.0.control(statement)
     }
 
-    fn defer_rollback(&mut self, depth: u32) {
+    fn defer_rollback(&self, depth: u32) {
         self.0.defer_rollback(depth);
     }
 
@@ -130,17 +98,36 @@ impl<G: DerefMut<Target: AsyncTxConnection> + Send> AsyncTxConnection for Pooled
         self.0.is_dirty()
     }
 
-    fn clean(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+    fn clean(&self) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.0.clean()
+    }
+
+    fn slot(&self) -> &TxSlot {
+        self.0.slot()
+    }
+}
+
+impl<G: Deref<Target: AsyncTxConnection> + Send + Sync> AsyncTransactional for Pooled<G> {
+    type Tx<'t>
+        = AsyncTx<&'t Self>
+    where
+        Self: 't;
+
+    fn begin_with(
+        &self,
+        options: TxOptions,
+    ) -> impl Future<Output = Result<AsyncTx<&Self>, Self::Error>> + Send {
+        AsyncTx::begin(self, options)
     }
 }
 
 /// One async connection as an [`AsyncPool`] of size one: `get` waits until
 /// the previous user dropped it.
 ///
-/// For backends where a pool makes no sense (the in-memory database) or for
-/// tests. Unlike [`SharedAsync`](crate::repo::SharedAsync), connections are
-/// owned, so it supports owned transactions and [`Database`](crate::registry::Database).
+/// For backends where a pool makes no sense (the in-memory database), for
+/// tests, or to share one connection that has no `&self` API of its own: a
+/// transaction holds the connection until it ends, so nothing else runs
+/// inside it.
 pub struct SingleConnection<E: AsyncExecutor> {
     conn: Arc<futures_util::lock::Mutex<E>>,
     dialect: E::Dialect,
@@ -168,19 +155,21 @@ impl<E: AsyncExecutor> fmt::Debug for SingleConnection<E> {
     }
 }
 
+crate::pool_executor!(
+    async,
+    [E: AsyncTxConnection + Sync + 'static]
+    SingleConnection<E>,
+    |pool| &pool.dialect
+);
+
 impl<E> AsyncPool for SingleConnection<E>
 where
-    E: AsyncTxConnection + 'static,
-    E::Dialect: Clone,
+    E: AsyncTxConnection + Sync + 'static,
 {
     type Conn = Pooled<futures_util::lock::OwnedMutexGuard<E>>;
 
-    fn dialect(&self) -> &E::Dialect {
-        &self.dialect
-    }
-
     async fn get(&self) -> Result<Self::Conn, E::Error> {
-        let mut conn = self.conn.clone().lock_owned().await;
+        let conn = self.conn.clone().lock_owned().await;
         conn.clean().await?;
         Ok(Pooled(conn))
     }

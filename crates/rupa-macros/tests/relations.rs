@@ -1,6 +1,6 @@
 //! `#[column(references = ..)]`: the `ON` conditions that inferred joins render.
 
-use rupa::core::Postgres;
+use rupa::Postgres;
 use rupa::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Entity)]
@@ -92,9 +92,7 @@ fn a_self_reference_needs_its_relation_and_direction() {
     // reports), so even `via` is ambiguous: the condition is written out.
     let q = select::<User>()
         .left_join_on::<User>(|(employee, manager)| {
-            manager
-                .col(col!(User::id))
-                .eq(employee.col(col!(User::manager_id)))
+            manager.col(User::ID).eq(employee.col(User::MANAGER_ID))
         })
         .all();
     assert!(from(&q).ends_with(r#"ON "t1"."id" = "t0"."manager_id""#));
@@ -216,5 +214,33 @@ fn self_joins() {
         sql(&reporting()).starts_with(r#"SELECT "t0"."id", "t1"."id" FROM"#),
         "{}",
         sql(&reporting())
+    );
+}
+
+/// Schema facts are constants: usable in `const` items, not only at run time.
+const ORDER_COLUMNS: &[rupa::core::ColumnMeta] = <Order as rupa::Entity>::COLUMNS;
+
+#[test]
+fn references_are_recorded_in_column_metadata() {
+    let reference = |name: &str| {
+        ORDER_COLUMNS
+            .iter()
+            .find(|c| c.name == name)
+            .expect("an order column")
+            .references
+    };
+    let users = rupa::Reference {
+        table: rupa::core::ir::TableRef::new("users"),
+        columns: &["id"],
+    };
+
+    assert_eq!(reference("user_id"), Some(users));
+    assert_eq!(reference("reviewer"), Some(users));
+    assert_eq!(reference("id"), None);
+    assert!(
+        <User as rupa::Entity>::COLUMNS
+            .iter()
+            .any(|c| c.name == "manager_id" && c.references == Some(users)),
+        "a self-reference resolves to the entity's own table"
     );
 }

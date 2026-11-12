@@ -8,7 +8,7 @@ lowering per dialect and an `eval` for the memory backend.
 ## Usage
 
 `rupa::dsl::ilike(email, $pattern)` in `#[query(filter = ..)]`, or
-`rupa::dsl::ilike(col!(User::email), "a%")` with the builder.
+`rupa::dsl::ilike(User::EMAIL, "a%")` with the builder.
 
 ## Internal role
 

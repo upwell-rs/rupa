@@ -3,6 +3,9 @@ rupa_sql::driver_error! {
     pub enum SqlxError {
         /// sqlx (or the database) reported an error.
         Db(sqlx::Error),
+        /// A migration connection was used outside a runner-owned migration body.
+        #[cfg(feature = "migrations")]
+        Migration(rupa_migrate::StateError),
     }
 }
 

@@ -1,10 +1,10 @@
 //! Async RUPA executor on [`tokio_postgres`].
 //!
 //! - [`PgExecutor`] wraps one `tokio_postgres::Client`.
-//! - With the `pool` feature, [`PgPool`] pools them (on `deadpool`).
+//! - With the `pool` feature, `PgPool` pools them (on `deadpool`).
 //! - With the `dynamic` feature, `PgDriver` registers the driver for
 //!   `postgres:` URLs (see `rupa_core::registry`).
-//! - With `tls-rustls`, [`PgPool::connect`] negotiates TLS on rustls as the
+//! - With `tls-rustls`, `PgPool::connect` negotiates TLS on rustls as the
 //!   URL's `sslmode` asks.
 //!
 //! # Performance
@@ -19,32 +19,39 @@
 //!
 //! # Transactions
 //!
-//! [`PgExecutor`] is an [`AsyncTxConnection`], so it is
-//! [`AsyncTransactional`](rupa_core::tx::AsyncTransactional): `begin` returns
-//! a [`PgTx`], itself an executor, and `begin` on a `PgTx` opens a savepoint.
+//! [`PgExecutor`] is an [`AsyncTxConnection`] and [`AsyncTransactional`]:
+//! `begin` returns a [`PgTx`], itself an executor, and `begin` on a `PgTx` opens a savepoint.
 //! Rust has no async `Drop`, so a `PgTx` dropped without `commit`/`rollback`
 //! cannot roll back on the spot. Instead it marks the executor dirty, and the
-//! rollback is sent before the connection's next statement; [`PgPool`] also
+//! rollback is sent before the connection's next statement; `PgPool` also
 //! cleans dirty connections when they are returned.
 
 #![warn(missing_docs)]
 
 #[cfg(feature = "dynamic")]
 mod driver;
+#[cfg(feature = "migrations")]
+mod migration_session;
 #[cfg(feature = "pool")]
 pub mod pool;
+#[cfg(feature = "migration-protocol")]
+#[doc(hidden)]
+pub mod protocol;
 #[doc(hidden)]
 pub mod shared;
 
 use futures_util::{StreamExt, TryStreamExt, pin_mut};
 use postgres_types::ToSql;
+use std::future::Future;
 use std::sync::Arc;
 
 use rupa_core::Postgres;
-use rupa_core::exec::{AsyncExecutor, Outcome};
+use rupa_core::exec::{AsyncExecutor, Awaited, Engine, Outcome};
 use rupa_core::ir::{Statement, TxStatement};
 use rupa_core::query::Expect;
-use rupa_core::tx::{AsyncTx, AsyncTxConnection, PendingRollback};
+use rupa_core::tx::{
+    AsyncTransactional, AsyncTx, AsyncTxConnection, PendingRollback, TxOptions, TxSlot,
+};
 
 #[cfg(feature = "dynamic")]
 pub use driver::PgDriver;
@@ -55,14 +62,19 @@ pub use shared::{PgError, STATEMENT_CACHE_CAPACITY, StatementCache};
 
 /// A transaction (or savepoint) on a [`PgExecutor`]. Dropped while open, it
 /// leaves the rollback to the executor (see the crate docs).
-pub type PgTx<'t> = AsyncTx<&'t mut PgExecutor>;
+pub type PgTx<'t> = AsyncTx<&'t PgExecutor>;
 
-/// Executes queries on a `tokio_postgres::Client`.
+/// Executes queries on a `tokio_postgres::Client`. The client pipelines
+/// concurrent statements itself, so the executor, and a transaction on it,
+/// is shared by reference without a lock.
 pub struct PgExecutor {
     client: tokio_postgres::Client,
     dialect: Postgres,
     pending: PendingRollback,
+    slot: TxSlot,
     statements: StatementCache,
+    #[cfg(feature = "migrations")]
+    migration: rupa_migrate::protocol::postgres::State,
 }
 
 impl PgExecutor {
@@ -73,13 +85,16 @@ impl PgExecutor {
             client,
             dialect: Postgres,
             pending: PendingRollback::default(),
+            slot: TxSlot::default(),
             statements: StatementCache::default(),
+            #[cfg(feature = "migrations")]
+            migration: rupa_migrate::protocol::postgres::State::default(),
         }
     }
 
     /// Keeps at most `capacity` prepared statements (`0`: prepare every
     /// query anew).
-    pub fn with_statement_cache_size(mut self, capacity: usize) -> Self {
+    pub fn with_statement_cache_size(self, capacity: usize) -> Self {
         self.statements.set_capacity(capacity);
         self
     }
@@ -97,12 +112,12 @@ impl PgExecutor {
 
     /// The prepared-statement cache, e.g. to clear it after changing the
     /// schema through [`client`](Self::client).
-    pub fn statement_cache(&mut self) -> &mut StatementCache {
-        &mut self.statements
+    pub fn statement_cache(&self) -> &StatementCache {
+        &self.statements
     }
 
     /// The prepared statement for `sql`, from the cache or prepared now.
-    async fn prepare(&mut self, sql: &Arc<str>) -> Result<tokio_postgres::Statement, PgError> {
+    async fn prepare(&self, sql: &Arc<str>) -> Result<tokio_postgres::Statement, PgError> {
         if let Some(statement) = self.statements.get(sql) {
             return Ok(statement);
         }
@@ -116,7 +131,7 @@ impl PgExecutor {
     /// SQL text: a repeated query skips both rendering and parsing.
     ///
     /// The statement may be stale; prepare it afresh next time.
-    async fn run(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
+    async fn dispatch(&self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
         self.clean().await?;
         let rendered = rupa_sql::render_cached(statement, &self.dialect)?;
         let prepared = self.prepare(&rendered.sql).await?;
@@ -165,6 +180,10 @@ impl std::fmt::Debug for PgExecutor {
     }
 }
 
+impl Engine for PgExecutor {
+    type Completion = Awaited;
+}
+
 impl AsyncExecutor for PgExecutor {
     type Dialect = Postgres;
     type Error = PgError;
@@ -173,19 +192,22 @@ impl AsyncExecutor for PgExecutor {
         &self.dialect
     }
 
-    async fn execute(&mut self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
-        self.run(statement, expect).await
+    async fn execute(&self, statement: &Statement, expect: Expect) -> Result<Outcome, PgError> {
+        #[cfg(feature = "migrations")]
+        self.migration.outside_run()?;
+
+        self.dispatch(statement, expect).await
     }
 }
 
 impl AsyncTxConnection for PgExecutor {
-    async fn control(&mut self, statement: TxStatement) -> Result<(), PgError> {
+    async fn control(&self, statement: TxStatement) -> Result<(), PgError> {
         self.clean().await?;
         let sql = rupa_sql::render_tx(&statement, &self.dialect)?;
         Ok(self.client.batch_execute(&sql).await?)
     }
 
-    fn defer_rollback(&mut self, depth: u32) {
+    fn defer_rollback(&self, depth: u32) {
         self.pending.defer(depth);
     }
 
@@ -193,14 +215,29 @@ impl AsyncTxConnection for PgExecutor {
         self.pending.is_pending()
     }
 
-    async fn clean(&mut self) -> Result<(), PgError> {
+    async fn clean(&self) -> Result<(), PgError> {
         if let Some(statement) = self.pending.statement() {
             self.client
                 .batch_execute(&rupa_sql::render_tx(&statement, &self.dialect)?)
                 .await?;
-            self.pending.clear();
+            self.pending.clear(statement);
         }
 
         Ok(())
+    }
+
+    fn slot(&self) -> &TxSlot {
+        &self.slot
+    }
+}
+
+impl AsyncTransactional for PgExecutor {
+    type Tx<'t> = PgTx<'t>;
+
+    fn begin_with(
+        &self,
+        options: TxOptions,
+    ) -> impl Future<Output = Result<PgTx<'_>, PgError>> + Send {
+        AsyncTx::begin(self, options)
     }
 }

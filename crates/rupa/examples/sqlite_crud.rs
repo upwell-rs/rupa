@@ -8,45 +8,44 @@ mod sqlite;
 mod task;
 
 use rupa::prelude::*;
-use rupa::{Executor, Pool};
 use task::{NewTask, Task, TaskPatch};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = sqlite::open(task::SCHEMA)?;
-    let mut conn = pool.get()?;
-    let task = conn.run(
-        insert::<Task>()
-            .value(&NewTask {
-                title: "write examples".into(),
-                done: false,
-            })
-            .returning_one(),
-    )?;
-    assert_eq!(conn.run(get::<Task>(&task.id))?, Some(task.clone()));
+    let task = insert::<Task>()
+        .value(&NewTask {
+            title: "write examples".into(),
+            done: false,
+        })
+        .returning_one()
+        .execute(&pool)?;
+    assert_eq!(get::<Task>(&task.id).execute(&pool)?, Some(task.clone()));
 
-    conn.run(
-        update::<Task>()
-            .one(&TaskPatch {
-                id: task.id,
-                done: Some(true),
-            })
-            .affected(),
-    )?;
+    update::<Task>()
+        .one(&TaskPatch {
+            id: task.id,
+            done: Some(true),
+        })
+        .affected()
+        .execute(&pool)?;
     assert_eq!(
-        conn.run(select::<Task>().filter(col!(Task::done).eq(true)).all())?
+        select::<Task>()
+            .filter(Task::DONE.eq(true))
+            .all()
+            .execute(&pool)?
             .len(),
         1
     );
 
     {
-        let mut tx = conn.begin()?;
-        tx.run(delete::<Task>().by_id(&task.id).affected())?;
+        let tx = pool.begin()?;
+        delete::<Task>().by_id(&task.id).affected().execute(&tx)?;
     }
-    assert!(conn.run(get::<Task>(&task.id))?.is_some());
+    assert!(get::<Task>(&task.id).execute(&pool)?.is_some());
 
-    let removed = conn.transaction(|tx| tx.run(delete::<Task>().by_id(&task.id).affected()))?;
+    let removed = pool.transaction(|tx| delete::<Task>().by_id(&task.id).affected().execute(tx))?;
     assert_eq!(removed, 1);
-    assert!(conn.run(get::<Task>(&task.id))?.is_none());
+    assert!(get::<Task>(&task.id).execute(&pool)?.is_none());
 
     println!("insert, get, filter, patch, rollback, commit and delete passed");
     Ok(())

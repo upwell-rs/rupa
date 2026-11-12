@@ -23,7 +23,7 @@ The `execute` and `postgres` groups compare one lookup through each layer,
 so the difference between two rows is the overhead of one layer:
 
 - `executor`: the driver's executor, statically dispatched;
-- `repo_shared`: an `Arc<dyn Users>` repository over `Repo::shared`;
+- `repo_shared`: an `Arc<dyn Users>` repository over one shared executor;
 - `repo_database`: the same repository over a pooled, type-erased
   `Database` (what `rupa::connect` returns);
 - `raw_client` (Postgres only): tokio-postgres with a prepared statement.

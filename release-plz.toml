@@ -32,3 +32,9 @@ version_group = "rupa"
 [[package]]
 name = "rupa-driver-memory"
 version_group = "rupa"
+[[package]]
+name = "rupa-migrate"
+version_group = "rupa"
+[[package]]
+name = "rupa-build"
+version_group = "rupa"

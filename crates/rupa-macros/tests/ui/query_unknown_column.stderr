@@ -1,11 +1,10 @@
-error[E0609]: no field `emial` on type `__RupaFieldsUser`
+error[E0599]: no associated function or constant named `EMIAL` found for struct `User` in the current scope
  --> tests/ui/query_unknown_column.rs:8:18
   |
+4 | pub struct User { #[id] id: i64, email: String, prefs: Prefs }
+  | --------------- associated function or constant `EMIAL` not found for this struct
+...
 8 | #[query(filter = emial == $email)]
-  |                  ^^^^^ unknown field
+  |                  ^^^^^ associated function or constant not found in `User`
   |
-help: a field with a similar name exists
-  |
-8 - #[query(filter = emial == $email)]
-8 + #[query(filter = email == $email)]
-  |
+  = note: this error originates in the attribute macro `query` (in Nightly builds, run with -Z macro-backtrace for more info)
