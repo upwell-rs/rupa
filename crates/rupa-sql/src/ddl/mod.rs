@@ -7,18 +7,23 @@
 //!
 //! Checks that need column types or names are made where the operation
 //! carries them: `CREATE TABLE`, `ADD COLUMN` and `CREATE INDEX`, whose
-//! columns and kind are typed. A foreign key into an existing table names
-//! columns without types, so an unknown column is rejected by the server.
+//! columns and kind are typed. Expressions (index parts and predicates) are
+//! written in DDL mode: no bound parameters, checked literals, and only what
+//! a schema object may hold ([`ExprRefusal`]). A foreign key into an existing
+//! table names columns without types, so an unknown column is rejected by the
+//! server.
 
 mod error;
+mod expr;
 mod index;
+pub(crate) mod literal;
 mod types;
 
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{ColumnDef, ForeignKey, ReferentialAction, SchemaOp, Table};
 use rupa_core::{Dialect, DialectId, Generated};
 
-pub use error::{IndexRefusal, SchemaError};
+pub use error::{ExprRefusal, IndexRefusal, SchemaError};
 
 use crate::writer::Syntax;
 use crate::{RenderError, syntax_for};
@@ -26,6 +31,7 @@ use crate::{RenderError, syntax_for};
 /// Renders `op` for `dialect` as one statement, without a trailing `;`.
 pub fn render_schema(op: &SchemaOp, dialect: &dyn Dialect) -> Result<String, RenderError> {
     let mut ddl = Ddl {
+        target: dialect,
         dialect: dialect.id(),
         syntax: syntax_for(dialect)?,
         sql: String::new(),
@@ -37,14 +43,15 @@ pub fn render_schema(op: &SchemaOp, dialect: &dyn Dialect) -> Result<String, Ren
 }
 
 /// One statement being written.
-struct Ddl {
+struct Ddl<'a> {
+    target: &'a dyn Dialect,
     dialect: DialectId,
     syntax: &'static dyn Syntax,
     sql: String,
 }
 
-impl Ddl {
-    fn op(&mut self, op: &SchemaOp) -> Result<(), SchemaError> {
+impl Ddl<'_> {
+    fn op(&mut self, op: &SchemaOp) -> Result<(), RenderError> {
         match op {
             SchemaOp::CreateTable(table) => self.create_table(table)?,
             SchemaOp::DropTable(table) => {

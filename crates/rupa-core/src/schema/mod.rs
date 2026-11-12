@@ -15,6 +15,7 @@
 
 mod build;
 mod column_kind;
+mod expr;
 mod index;
 
 use crate::column::Generated;
@@ -24,9 +25,11 @@ use crate::value::{SqlType, Value};
 pub use crate::column::Reference;
 pub use build::column;
 pub use column_kind::{ColumnKind, ColumnSpec, TypeSupport};
+pub use expr::DdlExpr;
 pub use index::{
-    BTree, Gin, Gist, Hash, Index, IndexBuilder, IndexColumn, IndexKind, IndexMethod, IndexSupport,
-    IndexableBy, IndexableColumn, JsonIndexKind,
+    BTree, ExprResult, Gin, Gist, Hash, Index, IndexBuilder, IndexColumn, IndexExpr, IndexKind,
+    IndexMethod, IndexPart, IndexSupport, IndexableBy, IndexableColumn, IndexableExpr,
+    JsonIndexKind,
 };
 
 /// One schema change. Deliberately exhaustive: a new operation must break

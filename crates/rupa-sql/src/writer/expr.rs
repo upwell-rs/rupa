@@ -129,7 +129,7 @@ impl Writer<'_> {
 
         match node {
             ExprNode::Column(c) => self.column(*c)?,
-            ExprNode::Param(v) => self.param(v),
+            ExprNode::Param(v) => self.value(v)?,
             ExprNode::Unary(UnOp::Not, e) => {
                 self.sql.push_str("NOT ");
                 self.expr(e, prec::ABOVE_CMP)?;
@@ -198,6 +198,8 @@ impl Writer<'_> {
                 if !valid_function_name(name) {
                     return Err(RenderError::InvalidToken(name));
                 }
+
+                self.check_function(name)?;
 
                 self.sql.push_str(name);
                 self.list(args)?;

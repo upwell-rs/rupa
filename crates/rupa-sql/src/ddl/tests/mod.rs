@@ -6,6 +6,7 @@ use rupa_core::{MySql, Postgres, Reference, Sqlite, Value};
 use super::*;
 
 mod alterations;
+mod expressions;
 mod indexes;
 mod kinds;
 mod tables;

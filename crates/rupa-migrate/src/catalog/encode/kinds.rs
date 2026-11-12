@@ -52,7 +52,7 @@ impl Encoder<'_> {
     }
 }
 
-fn sql_type_name(ty: SqlType) -> &'static str {
+pub(super) fn sql_type_name(ty: SqlType) -> &'static str {
     match ty {
         SqlType::Bool => "bool",
         SqlType::I16 => "i16",

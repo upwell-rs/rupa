@@ -95,6 +95,32 @@ pub enum Value {
 }
 
 impl Value {
+    /// The SQL type of this value (of the `NULL` for a typed null).
+    pub fn sql_type(&self) -> SqlType {
+        match self {
+            Value::Null(ty) => *ty,
+            Value::Bool(_) => SqlType::Bool,
+            Value::I16(_) => SqlType::I16,
+            Value::I32(_) => SqlType::I32,
+            Value::I64(_) => SqlType::I64,
+            Value::F32(_) => SqlType::F32,
+            Value::F64(_) => SqlType::F64,
+            Value::Text(_) => SqlType::Text,
+            Value::Bytes(_) => SqlType::Bytes,
+            #[cfg(feature = "uuid")]
+            Value::Uuid(_) => SqlType::Uuid,
+            #[cfg(feature = "chrono")]
+            Value::Date(_) => SqlType::Date,
+            #[cfg(feature = "chrono")]
+            Value::Time(_) => SqlType::Time,
+            #[cfg(feature = "chrono")]
+            Value::Timestamp(_) => SqlType::Timestamp,
+            #[cfg(feature = "chrono")]
+            Value::TimestampTz(_) => SqlType::TimestampTz,
+            Value::Json(_) => SqlType::Json,
+        }
+    }
+
     /// Whether this is a (typed) `NULL`.
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null(_))

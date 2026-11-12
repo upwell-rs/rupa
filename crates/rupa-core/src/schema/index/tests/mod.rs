@@ -4,6 +4,7 @@ use crate::dialect::DialectId;
 use crate::entity::{Entity, FromRow};
 use crate::error::ResultError;
 use crate::row::Row;
+use crate::schema::{ColumnDef, ColumnType};
 use crate::value::Value;
 use crate::varchar::VarChar;
 
@@ -58,7 +59,7 @@ fn typed_handles_give_the_index_its_column_types() {
     assert_eq!(index.table, Doc::TABLE);
     assert!(index.unique);
     assert_eq!(
-        index.columns,
+        index.columns().copied().collect::<Vec<_>>(),
         [IndexColumn::new("slug", ColumnType::VarChar(64))]
     );
 }
@@ -71,7 +72,7 @@ fn builders_add_checked_columns_and_become_indexes() {
         .into();
 
     assert_eq!(
-        index.columns,
+        index.columns().copied().collect::<Vec<_>>(),
         [
             IndexColumn::new("owner", ColumnType::BigInt),
             IndexColumn::new("title", ColumnType::Text),
@@ -135,7 +136,7 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
 
     assert_eq!(index.kind, Gin::METHOD);
     assert_eq!(
-        index.columns,
+        index.columns().copied().collect::<Vec<_>>(),
         [
             IndexColumn::new("tags", ColumnType::Json),
             IndexColumn::new("meta", ColumnType::Json),
@@ -146,5 +147,10 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
     let btree = Index::on("docs_meta", Doc::META);
 
     assert_eq!(btree.kind, BTree::METHOD);
-    assert_eq!(btree.columns, [IndexColumn::new("meta", ColumnType::Json)]);
+    assert_eq!(
+        btree.columns().copied().collect::<Vec<_>>(),
+        [IndexColumn::new("meta", ColumnType::Json)]
+    );
 }
+
+mod expressions;

@@ -42,11 +42,17 @@ fn varchar_fields_declare_their_length_in_the_schema() {
 #[test]
 fn handles_carry_the_length_into_indexes() {
     assert_eq!(
-        Index::on("accounts_email", Account::EMAIL).columns,
+        Index::on("accounts_email", Account::EMAIL)
+            .columns()
+            .copied()
+            .collect::<Vec<_>>(),
         [IndexColumn::new("email", ColumnType::VarChar(255))]
     );
     assert_eq!(
-        Index::on("accounts_bio", Account::BIO).columns,
+        Index::on("accounts_bio", Account::BIO)
+            .columns()
+            .copied()
+            .collect::<Vec<_>>(),
         [IndexColumn::new("bio", ColumnType::Text)]
     );
 }
@@ -67,7 +73,7 @@ fn gin_accepts_every_json_column_without_user_impls() {
 
     assert_eq!(index.kind, Gin::METHOD);
     assert_eq!(
-        index.columns.iter().map(|c| c.name).collect::<Vec<_>>(),
+        index.columns().map(|c| c.name).collect::<Vec<_>>(),
         ["profile", "labels", "prefs", "raw"]
     );
 }
