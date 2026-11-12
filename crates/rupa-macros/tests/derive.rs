@@ -1,7 +1,7 @@
 //! Derived entities and capabilities, end to end on the memory backend.
 
 use chrono::{DateTime, Utc};
-use rupa::core::{ColumnKind, Entity as _, Generated, SqlType, Value};
+use rupa::core::{Entity as _, Generated, SqlType, StorageKind, Value};
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
 use serde::{Deserialize, Serialize};
@@ -110,12 +110,12 @@ fn entity_metadata() {
     let kind = |n: &str| cols.iter().find(|c| c.name == n).unwrap();
     assert_eq!(
         (kind("prefs").kind, kind("prefs").sql_type),
-        (ColumnKind::Json, SqlType::Json)
+        (StorageKind::Json, SqlType::Json)
     );
-    assert!(kind("old_prefs").nullable && kind("old_prefs").kind == ColumnKind::Json);
+    assert!(kind("old_prefs").nullable && kind("old_prefs").kind == StorageKind::Json);
     assert_eq!(
         kind("raw_label").kind,
-        ColumnKind::Json,
+        StorageKind::Json,
         "#[column(json)] overrides scalar inference"
     );
     assert_eq!(
@@ -129,7 +129,7 @@ fn entity_metadata() {
     assert!(kind("id").primary_key && !kind("email").primary_key);
     assert_eq!(
         User::RAW_LABEL.kind(),
-        ColumnKind::Json,
+        StorageKind::Json,
         "the column handle respects the override too"
     );
     assert_eq!(User::CREATED_AT.name(), "created");

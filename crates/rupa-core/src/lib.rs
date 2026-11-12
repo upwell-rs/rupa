@@ -45,8 +45,8 @@ pub mod __macro_support {
     pub use crate::capability::{Deletable, Gettable, Insertable, Keyed, NoKey, Updatable, key_of};
     pub use crate::column::ReadAs;
     pub use crate::column::{
-        Column, ColumnKind, ColumnMeta, Encoding, Generated, Json, JsonCodec, Kinded,
-        NullableJsonCodec, Reference, Scalar, ScalarCodec, Stored,
+        Column, ColumnMeta, Encoding, Generated, Json, JsonCodec, Kinded, NullableJsonCodec,
+        Reference, Scalar, ScalarCodec, StorageKind, Stored,
     };
     pub use crate::dialect::{Capability, CapabilityMarker, Dialect, DslAvailable, Supports, caps};
     pub use crate::entity::{Entity, FromRow, IdValues};
@@ -72,7 +72,7 @@ pub mod __macro_support {
 
 pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
-pub use column::{Column, ColumnKind, ColumnMeta, Generated, Json, ReadAs, Reference, Scalar};
+pub use column::{Column, ColumnMeta, Generated, Json, ReadAs, Reference, Scalar, StorageKind};
 pub use config::{DbConfig, PoolConfig};
 pub use connection::{Connection, DynConnection, OpenTransaction, RepoOn, TxEnd};
 pub use dialect::{

@@ -1,5 +1,5 @@
 use super::*;
-use crate::column::{Column, ColumnKind, ColumnMeta, Scalar, ScalarCodec, column_meta};
+use crate::column::{Column, ColumnMeta, Scalar, ScalarCodec, StorageKind, column_meta};
 use crate::entity::{Entity, FromRow};
 use crate::error::ResultError;
 use crate::row::Row;
@@ -67,7 +67,7 @@ fn an_entity_describes_its_table() {
         table.foreign_keys,
         [ForeignKey::new(["author_id"], AUTHORS)]
     );
-    assert_eq!(ColumnKind::Scalar, Post::TITLE.kind());
+    assert_eq!(StorageKind::Scalar, Post::TITLE.kind());
 }
 
 #[test]

@@ -4,8 +4,8 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use super::{
-    Codec, ColumnKind, ColumnMeta, Encoding, Json, JsonCodec, JsonColumn, KindMarker,
-    NullableJsonCodec, Scalar, ScalarCodec,
+    Codec, ColumnMeta, Encoding, Json, JsonCodec, JsonColumn, KindMarker, NullableJsonCodec,
+    Scalar, ScalarCodec, StorageKind,
 };
 use crate::error::{DecodeError, ResultError};
 use crate::ir::{ColumnRef, SourceId};
@@ -108,7 +108,7 @@ impl<E, T, K> Column<E, T, K> {
     }
 
     /// Scalar or JSON.
-    pub const fn kind(&self) -> ColumnKind
+    pub const fn kind(&self) -> StorageKind
     where
         K: KindMarker,
     {
@@ -132,7 +132,7 @@ impl<E, T, K: KindMarker> Column<E, T, K> {
         assert!(
             matches!(
                 (K::KIND, encoding.kind),
-                (ColumnKind::Scalar, ColumnKind::Scalar) | (ColumnKind::Json, ColumnKind::Json)
+                (StorageKind::Scalar, StorageKind::Scalar) | (StorageKind::Json, StorageKind::Json)
             ),
             "the column kind does not match its encoding"
         );
