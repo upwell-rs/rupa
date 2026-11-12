@@ -8,7 +8,7 @@
 
 use rupa_core::column::ColumnMeta;
 use rupa_core::ir::{ColumnRef, ExprNode};
-use rupa_core::{Dialect, Value};
+use rupa_core::{Dialect, DialectId, Value};
 
 use super::{Syntax, Writer, prec};
 use crate::RenderError;
@@ -137,27 +137,37 @@ impl<'a> Writer<'a> {
             return Ok(());
         }
 
-        let mut text = String::new();
+        let dialect = self.dialect.id();
 
-        literal::write(value, self.dialect.id(), &mut text).ok_or_else(|| {
-            self.refuse(ExprRefusal::Literal {
+        if literal::write(value, dialect, &mut self.sql).is_none() {
+            return Err(self.refuse(ExprRefusal::Literal {
                 ty: value.sql_type(),
-            })
-        })?;
-        self.sql.push_str(&text);
+            }));
+        }
 
         Ok(())
     }
 
-    pub(super) fn check_function(&self, name: &'static str) -> Result<(), RenderError> {
+    /// Refuses calls DDL cannot hold. SQLite's `max` and `min` with several
+    /// arguments are scalar functions and allowed; with one they aggregate.
+    /// PostgreSQL and MySQL have no scalar `max(a, b)` (they spell it
+    /// `greatest`), so there the name alone is refused as an aggregate.
+    pub(super) fn check_function(
+        &self,
+        name: &'static str,
+        arguments: usize,
+    ) -> Result<(), RenderError> {
         if self.ddl.is_none() {
             return Ok(());
         }
 
         let bare = name.rsplit('.').next().unwrap_or(name);
         let named = |list: &[&str]| list.iter().any(|f| f.eq_ignore_ascii_case(bare));
+        let scalar = self.dialect.id() == DialectId::Sqlite
+            && arguments > 1
+            && (bare.eq_ignore_ascii_case("max") || bare.eq_ignore_ascii_case("min"));
 
-        if named(AGGREGATES) {
+        if named(AGGREGATES) && !scalar {
             return Err(self.refuse(ExprRefusal::Aggregate { function: name }));
         }
 
@@ -176,6 +186,7 @@ impl<'a> Writer<'a> {
         let Some(mode) = &self.ddl else {
             return Ok(());
         };
+
         let known = mode
             .scope
             .is_none_or(|columns| columns.iter().any(|c| c.name == column.name));

@@ -6,26 +6,27 @@ use rupa_core::schema::{DdlExpr, IndexExpr, IndexPart};
 use super::*;
 use crate::ExprRefusal;
 
-const DIALECTS: [DialectId; 3] = [DialectId::Postgres, DialectId::MySql, DialectId::Sqlite];
+pub(super) const DIALECTS: [DialectId; 3] =
+    [DialectId::Postgres, DialectId::MySql, DialectId::Sqlite];
 
 const SCOPE: &[ColumnMeta] = &[
     ColumnMeta::new("title", "title", StorageKind::Scalar, SqlType::Text, false),
     ColumnMeta::new("n", "n", StorageKind::Scalar, SqlType::I64, false),
 ];
 
-fn column(name: &'static str) -> ExprNode {
+pub(super) fn column(name: &'static str) -> ExprNode {
     ExprNode::Column(ColumnRef::new(name))
 }
 
-fn call(name: &'static str, args: Vec<ExprNode>) -> ExprNode {
+pub(super) fn call(name: &'static str, args: Vec<ExprNode>) -> ExprNode {
     ExprNode::Call(name, args)
 }
 
-fn param(value: Value) -> ExprNode {
+pub(super) fn param(value: Value) -> ExprNode {
     ExprNode::Param(value)
 }
 
-fn binary(op: BinOp, lhs: ExprNode, rhs: ExprNode) -> ExprNode {
+pub(super) fn binary(op: BinOp, lhs: ExprNode, rhs: ExprNode) -> ExprNode {
     ExprNode::Binary(op, Box::new(lhs), Box::new(rhs))
 }
 
@@ -37,14 +38,14 @@ fn expression(node: ExprNode, ty: ColumnType) -> IndexPart {
     .into()
 }
 
-fn on_expression(node: ExprNode) -> Index {
+pub(super) fn on_expression(node: ExprNode) -> Index {
     Index {
         parts: vec![expression(node, ColumnType::VarChar(200))],
         ..index("notes_expr", BTree::METHOD, [])
     }
 }
 
-fn partial(node: ExprNode) -> Index {
+pub(super) fn partial(node: ExprNode) -> Index {
     index(
         "notes_partial",
         BTree::METHOD,
@@ -53,7 +54,7 @@ fn partial(node: ExprNode) -> Index {
     .filter(DdlExpr::new(node))
 }
 
-fn refused(
+pub(super) fn refused(
     object: &'static str,
     dialect: DialectId,
     reason: ExprRefusal,

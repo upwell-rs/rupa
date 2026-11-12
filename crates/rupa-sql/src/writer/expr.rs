@@ -199,7 +199,7 @@ impl Writer<'_> {
                     return Err(RenderError::InvalidToken(name));
                 }
 
-                self.check_function(name)?;
+                self.check_function(name, args.len())?;
 
                 self.sql.push_str(name);
                 self.list(args)?;
