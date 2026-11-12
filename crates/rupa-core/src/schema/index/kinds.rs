@@ -57,4 +57,6 @@ impl<T: ScalarColumn> IndexableBy<BTree> for T {}
 
 impl<T: ScalarColumn> IndexableBy<Hash> for T {}
 
+impl JsonIndexKind for BTree {}
+
 impl JsonIndexKind for Gin {}

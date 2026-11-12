@@ -142,4 +142,9 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
             IndexColumn::new("note", ColumnType::Json),
         ]
     );
+
+    let btree = Index::on("docs_meta", Doc::META);
+
+    assert_eq!(btree.kind, BTree::METHOD);
+    assert_eq!(btree.columns, [IndexColumn::new("meta", ColumnType::Json)]);
 }

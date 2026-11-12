@@ -42,3 +42,18 @@ fn values_round_trip_and_oversized_values_fail_to_decode() {
     assert!(VarChar::<2>::from_value(Value::Text("ada".into())).is_err());
     assert!(VarChar::<4>::from_value(Value::I32(1)).is_err());
 }
+
+#[test]
+fn serde_writes_a_string_and_checks_the_length_when_reading() {
+    let name = VarChar::<4>::new("ada").expect("fits");
+
+    assert_eq!(serde_json::to_string(&name).expect("serializes"), "\"ada\"");
+    assert_eq!(
+        serde_json::from_str::<VarChar<4>>("\"ada\"").expect("deserializes"),
+        name
+    );
+
+    let error = serde_json::from_str::<VarChar<2>>("\"ada\"").expect_err("too long");
+
+    assert!(error.to_string().contains("exceeds the limit of 2"));
+}

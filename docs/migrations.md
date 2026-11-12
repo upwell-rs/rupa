@@ -229,7 +229,9 @@ is acquired, with `SchemaError::Index { reason: IndexRefusal::Unbounded { .. }, 
 
 ### Index kinds
 
-`Index::on(name, column)` is a B-tree. Other kinds are types implementing
+`Index::on(name, column)` is a B-tree; on a JSON column it compares whole
+documents (PostgreSQL `jsonb`, SQLite text) and MySQL refuses it at preflight.
+Other kinds are types implementing
 `IndexKind`: `Hash`, `Gin` (JSON columns of any type, PostgreSQL's default `jsonb_ops`)
 and `Gist` ship with rupa, and you can add your own (`impl IndexKind for Brin`). `Kind::on(name, column)` returns a builder
 that adds columns with `.and(..)` and converts into an `Index`; the column
