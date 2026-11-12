@@ -72,10 +72,7 @@ fn what_a_dialect_cannot_express_is_rejected() {
         .column(ColumnDef::new("id", ColumnType::BigInt).identity())
         .column(ColumnDef::new("v", ColumnType::Int))
         .primary_key(["id", "v"]);
-    let custom = Table::named("t").column(ColumnDef::new(
-        "c",
-        ColumnType::Custom(CustomType::new().postgres("CITEXT")),
-    ));
+    let custom = Table::named("t").column(ColumnDef::new("c", super::kinds::CITEXT.column_type()));
     let generated = Table::named("t").column(ColumnDef {
         generated: Some(Generated::Database),
         ..ColumnDef::new("v", ColumnType::Int)
@@ -98,9 +95,11 @@ fn what_a_dialect_cannot_express_is_rejected() {
         (
             SchemaOp::CreateTable(custom),
             &Sqlite,
-            SchemaError::CustomType {
+            SchemaError::UnsupportedType {
                 column: "c",
+                kind: "citext",
                 dialect: DialectId::Sqlite,
+                reason: "SQLite has no citext type",
             },
         ),
         (

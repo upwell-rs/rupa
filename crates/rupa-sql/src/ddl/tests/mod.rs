@@ -1,6 +1,5 @@
 use rupa_core::schema::{
-    BTree, ColumnDefault, ColumnType, CustomType, Gin, Hash, Index, IndexColumn, IndexKind,
-    ReferentialAction,
+    BTree, ColumnDefault, ColumnType, Gin, Hash, Index, IndexColumn, IndexKind, ReferentialAction,
 };
 use rupa_core::{MySql, Postgres, Reference, Sqlite, Value};
 
@@ -8,6 +7,7 @@ use super::*;
 
 mod alterations;
 mod indexes;
+mod kinds;
 mod tables;
 
 const NOTES: TableRef = TableRef::with_schema("app", "notes");

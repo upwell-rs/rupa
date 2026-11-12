@@ -1,9 +1,9 @@
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{
-    ColumnDef, ColumnDefault, ColumnType, ForeignKey, Gin, Index, IndexColumn, IndexKind,
-    IndexMethod, IndexSupport, ReferentialAction, SchemaOp, Table,
+    ColumnDef, ColumnDefault, ColumnSpec, ColumnType, ForeignKey, Gin, Index, IndexColumn,
+    IndexKind, IndexMethod, IndexSupport, ReferentialAction, SchemaOp, Table, TypeSupport,
 };
-use rupa_core::{Reference, Value};
+use rupa_core::{Reference, SqlType, Value};
 use rupa_sql::SchemaError;
 use sha2::{Digest, Sha256};
 
@@ -232,6 +232,55 @@ fn an_index_methods_rendering_configuration_is_part_of_its_checksum() {
             Plan::new()
                 .create_index(notes_title().method(CUSTOM.mysql(IndexSupport::Using("BTREE"))))
         },
+    ];
+    let digests: Vec<_> = variants
+        .iter()
+        .map(|plan| digest(Planned(Fixed(planless(), *plan))).expect("valid plan"))
+        .collect();
+
+    for (i, a) in digests.iter().enumerate() {
+        for b in &digests[i + 1..] {
+            assert_ne!(a, b, "every rendering setting is part of the identity");
+        }
+    }
+}
+
+const KIND: ColumnSpec = ColumnSpec::new("shape", SqlType::Text)
+    .postgres(TypeSupport::with_args("shape", &[3]))
+    .mysql(TypeSupport::named("LONGTEXT"))
+    .sqlite(TypeSupport::Unsupported("SQLite has no shape type"));
+
+fn with_kind(spec: ColumnSpec) -> Plan {
+    let spec = Box::leak(Box::new(spec));
+
+    Plan::new().create_table(notes().column(ColumnDef::new("title", spec.column_type())))
+}
+
+#[test]
+fn a_column_kinds_rendering_configuration_is_part_of_its_checksum() {
+    let variants: [fn() -> Plan; 12] = [
+        || with_kind(KIND),
+        || {
+            with_kind(ColumnSpec {
+                name: "form",
+                ..KIND
+            })
+        },
+        || with_kind(KIND.postgres(TypeSupport::with_args("shape", &[4]))),
+        || with_kind(KIND.postgres(TypeSupport::with_args("shape", &[3, 4]))),
+        || with_kind(KIND.postgres(TypeSupport::with_args("shapes", &[3]))),
+        || with_kind(KIND.postgres(TypeSupport::named("shape"))),
+        || with_kind(KIND.postgres(TypeSupport::Unsupported("shape"))),
+        || with_kind(KIND.mysql(TypeSupport::named("TEXT"))),
+        || with_kind(KIND.sqlite(TypeSupport::Unsupported("no shapes"))),
+        || with_kind(KIND.sqlite(TypeSupport::named("TEXT"))),
+        || {
+            with_kind(ColumnSpec {
+                sql_type: SqlType::Json,
+                ..KIND
+            })
+        },
+        || with_kind(KIND.bounded()),
     ];
     let digests: Vec<_> = variants
         .iter()

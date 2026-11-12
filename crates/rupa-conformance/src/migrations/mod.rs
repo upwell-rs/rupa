@@ -92,6 +92,10 @@ macro_rules! all_cases {
                 case_scripted_migrations_run_schema_operations,
                 case_ordinary_renames_and_indexes_work,
             ],
+            kinds: [
+                case_a_kind_stored_everywhere_applies_on_every_dialect,
+                case_a_postgres_only_kind_fails_typed_elsewhere_before_acquisition,
+            ],
             exclusion: [
                 case_owner_excludes_competitors_between_commits,
                 case_concurrent_first_runners_execute_once,
