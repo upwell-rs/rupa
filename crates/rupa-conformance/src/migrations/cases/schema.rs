@@ -6,7 +6,8 @@ use rupa::sql::{IndexRefusal, RenderError, SchemaError};
 use super::support::{dialect, planned, script};
 use super::{Harness, Session, catalog};
 use crate::migrations::fixture::{
-    Plans, Post, Scripted, add_pinned, create_tables, create_tables_with_text_index,
+    Plans, Post, Scripted, add_pinned, create_tables, create_tables_with_gin_index,
+    create_tables_with_text_index,
 };
 
 pub(super) fn case_planned_schema_creates_entity_tables<H: Harness>(h: &mut H) {
@@ -54,6 +55,47 @@ pub(super) fn case_text_indexes_work_or_fail_typed_before_acquisition<H: Harness
                         index: "posts_title",
                         dialect: DialectId::MySql,
                         reason: IndexRefusal::Unbounded { column: "title", .. },
+                    }
+                )
+            )
+        ),
+        "{result:?}"
+    );
+    assert!(!h.table_exists("_rupa_migrations"));
+    assert!(!h.table_exists("posts"));
+}
+
+/// GIN over a JSON column builds on PostgreSQL. Other dialects refuse the
+/// kind at preflight, before anything is created.
+pub(super) fn case_gin_indexes_build_on_postgres_and_fail_typed_elsewhere<H: Harness>(h: &mut H) {
+    let entries = [Planned(Plans(
+        planned::<H>("1"),
+        create_tables_with_gin_index,
+    ))];
+    let result = wait!(h, h.connect().apply(&catalog(&entries)));
+
+    if dialect(h) == DialectId::Postgres {
+        result.expect("GIN over a JSON column on PostgreSQL");
+
+        assert_eq!(h.count("SELECT count(*) FROM posts"), 0);
+
+        return;
+    }
+
+    assert!(
+        matches!(
+            result,
+            Err(RunError::Infrastructure {
+                source: Error::Validation(ValidationError::Schema(ref error)),
+                ..
+            }) if matches!(
+                **error,
+                RenderError::Schema(ref schema) if matches!(
+                    **schema,
+                    SchemaError::Index {
+                        index: "posts_meta",
+                        reason: IndexRefusal::Kind { kind: "gin", .. },
+                        ..
                     }
                 )
             )

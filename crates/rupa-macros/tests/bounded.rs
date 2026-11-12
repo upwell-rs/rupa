@@ -1,7 +1,7 @@
 //! Bounded text fields keep their length in the entity's column metadata.
 
 use rupa::VarChar;
-use rupa::core::schema::{ColumnDef, ColumnType, Gin, Index, IndexColumn, IndexKind};
+use rupa::core::schema::{ColumnDef, ColumnType, Index, IndexColumn};
 use rupa::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Entity)]
@@ -38,10 +38,6 @@ fn handles_carry_the_length_into_indexes() {
     assert_eq!(
         Index::on("accounts_bio", Account::BIO).columns,
         [IndexColumn::new("bio", ColumnType::Text)]
-    );
-    assert_eq!(
-        Gin::on("accounts_bio_search", Account::BIO).build().kind,
-        Gin::METHOD
     );
 }
 

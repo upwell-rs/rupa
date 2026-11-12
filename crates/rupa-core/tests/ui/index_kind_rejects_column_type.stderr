@@ -8,13 +8,14 @@ error[E0277]: a `i64` column cannot be indexed by `Gin`
   |
   = help: the trait `IndexableBy<Gin>` is not implemented for `i64`
   = note: implement `IndexableBy<Gin>` for the type if the kind can index it
-  = help: the following other types implement trait `IndexableBy<K>`:
-            String
-            rupa_core::VarChar<N>
-            serde_json::value::Value
-            std::option::Option<String>
-            std::option::Option<rupa_core::VarChar<N>>
-            std::option::Option<serde_json::value::Value>
+help: the following other types implement trait `IndexableBy<K>`
+ --> src/schema/index/kinds.rs
+  |
+  | impl IndexableBy<Gin> for serde_json::Value {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `serde_json::value::Value`
+  |
+  | impl IndexableBy<Gin> for Option<serde_json::Value> {}
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `std::option::Option<serde_json::value::Value>`
 note: required by a bound in `rupa_core::schema::IndexKind::on`
  --> src/schema/index/mod.rs
   |

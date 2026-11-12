@@ -86,6 +86,7 @@ macro_rules! all_cases {
             schema: [
                 case_planned_schema_creates_entity_tables,
                 case_text_indexes_work_or_fail_typed_before_acquisition,
+                case_gin_indexes_build_on_postgres_and_fail_typed_elsewhere,
                 case_changed_plan_is_reported_as_changed_history,
                 case_scripted_migrations_run_schema_operations,
                 case_ordinary_renames_and_indexes_work,
