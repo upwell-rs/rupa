@@ -106,3 +106,20 @@ pub fn create_accounts_indexed_by_a_foreign_column() -> Plan {
         ),
     ))
 }
+
+/// Accounts with a unique index over the bucket divided by the float `2.0`:
+/// buckets 4 and 5 stay distinct, which an integer `2` would not give on
+/// SQLite and PostgreSQL.
+pub fn create_accounts_with_float_expression() -> Plan {
+    create_accounts().create_index(
+        BTree::on_expr::<Account>(
+            "accounts_half_bucket",
+            Expr::<f64>::raw_op(
+                "/",
+                Expr::<i32>::from_node(Account::BUCKET.into_node()),
+                bind(2.0_f64),
+            ),
+        )
+        .unique(),
+    )
+}

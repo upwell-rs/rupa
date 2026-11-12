@@ -97,6 +97,7 @@ macro_rules! all_cases {
                 case_text_expression_indexes_work_or_fail_typed_before_acquisition,
                 case_partial_indexes_work_or_fail_typed_before_acquisition,
                 case_expressions_ddl_cannot_hold_fail_typed_before_acquisition,
+                case_float_literals_in_index_expressions_stay_floats,
             ],
             kinds: [
                 case_a_kind_stored_everywhere_applies_on_every_dialect,
