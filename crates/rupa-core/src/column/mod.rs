@@ -23,7 +23,7 @@ use crate::value::{ScalarColumn, SqlType, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 /// How a column is stored.
-pub enum ColumnKind {
+pub enum StorageKind {
     /// A plain SQL value (`ScalarColumn`).
     Scalar,
     /// A JSON document (any `Serialize + DeserializeOwned` type).
@@ -57,7 +57,7 @@ pub struct ColumnMeta {
     /// The column name in the database.
     pub name: &'static str,
     /// Scalar or JSON.
-    pub kind: ColumnKind,
+    pub kind: StorageKind,
     /// The SQL type values are bound and decoded as.
     pub sql_type: SqlType,
     /// The column type a schema declares: [`sql_type`](Self::sql_type) with
@@ -79,7 +79,7 @@ impl ColumnMeta {
     pub const fn new(
         field: &'static str,
         name: &'static str,
-        kind: ColumnKind,
+        kind: StorageKind,
         sql_type: SqlType,
         nullable: bool,
     ) -> Self {
@@ -162,18 +162,18 @@ impl Kinded for Stored<true> {
     type Kind = Json;
 }
 
-/// Maps a type-level kind ([`Scalar`], [`Json`]) to its [`ColumnKind`].
+/// Maps a type-level kind ([`Scalar`], [`Json`]) to its [`StorageKind`].
 pub trait KindMarker: 'static {
     /// The runtime kind.
-    const KIND: ColumnKind;
+    const KIND: StorageKind;
 }
 
 impl KindMarker for Scalar {
-    const KIND: ColumnKind = ColumnKind::Scalar;
+    const KIND: StorageKind = StorageKind::Scalar;
 }
 
 impl KindMarker for Json {
-    const KIND: ColumnKind = ColumnKind::Json;
+    const KIND: StorageKind = StorageKind::Json;
 }
 
 #[diagnostic::on_unimplemented(
@@ -290,7 +290,7 @@ pub const fn column_meta<T, C: Codec<T>>(field: &'static str, name: &'static str
 /// How values of `T` are stored, as a constant: the codec `#[derive(Entity)]`
 /// selected for a field, with its kind.
 pub struct Encoding<T> {
-    kind: ColumnKind,
+    kind: StorageKind,
     sql_type: SqlType,
     column_type: ColumnType,
     nullable: bool,
@@ -321,7 +321,7 @@ impl<T> Encoding<T> {
 
     /// Whether values are stored as JSON documents.
     pub const fn is_json(&self) -> bool {
-        matches!(self.kind, ColumnKind::Json)
+        matches!(self.kind, StorageKind::Json)
     }
 }
 

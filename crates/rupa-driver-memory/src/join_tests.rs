@@ -1,6 +1,6 @@
 //! Joins evaluated from hand-built IR (the typed join builder comes later).
 
-use rupa_core::column::{ColumnKind, ColumnMeta};
+use rupa_core::column::{ColumnMeta, StorageKind};
 use rupa_core::exec::Outcome;
 use rupa_core::ir::{
     BinOp, ColumnRef, Delete, Direction, ExprNode, FromClause, Insert, Join, JoinKind, OrderBy,
@@ -14,7 +14,7 @@ const USERS: TableRef = TableRef::new("users");
 const ORDERS: TableRef = TableRef::new("orders");
 
 fn meta(name: &'static str, sql_type: SqlType, nullable: bool) -> ColumnMeta {
-    ColumnMeta::new(name, name, ColumnKind::Scalar, sql_type, nullable)
+    ColumnMeta::new(name, name, StorageKind::Scalar, sql_type, nullable)
 }
 
 fn insert(db: &mut MemoryDb, table: TableRef, columns: &[&'static str], rows: Vec<Vec<Value>>) {
