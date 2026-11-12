@@ -1,5 +1,6 @@
 mod down;
 mod expressions;
+mod lowering;
 mod plans;
 mod snapshots;
 

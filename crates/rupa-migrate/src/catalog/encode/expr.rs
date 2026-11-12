@@ -2,11 +2,14 @@
 //! expression IR, each node behind a tag naming its variant. Only what the
 //! rendering depends on is recorded.
 
-use rupa_core::ir::{BinOp, ColumnRef, ExprNode, PathSeg, UnOp};
+use rupa_core::ir::{BinOp, ColumnRef, DslCall, ExprNode, PathSeg, UnOp};
 use rupa_core::schema::{DdlExpr, Index, IndexPart};
+use rupa_core::{Dialect, MySql, Postgres, Sqlite};
 
 use super::Encoder;
 use super::kinds::sql_type_name;
+
+const MAX_LOWERING_DEPTH: usize = 32;
 
 impl Encoder<'_> {
     /// What an index adds to the record of its columns: where its
@@ -41,10 +44,12 @@ impl Encoder<'_> {
     }
 
     fn ddl_expr(&mut self, expr: &DdlExpr) {
-        self.node(&expr.node);
+        self.node(&expr.node, None, 0);
     }
 
-    fn node(&mut self, node: &ExprNode) {
+    /// `lowering` is the dialect a DSL call is being lowered for, inside the
+    /// body of an earlier lowering; `None` at the top of an expression.
+    fn node(&mut self, node: &ExprNode, lowering: Option<&dyn Dialect>, depth: usize) {
         match node {
             ExprNode::Column(column) => {
                 self.str("column");
@@ -68,13 +73,13 @@ impl Encoder<'_> {
                     UnOp::IsNull => "is-null",
                     UnOp::IsNotNull => "is-not-null",
                 });
-                self.node(operand);
+                self.node(operand, lowering, depth);
             }
             ExprNode::Binary(op, lhs, rhs) => {
                 self.str("binary");
                 self.str(binary_name(*op));
-                self.node(lhs);
-                self.node(rhs);
+                self.node(lhs, lowering, depth);
+                self.node(rhs, lowering, depth);
             }
             ExprNode::In {
                 expr,
@@ -83,8 +88,8 @@ impl Encoder<'_> {
             } => {
                 self.str("in");
                 self.flag(*negated);
-                self.node(expr);
-                self.nodes(list);
+                self.node(expr, lowering, depth);
+                self.nodes(list, lowering, depth);
             }
             ExprNode::JsonPath {
                 column,
@@ -112,32 +117,51 @@ impl Encoder<'_> {
             ExprNode::Cast(operand, ty) => {
                 self.str("cast");
                 self.str(sql_type_name(*ty));
-                self.node(operand);
+                self.node(operand, lowering, depth);
             }
             ExprNode::Dsl(call) => {
                 self.str("dsl");
-                self.str(call.def.name);
-                self.nodes(&call.args);
+
+                match lowering {
+                    Some(dialect) => self.lowered(call, dialect, depth),
+                    None => {
+                        for (tag, dialect) in LOWERINGS {
+                            self.str(tag);
+                            self.lowered(call, dialect, 0);
+                        }
+                    }
+                }
             }
             ExprNode::RawOp(op, lhs, rhs) => {
                 self.str("raw-op");
                 self.str(op);
-                self.node(lhs);
-                self.node(rhs);
+                self.node(lhs, lowering, depth);
+                self.node(rhs, lowering, depth);
             }
             ExprNode::Call(name, args) => {
                 self.str("call");
                 self.str(name);
-                self.nodes(args);
+                self.nodes(args, lowering, depth);
             }
         }
     }
 
-    fn nodes(&mut self, nodes: &[ExprNode]) {
+    fn nodes(&mut self, nodes: &[ExprNode], lowering: Option<&dyn Dialect>, depth: usize) {
         self.len(nodes.len());
 
         for node in nodes {
-            self.node(node);
+            self.node(node, lowering, depth);
+        }
+    }
+
+    /// A DSL call is identified by what it renders as: its lowering for
+    /// `dialect`, which includes its arguments. A dialect the function has no
+    /// lowering for (or whose lowering fails) is a record of its own, without
+    /// the error's text.
+    fn lowered(&mut self, call: &DslCall, dialect: &dyn Dialect, depth: usize) {
+        match call.lower(dialect) {
+            Ok(node) if depth < MAX_LOWERING_DEPTH => self.node(&node, Some(dialect), depth + 1),
+            _ => self.str("lowering-unavailable"),
         }
     }
 
@@ -146,6 +170,12 @@ impl Encoder<'_> {
         self.str(column.name);
     }
 }
+
+const LOWERINGS: [(&str, &dyn Dialect); 3] = [
+    ("postgres", &Postgres),
+    ("mysql", &MySql),
+    ("sqlite", &Sqlite),
+];
 
 fn binary_name(op: BinOp) -> &'static str {
     match op {
