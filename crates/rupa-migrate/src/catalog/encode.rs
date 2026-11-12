@@ -8,8 +8,8 @@
 
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{
-    BTree, ColumnDef, ColumnDefault, ColumnType, ForeignKey, Index, IndexKind, ReferentialAction,
-    SchemaOp, Table,
+    BTree, ColumnDef, ColumnDefault, ColumnType, ForeignKey, Index, IndexKind, IndexMethod,
+    IndexSupport, ReferentialAction, SchemaOp, Table,
 };
 use rupa_core::{Generated, Value};
 use sha2::Sha256;
@@ -228,7 +228,7 @@ impl Encoder<'_> {
     /// Column types are not part of an index's identity: they follow the
     /// entity the handles came from, as in `CREATE TABLE`. A B-tree, the
     /// kind every earlier index had, encodes as it always did; any other
-    /// kind adds its name.
+    /// kind adds its whole rendering configuration.
     fn index(&mut self, index: &Index) {
         self.str(index.name);
         self.table_ref(index.table);
@@ -241,9 +241,30 @@ impl Encoder<'_> {
         self.flag(index.unique);
 
         if index.kind != BTree::METHOD {
-            self.str("using");
-            self.str(index.kind.name);
+            self.method(index.kind);
         }
+    }
+
+    fn method(&mut self, kind: IndexMethod) {
+        self.str("using");
+        self.str(kind.name);
+
+        for support in [kind.postgres, kind.mysql, kind.sqlite] {
+            match support {
+                IndexSupport::Default => self.str("default"),
+                IndexSupport::Using(method) => {
+                    self.str("using-method");
+                    self.str(method);
+                }
+                IndexSupport::Unsupported(reason) => {
+                    self.str("unsupported");
+                    self.str(reason);
+                }
+            }
+        }
+
+        self.flag(kind.unique);
+        self.flag(kind.multi_column);
     }
 
     fn table_ref(&mut self, table: TableRef) {

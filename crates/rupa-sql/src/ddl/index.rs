@@ -25,13 +25,17 @@ impl Ddl {
             self.ident(index.table.name);
         } else {
             self.ident(index.name);
+
+            if self.dialect == DialectId::MySql {
+                self.using(using);
+            }
+
             self.sql.push_str(" ON ");
             self.table(index.table);
         }
 
-        if let Some(method) = using {
-            self.sql.push_str(" USING ");
-            self.sql.push_str(method);
+        if self.dialect == DialectId::Postgres {
+            self.using(using);
         }
 
         self.sql.push_str(" (");
@@ -49,6 +53,13 @@ impl Ddl {
         Ok(())
     }
 
+    fn using(&mut self, method: Option<&'static str>) {
+        if let Some(method) = method {
+            self.sql.push_str(" USING ");
+            self.sql.push_str(method);
+        }
+    }
+
     /// Checks `index` against the dialect and returns its `USING` method.
     fn index_method(&self, index: &Index) -> Result<Option<&'static str>, SchemaError> {
         let kind = index.kind;
@@ -59,6 +70,12 @@ impl Ddl {
         };
         let using = match kind.support(self.dialect) {
             IndexSupport::Default => None,
+            IndexSupport::Using(_) if self.dialect == DialectId::Sqlite => {
+                return Err(refuse(IndexRefusal::Kind {
+                    kind: kind.name,
+                    reason: "SQLite has no index methods",
+                }));
+            }
             IndexSupport::Using(method) => Some(method),
             IndexSupport::Unsupported(reason) => {
                 return Err(refuse(IndexRefusal::Kind {

@@ -1,4 +1,4 @@
-use super::{IndexKind, IndexMethod, IndexSupport, IndexableBy};
+use super::{IndexKind, IndexMethod, IndexSupport, IndexableBy, JsonIndexKind};
 use crate::value::ScalarColumn;
 
 /// The portable ordered index: the default method of every dialect.
@@ -10,8 +10,8 @@ pub struct BTree;
 #[derive(Debug, Clone, Copy)]
 pub struct Hash;
 
-/// A generalized inverted index (`USING gin`) over JSON documents, using
-/// PostgreSQL's default `jsonb_ops` class. PostgreSQL only. Text needs an
+/// A generalized inverted index (`USING gin`) over JSON columns of any type,
+/// using PostgreSQL's default `jsonb_ops` class. PostgreSQL only. Text needs an
 /// operator class (`gin_trgm_ops`, `to_tsvector`), so no text type is
 /// accepted here.
 #[derive(Debug, Clone, Copy)]
@@ -57,6 +57,4 @@ impl<T: ScalarColumn> IndexableBy<BTree> for T {}
 
 impl<T: ScalarColumn> IndexableBy<Hash> for T {}
 
-impl IndexableBy<Gin> for serde_json::Value {}
-
-impl IndexableBy<Gin> for Option<serde_json::Value> {}
+impl JsonIndexKind for Gin {}

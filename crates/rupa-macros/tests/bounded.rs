@@ -1,7 +1,13 @@
 //! Bounded text fields keep their length in the entity's column metadata.
 
 use rupa::VarChar;
-use rupa::core::schema::{ColumnDef, ColumnType, Index, IndexColumn};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Profile {
+    theme: String,
+}
+use rupa::core::schema::{ColumnDef, ColumnType, Gin, Index, IndexColumn, IndexKind};
 use rupa::prelude::*;
 
 #[derive(Debug, Clone, PartialEq, Entity)]
@@ -12,6 +18,10 @@ struct Account {
     email: VarChar<255>,
     nickname: Option<VarChar<16>>,
     bio: String,
+    profile: Profile,
+    labels: Vec<String>,
+    prefs: Option<Profile>,
+    raw: serde_json::Value,
 }
 
 #[test]
@@ -45,4 +55,19 @@ fn handles_carry_the_length_into_indexes() {
 fn varchar_values_compare_in_queries() {
     let email = VarChar::<255>::new("ada@example.com").expect("short enough");
     let _ = select::<Account>().filter(Account::EMAIL.eq(email));
+}
+
+#[test]
+fn gin_accepts_every_json_column_without_user_impls() {
+    let index = Gin::on("accounts_profile", Account::PROFILE)
+        .and(Account::LABELS)
+        .and(Account::PREFS)
+        .and(Account::RAW)
+        .build();
+
+    assert_eq!(index.kind, Gin::METHOD);
+    assert_eq!(
+        index.columns.iter().map(|c| c.name).collect::<Vec<_>>(),
+        ["profile", "labels", "prefs", "raw"]
+    );
 }
