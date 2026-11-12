@@ -165,10 +165,15 @@ impl ColumnSpec {
 /// assert_eq!(BigText::SPEC.column_type(), <BigText as ScalarColumn>::COLUMN_TYPE);
 /// ```
 ///
-/// A kind that needs a cast is declared and indexed, without the codec:
+/// A kind that needs a cast is declared without the codec, so it has no
+/// entity column handle. Its columns and indexes are written literally, and a
+/// literal index is not checked against [`IndexableBy`](super::IndexableBy):
 ///
 /// ```
-/// use rupa_core::schema::{ColumnDef, ColumnKind, ColumnSpec, Gin, IndexableBy, TypeSupport};
+/// use rupa_core::ir::TableRef;
+/// use rupa_core::schema::{
+///     ColumnDef, ColumnKind, ColumnSpec, Gin, Index, IndexColumn, IndexKind, TypeSupport,
+/// };
 /// use rupa_core::SqlType;
 ///
 /// struct Tsvector;
@@ -180,11 +185,16 @@ impl ColumnSpec {
 ///         .sqlite(TypeSupport::Unsupported("SQLite has no tsvector type"));
 /// }
 ///
-/// impl IndexableBy<Gin> for Tsvector {}
-///
 /// let terms = ColumnDef::new("terms", Tsvector::SPEC.column_type());
+/// let index = Index::new(
+///     "docs_terms",
+///     TableRef::new("docs"),
+///     [IndexColumn::new("terms", Tsvector::SPEC.column_type())],
+/// )
+/// .method(Gin::METHOD);
 ///
 /// assert_eq!(terms.name, "terms");
+/// assert_eq!(index.kind, Gin::METHOD);
 /// ```
 ///
 /// Const generics become structured arguments:
