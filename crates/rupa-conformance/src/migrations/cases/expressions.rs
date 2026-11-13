@@ -1,11 +1,12 @@
 use rupa::migrate::Planned;
 use rupa::sql::{ExprRefusal, IndexRefusal, SchemaError};
-use rupa::{DialectId, VarChar, insert};
+use rupa::{DialectId, Entity, VarChar, insert};
 
 use super::support::{dialect, planned, schema_refusal};
 use super::{Harness, Session, catalog};
 use crate::migrations::fixture::{
-    Account, NewAccount, Plans, create_accounts_indexed_by_a_foreign_column,
+    Account, Author, NewAccount, Plans, create_accounts_indexed_by_a_foreign_column,
+    create_accounts_indexed_by_a_same_named_foreign_column,
     create_accounts_indexed_by_a_volatile_function, create_accounts_indexed_by_an_aggregate,
     create_accounts_with_expression_indexes, create_accounts_with_float_expression,
     create_accounts_with_partial_index, create_accounts_with_text_expression,
@@ -170,7 +171,20 @@ pub(super) fn case_expressions_ddl_cannot_hold_fail_typed_before_acquisition<H: 
         (
             create_accounts_indexed_by_a_foreign_column,
             "accounts_foreign",
-            ExprRefusal::Column { column: "name" },
+            ExprRefusal::Column {
+                column: "name",
+                table: Some(<Author as Entity>::TABLE),
+                expected: <Account as Entity>::TABLE,
+            },
+        ),
+        (
+            create_accounts_indexed_by_a_same_named_foreign_column,
+            "accounts_same_name",
+            ExprRefusal::Column {
+                column: "id",
+                table: Some(<Author as Entity>::TABLE),
+                expected: <Account as Entity>::TABLE,
+            },
         ),
     ] {
         assert_eq!(

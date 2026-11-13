@@ -123,3 +123,12 @@ pub fn create_accounts_with_float_expression() -> Plan {
         .unique(),
     )
 }
+
+/// An index with an expression over `authors.id`, while accounts has an `id`
+/// column of its own.
+pub fn create_accounts_indexed_by_a_same_named_foreign_column() -> Plan {
+    create_accounts().create_index(
+        BTree::on("accounts_same_name", Account::BUCKET)
+            .and_expr(Expr::<i64>::from_node(Author::ID.into_node())),
+    )
+}

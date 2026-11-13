@@ -261,7 +261,7 @@ fn handle(
 
         #[doc = #doc]
         #[allow(dead_code, reason = "a derived handle exists for every field, used or not")]
-        #vis const #handle: #ms::Column<#entity, #ty, #kind> = #ms::Column::with_encoding(#column, #encoding);
+        #vis const #handle: #ms::Column<#entity, #ty, #kind> = #ms::Column::with_encoding_in(<#entity as #ms::Entity>::TABLE, #column, #encoding);
     }
 }
 

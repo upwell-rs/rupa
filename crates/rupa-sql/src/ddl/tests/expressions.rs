@@ -318,7 +318,11 @@ fn columns_outside_the_table_are_refused() {
             refused(
                 "notes_expr",
                 DialectId::Postgres,
-                ExprRefusal::Column { column }
+                ExprRefusal::Column {
+                    column,
+                    table: None,
+                    expected: NOTES
+                }
             )
         );
     }
