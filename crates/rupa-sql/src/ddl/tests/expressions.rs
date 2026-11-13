@@ -301,7 +301,7 @@ fn columns_outside_the_table_are_refused() {
 
     assert_eq!(
         ok(&SchemaOp::CreateIndex(scoped(column("title"))))[0],
-        r#"CREATE INDEX "notes_expr" ON "app"."notes" (("title"))"#
+        r#"CREATE INDEX "notes_expr" ON "app"."notes" ("title")"#
     );
 
     for node in [
