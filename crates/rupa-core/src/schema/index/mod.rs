@@ -262,8 +262,13 @@ impl Index {
     }
 
     /// Indexes only the rows meeting `predicate`, unchecked: prefer
-    /// [`IndexBuilder::filter`].
+    /// [`IndexBuilder::filter`]. Repeated calls are ANDed, as in queries.
     pub fn filter(mut self, predicate: DdlExpr) -> Self {
+        let predicate = match self.predicate.take() {
+            Some(existing) => existing.and(predicate),
+            None => predicate,
+        };
+
         self.predicate = Some(Box::new(predicate));
 
         self
@@ -294,10 +299,13 @@ impl<K: IndexKind, E: Entity> IndexBuilder<K, E> {
     }
 
     /// Indexes only the rows meeting `condition`, which may name the
-    /// entity's columns only. Dialects without partial indexes (MySQL)
-    /// refuse the index when it is rendered.
+    /// entity's columns only. Repeated calls are ANDed, as in queries.
+    /// Dialects without partial indexes (MySQL) refuse the index when it is
+    /// rendered.
     pub fn filter(mut self, condition: impl IntoCondition) -> Self {
-        self.index.predicate = Some(Box::new(DdlExpr::of::<E, bool>(condition.into_condition())));
+        self.index = self
+            .index
+            .filter(DdlExpr::of::<E, bool>(condition.into_condition()));
 
         self
     }

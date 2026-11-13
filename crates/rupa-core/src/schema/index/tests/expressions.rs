@@ -1,7 +1,7 @@
 use super::*;
 use crate::column::{Column, Scalar};
 use crate::expr::{Expr, ExprOps, IntoExpr};
-use crate::ir::{ColumnRef, ExprNode, TableRef};
+use crate::ir::{BinOp, ColumnRef, ExprNode, TableRef};
 use crate::schema::{DdlExpr, IndexExpr};
 
 fn lower_title() -> Expr<String> {
@@ -89,6 +89,32 @@ fn a_filter_sets_the_predicate_scoped_to_the_entity() {
             .predicate
             .map(|predicate| predicate.scope),
         Some(None)
+    );
+}
+
+#[test]
+fn repeated_filters_are_anded_in_order() {
+    let closed = Doc::OWNER.is_null();
+    let titled = Doc::TITLE.eq("a");
+    let index: Index = BTree::on("docs_unowned", Doc::SLUG)
+        .filter(closed.clone())
+        .filter(titled.clone())
+        .into();
+    let expected = ExprNode::Binary(
+        BinOp::And,
+        Box::new(closed.into_node()),
+        Box::new(titled.clone().into_node()),
+    );
+    let literal = Index::on("literal", Doc::SLUG)
+        .filter(DdlExpr::new(Doc::OWNER.is_null().into_node()))
+        .filter(DdlExpr::of::<Doc, bool>(titled));
+    let predicate = index.predicate.expect("a predicate");
+
+    assert_eq!(predicate.node, expected);
+    assert_eq!(predicate.scope, Some(Doc::COLUMNS));
+    assert_eq!(
+        literal.predicate.and_then(|predicate| predicate.scope),
+        Some(Doc::COLUMNS)
     );
 }
 

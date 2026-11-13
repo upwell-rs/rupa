@@ -5,7 +5,7 @@
 use crate::column::ColumnMeta;
 use crate::entity::Entity;
 use crate::expr::Expr;
-use crate::ir::ExprNode;
+use crate::ir::{BinOp, ExprNode};
 
 /// A query expression used in a schema object. It carries the columns of the
 /// entity it was written for, so rendering can refuse a column the table does
@@ -30,6 +30,15 @@ impl DdlExpr {
         Self {
             node: expr.into_node(),
             scope: Some(E::COLUMNS),
+        }
+    }
+
+    /// Both conditions, `self` first. The scope is `self`'s, or `other`'s
+    /// when `self` has none.
+    pub fn and(self, other: Self) -> Self {
+        Self {
+            node: ExprNode::Binary(BinOp::And, Box::new(self.node), Box::new(other.node)),
+            scope: self.scope.or(other.scope),
         }
     }
 }
