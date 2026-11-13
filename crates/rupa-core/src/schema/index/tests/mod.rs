@@ -11,13 +11,17 @@ use crate::varchar::VarChar;
 struct Doc;
 
 impl Doc {
-    const TITLE: Column<Doc, String, Scalar> = Column::scalar("title");
-    const SLUG: Column<Doc, VarChar<64>, Scalar> = Column::scalar("slug");
-    const OWNER: Column<Doc, Option<i64>, Scalar> = Column::scalar("owner");
-    const META: Column<Doc, serde_json::Value, crate::column::Json> = Column::json("meta");
-    const TAGS: Column<Doc, Vec<String>, crate::column::Json> = Column::json("tags");
+    const TITLE: Column<Doc, String, Scalar> = Column::scalar_in(<Doc as Entity>::TABLE, "title");
+    const SLUG: Column<Doc, VarChar<64>, Scalar> =
+        Column::scalar_in(<Doc as Entity>::TABLE, "slug");
+    const OWNER: Column<Doc, Option<i64>, Scalar> =
+        Column::scalar_in(<Doc as Entity>::TABLE, "owner");
+    const META: Column<Doc, serde_json::Value, crate::column::Json> =
+        Column::json_in(<Doc as Entity>::TABLE, "meta");
+    const TAGS: Column<Doc, Vec<String>, crate::column::Json> =
+        Column::json_in(<Doc as Entity>::TABLE, "tags");
     const NOTE: Column<Doc, Option<Vec<String>>, crate::column::Json> =
-        Column::nullable_json("note");
+        Column::nullable_json_in(<Doc as Entity>::TABLE, "note");
 }
 
 impl FromRow for Doc {

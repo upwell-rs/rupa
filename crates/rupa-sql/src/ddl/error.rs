@@ -1,3 +1,4 @@
+use rupa_core::ir::TableRef;
 use rupa_core::schema::ColumnType;
 use rupa_core::{DialectId, SqlType};
 
@@ -136,12 +137,17 @@ pub enum ExprRefusal {
         /// The function.
         function: &'static str,
     },
-    /// A column the indexed table does not have: another table's column, or
-    /// a column of a joined source.
-    #[error("column `{column}` is not a column of the table")]
+    /// A column the schema object's table does not have: a column of another
+    /// table (`table`, when the typed handle recorded it), a column of a
+    /// joined source, or a name the entity has no column for.
+    #[error("column `{column}`{} is not a column of table `{}`", of_table(.table), qualified(.expected))]
     Column {
         /// The column.
         column: &'static str,
+        /// The table the column's handle belongs to, if it recorded one.
+        table: Option<TableRef>,
+        /// The table the schema object belongs to.
+        expected: TableRef,
     },
     /// A bound value with no safe literal form on the dialect (bytes, UUIDs,
     /// dates and times, non-finite floats, text with a NUL or, on MySQL, a
@@ -195,4 +201,17 @@ pub enum IndexRefusal {
     /// The dialect has no partial indexes.
     #[error("the dialect has no partial indexes")]
     Partial,
+}
+
+fn qualified(table: &TableRef) -> String {
+    match table.schema {
+        Some(schema) => format!("{schema}.{}", table.name),
+        None => table.name.to_owned(),
+    }
+}
+
+fn of_table(table: &Option<TableRef>) -> String {
+    table.as_ref().map_or_else(String::new, |table| {
+        format!(" of table `{}`", qualified(table))
+    })
 }

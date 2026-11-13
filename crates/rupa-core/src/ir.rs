@@ -128,20 +128,32 @@ pub struct ColumnRef {
     pub source: SourceId,
     /// The column name.
     pub name: &'static str,
+    /// The table the column belongs to, when it came from an entity's typed
+    /// handle. Rendering, caching and evaluation never read it: it lets a
+    /// schema object refuse a column of another table.
+    pub table: Option<TableRef>,
 }
 
 impl ColumnRef {
     /// A column of the statement's first (or only) table.
     pub const fn new(name: &'static str) -> Self {
-        Self {
-            source: SourceId(0),
-            name,
-        }
+        Self::of(SourceId(0), name)
     }
 
     /// A column of source `source`.
     pub const fn of(source: SourceId, name: &'static str) -> Self {
-        Self { source, name }
+        Self {
+            source,
+            name,
+            table: None,
+        }
+    }
+
+    /// The same column, recorded as belonging to `table`.
+    pub const fn in_table(mut self, table: TableRef) -> Self {
+        self.table = Some(table);
+
+        self
     }
 }
 

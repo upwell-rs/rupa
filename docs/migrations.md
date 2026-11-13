@@ -282,7 +282,12 @@ query in what it may hold: nothing is bound, so every value is written as a
 checked literal (booleans, integers, finite floats, text and JSON; text with a
 NUL, or with a backslash on MySQL, and values with no safe literal form such as
 bytes, UUIDs and dates are refused). A column must belong to the entity the
-index is built for. Calls to aggregate functions (`count`, `sum`, ..), window
+index is built for: a typed handle records its table, so a column of another
+entity is refused even when the two have a column of the same name
+(`ExprRefusal::Column`, naming both tables). Hand-written entities build their
+handles with `Column::scalar_in(Self::TABLE, "name")` (or `json_in`,
+`nullable_json_in`) so that they are checked too; `Column::scalar(..)` has no
+table and is only checked by name. Calls to aggregate functions (`count`, `sum`, ..), window
 functions (`row_number`, ..) and well-known volatile built-ins (`now`, `random`,
 `uuid`, `current_timestamp`, ..) are refused after DSL functions are lowered, so
 a function built on one is refused too. The query IR has no subquery node, so

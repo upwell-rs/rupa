@@ -13,6 +13,7 @@ mod schema;
 
 pub use expressions::{
     Account, NewAccount, create_accounts_indexed_by_a_foreign_column,
+    create_accounts_indexed_by_a_same_named_foreign_column,
     create_accounts_indexed_by_a_volatile_function, create_accounts_indexed_by_an_aggregate,
     create_accounts_with_expression_indexes, create_accounts_with_float_expression,
     create_accounts_with_partial_index, create_accounts_with_text_expression,

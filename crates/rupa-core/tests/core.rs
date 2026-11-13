@@ -59,12 +59,16 @@ fn repeated_filters_are_anded_and_values_become_params() {
         BinOp::And,
         Box::new(ExprNode::Binary(
             BinOp::Eq,
-            Box::new(ExprNode::Column(ColumnRef::new("email"))),
+            Box::new(ExprNode::Column(
+                ColumnRef::new("email").in_table(User::TABLE),
+            )),
             Box::new(ExprNode::Param(Value::Text("a@b.c".into()))),
         )),
         Box::new(ExprNode::Binary(
             BinOp::Eq,
-            Box::new(ExprNode::Column(ColumnRef::new("active"))),
+            Box::new(ExprNode::Column(
+                ColumnRef::new("active").in_table(User::TABLE),
+            )),
             Box::new(ExprNode::Param(Value::Bool(true))),
         )),
     );
@@ -295,12 +299,14 @@ fn join_numbers_sources_and_qualifies_columns() {
         **first,
         ExprNode::Binary(
             BinOp::Eq,
-            Box::new(ExprNode::Column(ColumnRef::new("active"))),
+            Box::new(ExprNode::Column(
+                ColumnRef::new("active").in_table(User::TABLE)
+            )),
             Box::new(ExprNode::Param(Value::Bool(true)))
         )
     );
     assert!(matches!(&**second, ExprNode::Binary(BinOp::Eq, l, _)
-        if **l == ExprNode::Column(ColumnRef::of(SourceId(1), "email"))));
+        if **l == ExprNode::Column(ColumnRef::of(SourceId(1), "email").in_table(User::TABLE))));
 }
 
 #[test]

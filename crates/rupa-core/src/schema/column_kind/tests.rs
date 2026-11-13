@@ -36,8 +36,10 @@ impl<const N: usize> IndexableBy<Gin> for Vector<N> {}
 struct Item;
 
 impl Item {
-    const EMBEDDING: Column<Item, Vector<3>, Scalar> = Column::scalar("embedding");
-    const MAYBE: Column<Item, Option<Vector<8>>, Scalar> = Column::scalar("maybe");
+    const EMBEDDING: Column<Item, Vector<3>, Scalar> =
+        Column::scalar_in(<Item as Entity>::TABLE, "embedding");
+    const MAYBE: Column<Item, Option<Vector<8>>, Scalar> =
+        Column::scalar_in(<Item as Entity>::TABLE, "maybe");
 }
 
 impl FromRow for Item {

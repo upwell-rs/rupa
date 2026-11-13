@@ -7,7 +7,7 @@
 //! like a written one. The IR has no subquery node, so none can be written.
 
 use rupa_core::column::ColumnMeta;
-use rupa_core::ir::{ColumnRef, ExprNode};
+use rupa_core::ir::{ColumnRef, ExprNode, TableRef};
 use rupa_core::{Dialect, DialectId, Value};
 
 use super::{Syntax, Writer, prec};
@@ -98,6 +98,9 @@ const VOLATILE: &[&str] = &[
 pub(crate) struct Mode<'a> {
     /// The object holding the expression, named in refusals.
     pub(crate) object: &'static str,
+    /// The table the object belongs to: a column of a typed handle must be
+    /// one of its.
+    pub(crate) table: TableRef,
     /// The columns the expression may name, if known.
     pub(crate) scope: Option<&'a [ColumnMeta]>,
 }
@@ -190,10 +193,13 @@ impl<'a> Writer<'a> {
         let known = mode
             .scope
             .is_none_or(|columns| columns.iter().any(|c| c.name == column.name));
+        let owned = column.table.is_none_or(|table| table == mode.table);
 
-        if column.source.0 != 0 || !known {
+        if column.source.0 != 0 || !known || !owned {
             return Err(self.refuse(ExprRefusal::Column {
                 column: column.name,
+                table: column.table,
+                expected: mode.table,
             }));
         }
 

@@ -1,9 +1,10 @@
 use rupa_core::SqlType;
 use rupa_core::Value;
+use rupa_core::ir::TableRef;
 use rupa_core::ir::{BinOp, ColumnRef, ExprNode, PathSeg, UnOp};
 use rupa_core::schema::{ColumnType, DdlExpr, Index, IndexColumn, IndexExpr, IndexPart};
 
-use super::plans::{assert_distinct_digests, notes_title, plan_digest};
+use super::plans::{NOTES, assert_distinct_digests, notes_title, plan_digest};
 use super::*;
 
 pub(super) fn column(name: &'static str) -> ExprNode {
@@ -178,4 +179,23 @@ fn expression_and_predicate_encoding_is_stable() {
         checksum.to_string(),
         "195764919efb93450f134a2c1f8a183c077cac33768a4df5ea495aaefc81b2fb"
     );
+}
+
+fn titled(table: Option<TableRef>) -> Plan {
+    let column = match table {
+        Some(table) => ColumnRef::new("title").in_table(table),
+        None => ColumnRef::new("title"),
+    };
+
+    Plan::new().create_index(on(call("lower", ExprNode::Column(column))))
+}
+
+#[test]
+fn a_columns_recorded_table_is_not_part_of_the_checksum() {
+    let untabled = plan_digest(|| titled(None));
+    let notes = plan_digest(|| titled(Some(NOTES)));
+    let elsewhere = plan_digest(|| titled(Some(TableRef::new("elsewhere"))));
+
+    assert_eq!(untabled, notes);
+    assert_eq!(notes, elsewhere);
 }

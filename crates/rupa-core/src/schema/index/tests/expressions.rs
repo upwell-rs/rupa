@@ -1,6 +1,7 @@
 use super::*;
+use crate::column::{Column, Scalar};
 use crate::expr::{Expr, ExprOps, IntoExpr};
-use crate::ir::{ColumnRef, ExprNode};
+use crate::ir::{ColumnRef, ExprNode, TableRef};
 use crate::schema::{DdlExpr, IndexExpr};
 
 fn lower_title() -> Expr<String> {
@@ -88,5 +89,68 @@ fn a_filter_sets_the_predicate_scoped_to_the_entity() {
             .predicate
             .map(|predicate| predicate.scope),
         Some(None)
+    );
+}
+
+struct Other;
+
+impl Other {
+    const TITLE: Column<Other, String, Scalar> =
+        Column::scalar_in(TableRef::new("others"), "title");
+}
+
+fn table_of(expr: &DdlExpr) -> Option<TableRef> {
+    match &expr.node {
+        ExprNode::Column(column) => column.table,
+        ExprNode::Binary(_, lhs, _) => match &**lhs {
+            ExprNode::Column(column) => column.table,
+            other => panic!("not a column: {other:?}"),
+        },
+        other => panic!("not a column comparison: {other:?}"),
+    }
+}
+
+#[test]
+fn handles_record_their_entitys_table_in_conditions_and_expressions() {
+    let filtered: Index = BTree::on("docs_slug", Doc::SLUG)
+        .filter(Doc::TITLE.eq("a"))
+        .into();
+    let foreign: Index = BTree::on("docs_slug", Doc::SLUG)
+        .filter(Other::TITLE.eq("a"))
+        .into();
+    let expression = BTree::on_expr::<Doc>(
+        "docs_other_title",
+        Expr::<String>::from_node(Other::TITLE.into_node()),
+    )
+    .build();
+    let [IndexPart::Expr(part)] = expression.parts.as_slice() else {
+        panic!("one expression part");
+    };
+
+    assert_eq!(
+        table_of(filtered.predicate.as_ref().expect("a predicate")),
+        Some(Doc::TABLE)
+    );
+    assert_eq!(
+        table_of(foreign.predicate.as_ref().expect("a predicate")),
+        Some(TableRef::new("others"))
+    );
+    assert_eq!(table_of(&part.expr), Some(TableRef::new("others")));
+    assert_ne!(filtered.predicate, foreign.predicate);
+}
+
+#[test]
+fn a_handle_without_a_table_leaves_its_node_untabled() {
+    let bare: Column<Doc, String, Scalar> = Column::scalar("title");
+
+    assert_eq!(bare.table(), None);
+    assert_eq!(bare.column_ref(), ColumnRef::new("title"));
+    assert_eq!(
+        Doc::TITLE.column_ref(),
+        ColumnRef::new("title").in_table(Doc::TABLE)
+    );
+    assert_eq!(
+        Doc::TITLE.in_table(TableRef::new("x")).table(),
+        Some(TableRef::new("x"))
     );
 }

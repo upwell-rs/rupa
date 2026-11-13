@@ -50,7 +50,7 @@ impl Ddl<'_> {
                 IndexPart::Column(column) => self.ident(column.name),
                 IndexPart::Expr(part) => {
                     self.sql.push('(');
-                    self.expr(index.name, &part.expr)?;
+                    self.expr(index.name, index.table, &part.expr)?;
                     self.sql.push(')');
                 }
             }
@@ -60,7 +60,7 @@ impl Ddl<'_> {
 
         if let Some(predicate) = &index.predicate {
             self.sql.push_str(" WHERE ");
-            self.expr(index.name, predicate)?;
+            self.expr(index.name, index.table, predicate)?;
         }
 
         Ok(())
