@@ -42,7 +42,34 @@ fn float_literals_always_read_as_floats() {
 #[test]
 fn integers_stay_integer_literals() {
     for value in [Value::I16(2), Value::I32(2), Value::I64(2)] {
+        for dialect in [&MySql as &dyn Dialect, &Sqlite] {
+            assert!(
+                rendered(value.clone(), dialect).ends_with(" / 2))"),
+                "{value:?} on {dialect:?}"
+            );
+        }
+    }
+
+    for value in [Value::I16(2), Value::I32(2)] {
         assert!(rendered(value, &Postgres).ends_with(r#""n" / 2))"#));
+    }
+}
+
+#[test]
+fn postgres_keeps_i64_literals_bigint() {
+    assert!(
+        rendered(Value::I64(1_000_000), &Postgres).ends_with(r#""n" / CAST(1000000 AS BIGINT)))"#)
+    );
+}
+
+#[test]
+fn integer_defaults_stay_bare() {
+    let table = Table::at(NOTES).column(
+        ColumnDef::new("count", ColumnType::BigInt).default(ColumnDefault::Value(Value::I64(5))),
+    );
+
+    for sql in ok(&SchemaOp::CreateTable(table)) {
+        assert!(sql.contains("DEFAULT 5"), "{sql}");
     }
 }
 

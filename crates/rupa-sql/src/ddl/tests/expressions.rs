@@ -133,7 +133,7 @@ fn literals_are_inlined_as_checked_literals() {
     assert_eq!(
         postgres.as_deref(),
         Ok(
-            r#"CREATE INDEX "notes_partial" ON "app"."notes" ("title") WHERE "title" = 'it''s' AND "n" > -3"#
+            r#"CREATE INDEX "notes_partial" ON "app"."notes" ("title") WHERE "title" = 'it''s' AND "n" > CAST(-3 AS BIGINT)"#
         )
     );
     assert_eq!(

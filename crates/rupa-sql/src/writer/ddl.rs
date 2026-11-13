@@ -141,11 +141,21 @@ impl<'a> Writer<'a> {
         }
 
         let dialect = self.dialect.id();
+        let bigint = dialect == DialectId::Postgres && matches!(value, Value::I64(_));
+        let mut literal = String::new();
 
-        if literal::write(value, dialect, &mut self.sql).is_none() {
+        if literal::write(value, dialect, &mut literal).is_none() {
             return Err(self.refuse(ExprRefusal::Literal {
                 ty: value.sql_type(),
             }));
+        }
+
+        if bigint {
+            self.sql.push_str("CAST(");
+            self.sql.push_str(&literal);
+            self.sql.push_str(" AS BIGINT)");
+        } else {
+            self.sql.push_str(&literal);
         }
 
         Ok(())
