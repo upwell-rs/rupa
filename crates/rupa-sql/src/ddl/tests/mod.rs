@@ -8,6 +8,7 @@ use super::*;
 mod alterations;
 mod expressions;
 mod indexes;
+mod key_parts;
 mod kinds;
 mod literals;
 mod scalar_calls;

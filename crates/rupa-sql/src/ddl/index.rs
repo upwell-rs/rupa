@@ -1,11 +1,12 @@
 //! `CREATE INDEX`: rendering and the dialect checks on kind and columns.
 
 use rupa_core::DialectId;
-use rupa_core::ir::TableRef;
+use rupa_core::ir::{ExprNode, TableRef};
 use rupa_core::schema::{Index, IndexPart, IndexSupport};
 
 use super::{Ddl, IndexRefusal, SchemaError, types};
 use crate::RenderError;
+use crate::writer::MAX_LOWERING_DEPTH;
 
 impl Ddl<'_> {
     pub(super) fn create_index(&mut self, index: &Index) -> Result<(), RenderError> {
@@ -48,6 +49,9 @@ impl Ddl<'_> {
 
             match part {
                 IndexPart::Column(column) => self.ident(column.name),
+                IndexPart::Expr(part) if self.bare_column(&part.expr.node, 0) => {
+                    self.expr(index.name, index.table, &part.expr)?;
+                }
                 IndexPart::Expr(part) => {
                     self.sql.push('(');
                     self.expr(index.name, index.table, &part.expr)?;
@@ -64,6 +68,21 @@ impl Ddl<'_> {
         }
 
         Ok(())
+    }
+
+    /// Whether `node`, lowered for the dialect, is a single column. Such a
+    /// part is written as a plain key part: MySQL refuses a functional key
+    /// part that is only a column (error 3762), and every dialect indexes
+    /// both the same way. Lowering is followed as deep as the writer follows
+    /// it.
+    fn bare_column(&self, node: &ExprNode, depth: usize) -> bool {
+        match node {
+            ExprNode::Column(_) => true,
+            ExprNode::Dsl(call) if depth < MAX_LOWERING_DEPTH => call
+                .lower(self.target)
+                .is_ok_and(|lowered| self.bare_column(&lowered, depth + 1)),
+            _ => false,
+        }
     }
 
     fn using(&mut self, method: Option<&'static str>) {
