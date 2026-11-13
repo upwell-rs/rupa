@@ -25,7 +25,8 @@ fn float_literals_always_read_as_floats() {
         (Value::F64(1e-300), "1e-300"),
         (Value::F64(f64::MIN_POSITIVE), "2.2250738585072014e-308"),
         (Value::F32(3.0), "3.0"),
-        (Value::F32(f32::MAX), "3.4028235e38"),
+        (Value::F32(0.1), "0.10000000149011612"),
+        (Value::F32(f32::MAX), "3.4028234663852886e38"),
     ] {
         let expected = format!(" / {text}))");
 
