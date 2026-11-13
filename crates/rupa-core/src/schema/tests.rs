@@ -11,9 +11,11 @@ struct Post {
 }
 
 impl Post {
-    const TITLE: Column<Post, String, Scalar> = Column::scalar("title");
-    const AUTHOR: Column<Post, Option<i64>, Scalar> = Column::scalar("author_id");
-    const SLUG: Column<Post, VarChar<40>, Scalar> = Column::scalar("slug");
+    const TITLE: Column<Post, String, Scalar> = Column::scalar_in(<Post as Entity>::TABLE, "title");
+    const AUTHOR: Column<Post, Option<i64>, Scalar> =
+        Column::scalar_in(<Post as Entity>::TABLE, "author_id");
+    const SLUG: Column<Post, VarChar<40>, Scalar> =
+        Column::scalar_in(<Post as Entity>::TABLE, "slug");
 }
 
 const AUTHORS: Reference = Reference {

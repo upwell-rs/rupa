@@ -1,0 +1,29 @@
+error[E0277]: `i64` values (a column or an expression result) cannot be indexed by `Gin`
+  --> tests/ui/index_kind_rejects_expr.rs:11:50
+   |
+11 |     let _ = Gin::on_expr::<User>("users_abs_id", lowered);
+   |             --------------------                 ^^^^^^^ not accepted by this index kind
+   |             |
+   |             required by a bound introduced by this call
+   |
+   = help: the trait `IndexableBy<Gin>` is not implemented for `i64`
+   = note: implement `IndexableBy<Gin>` for the type if the kind can index it
+help: the trait `IndexableExpr<K>` is conditionally implemented for `rupa_core::Expr<T>`
+  --> src/schema/index/part.rs
+   |
+   | / impl<K: IndexKind, T: ExprResult> IndexableExpr<K> for Expr<T>
+   | | where
+   | |     T::Kind: IndexableColumn<K, T>,
+   | |______________---------------------^
+   |                |
+   |                unsatisfied requirement introduced here: `<i64 as ExprResult>::Kind: IndexableColumn<Gin, i64>`
+   = note: required for `rupa_core::Scalar` to implement `IndexableColumn<Gin, i64>`
+   = note: required for `rupa_core::Expr<i64>` to implement `IndexableExpr<Gin>`
+note: required by a bound in `on_expr`
+  --> src/schema/index/mod.rs
+   |
+   |     fn on_expr<E: Entity>(
+   |        ------- required by a bound in this associated function
+   |         name: &'static str,
+   |         expr: impl IndexableExpr<Self>,
+   |                    ^^^^^^^^^^^^^^^^^^^ required by this bound in `IndexKind::on_expr`

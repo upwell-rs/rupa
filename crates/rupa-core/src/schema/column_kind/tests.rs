@@ -36,8 +36,10 @@ impl<const N: usize> IndexableBy<Gin> for Vector<N> {}
 struct Item;
 
 impl Item {
-    const EMBEDDING: Column<Item, Vector<3>, Scalar> = Column::scalar("embedding");
-    const MAYBE: Column<Item, Option<Vector<8>>, Scalar> = Column::scalar("maybe");
+    const EMBEDDING: Column<Item, Vector<3>, Scalar> =
+        Column::scalar_in(<Item as Entity>::TABLE, "embedding");
+    const MAYBE: Column<Item, Option<Vector<8>>, Scalar> =
+        Column::scalar_in(<Item as Entity>::TABLE, "maybe");
 }
 
 impl FromRow for Item {
@@ -109,5 +111,8 @@ fn kinds_are_entity_field_and_literal_column_types() {
 fn indexes_over_kind_columns_use_the_kinds_opt_in() {
     let index = Gin::on("items_embedding", Item::EMBEDDING).build();
 
-    assert_eq!(index.columns[0].ty, ColumnType::Kind(&Vector::<3>::SPEC));
+    assert_eq!(
+        index.columns().next().expect("one column").ty,
+        ColumnType::Kind(&Vector::<3>::SPEC)
+    );
 }

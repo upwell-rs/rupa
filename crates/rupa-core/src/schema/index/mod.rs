@@ -6,16 +6,19 @@
 //! ([`IndexableBy`]).
 
 mod kinds;
+mod part;
 
 use std::marker::PhantomData;
 
-use super::{ColumnDef, ColumnType};
+use super::DdlExpr;
 use crate::column::{Column, Json, Scalar};
 use crate::dialect::DialectId;
 use crate::entity::Entity;
+use crate::expr::IntoCondition;
 use crate::ir::TableRef;
 
 pub use kinds::{BTree, Gin, Gist, Hash};
+pub use part::{ExprResult, IndexColumn, IndexExpr, IndexPart, IndexableExpr};
 
 /// How a dialect writes an index kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -139,12 +142,29 @@ pub trait IndexKind: Sized + 'static {
             _p: PhantomData,
         }
     }
+
+    /// An index of this kind over one expression of entity `E`, which must
+    /// evaluate to a type the kind accepts. The entity is named explicitly,
+    /// since an expression does not carry it: `BTree::on_expr::<User>(..)`.
+    fn on_expr<E: Entity>(
+        name: &'static str,
+        expr: impl IndexableExpr<Self>,
+    ) -> IndexBuilder<Self, E> {
+        IndexBuilder {
+            index: Index {
+                parts: vec![expr.into_part::<E>().into()],
+                ..Index::new(name, E::TABLE, [])
+            }
+            .method(Self::METHOD),
+            _p: PhantomData,
+        }
+    }
 }
 
 /// Marks a column type `Self` as indexable by kind `K`: `GIN` over an
 /// integer, for one, does not compile.
 #[diagnostic::on_unimplemented(
-    message = "a `{Self}` column cannot be indexed by `{K}`",
+    message = "`{Self}` values (a column or an expression result) cannot be indexed by `{K}`",
     label = "not accepted by this index kind",
     note = "implement `IndexableBy<{K}>` for the type if the kind can index it"
 )]
@@ -170,35 +190,7 @@ impl<K: IndexKind, T: IndexableBy<K>> IndexableColumn<K, T> for Scalar {}
 
 impl<K: JsonIndexKind, T> IndexableColumn<K, T> for Json {}
 
-/// An indexed column: its name and type, so rendering can check the type
-/// against the dialect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IndexColumn {
-    /// The column name.
-    pub name: &'static str,
-    /// The column type, with its length for bounded text.
-    pub ty: ColumnType,
-}
-
-impl IndexColumn {
-    /// A column named `name` of type `ty`.
-    pub const fn new(name: &'static str, ty: ColumnType) -> Self {
-        Self { name, ty }
-    }
-
-    /// The column an entity field handle describes.
-    pub const fn of<E, T, K>(column: Column<E, T, K>) -> Self {
-        Self::new(column.name(), column.column_type())
-    }
-}
-
-impl From<&ColumnDef> for IndexColumn {
-    fn from(column: &ColumnDef) -> Self {
-        Self::new(column.name, column.ty)
-    }
-}
-
-/// `CREATE [UNIQUE] INDEX`. Columns carry their types: MySQL refuses unbounded
+/// `CREATE [UNIQUE] INDEX`. Parts carry their types: MySQL refuses unbounded
 /// `Text`, `Bytes` and `Json` in an index, which only rendering can tell.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Index {
@@ -208,10 +200,12 @@ pub struct Index {
     pub table: TableRef,
     /// The index kind.
     pub kind: IndexMethod,
-    /// The indexed columns, in order.
-    pub columns: Vec<IndexColumn>,
+    /// The indexed columns and expressions, in order.
+    pub parts: Vec<IndexPart>,
     /// Whether indexed values must be unique.
     pub unique: bool,
+    /// The condition rows must meet to be indexed (a partial index).
+    pub predicate: Option<Box<DdlExpr>>,
 }
 
 impl Index {
@@ -226,9 +220,18 @@ impl Index {
             name,
             table,
             kind: BTree::METHOD,
-            columns: columns.into_iter().collect(),
+            parts: columns.into_iter().map(IndexPart::from).collect(),
             unique: false,
+            predicate: None,
         }
+    }
+
+    /// The indexed columns, skipping expressions.
+    pub fn columns(&self) -> impl Iterator<Item = &IndexColumn> {
+        self.parts.iter().filter_map(|part| match part {
+            IndexPart::Column(column) => Some(column),
+            IndexPart::Expr(_) => None,
+        })
     }
 
     /// A B-tree index named `name` over one entity column.
@@ -237,6 +240,11 @@ impl Index {
         column: Column<E, T, C>,
     ) -> Self {
         BTree::on(name, column).into()
+    }
+
+    /// A B-tree index named `name` over one expression of entity `E`.
+    pub fn on_expr<E: Entity>(name: &'static str, expr: impl IndexableExpr<BTree>) -> Self {
+        BTree::on_expr::<E>(name, expr).into()
     }
 
     /// Sets the index kind, unchecked: prefer [`IndexKind::on`].
@@ -249,6 +257,19 @@ impl Index {
     /// Makes indexed values unique.
     pub fn unique(mut self) -> Self {
         self.unique = true;
+
+        self
+    }
+
+    /// Indexes only the rows meeting `predicate`, unchecked: prefer
+    /// [`IndexBuilder::filter`]. Repeated calls are ANDed, as in queries.
+    pub fn filter(mut self, predicate: DdlExpr) -> Self {
+        let predicate = match self.predicate.take() {
+            Some(existing) => existing.and(predicate),
+            None => predicate,
+        };
+
+        self.predicate = Some(Box::new(predicate));
 
         self
     }
@@ -265,7 +286,26 @@ pub struct IndexBuilder<K, E> {
 impl<K: IndexKind, E: Entity> IndexBuilder<K, E> {
     /// Adds a column the kind accepts.
     pub fn and<T, C: IndexableColumn<K, T>>(mut self, column: Column<E, T, C>) -> Self {
-        self.index.columns.push(IndexColumn::of(column));
+        self.index.parts.push(IndexColumn::of(column).into());
+
+        self
+    }
+
+    /// Adds an expression over the entity's columns that the kind accepts.
+    pub fn and_expr(mut self, expr: impl IndexableExpr<K>) -> Self {
+        self.index.parts.push(expr.into_part::<E>().into());
+
+        self
+    }
+
+    /// Indexes only the rows meeting `condition`, which may name the
+    /// entity's columns only. Repeated calls are ANDed, as in queries.
+    /// Dialects without partial indexes (MySQL) refuse the index when it is
+    /// rendered.
+    pub fn filter(mut self, condition: impl IntoCondition) -> Self {
+        self.index = self
+            .index
+            .filter(DdlExpr::of::<E, bool>(condition.into_condition()));
 
         self
     }

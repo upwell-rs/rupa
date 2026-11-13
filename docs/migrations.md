@@ -247,8 +247,73 @@ dialect that cannot build a kind (MySQL and SQLite have no GIN, GiST or hash
 indexes), a unique `Hash`/`Gin`/`Gist` index or a multi-column `Hash` index
 fails at preflight with a typed `SchemaError::Index`. Literal tables use
 `Index::new(name, table, [IndexColumn::new("title", ColumnType::VarChar(80))])`
-and `.method(Gin::METHOD)`. Expression and partial indexes are not offered;
-write them as SQL.
+and `.method(Gin::METHOD)`. Expression and partial indexes are described next.
+
+### Expression and partial indexes
+
+An index part is a column or an expression over the entity's columns, written
+with the query DSL. `Kind::on_expr::<Entity>(name, expr)` starts an index over
+one expression and `.and_expr(expr)` adds another; they can be mixed with
+columns in any order. The entity is named explicitly because an expression does
+not carry it. The expression's result type must be accepted by the kind exactly
+as a column of that type would be (`IndexableBy<Kind>` for scalars, a
+`JsonIndexKind` for JSON results), so `Gin::on_expr` over an integer
+expression does not compile. `.filter(condition)` makes the index partial: only
+rows meeting the condition are indexed, and a unique partial index constrains
+only those rows.
+
+```rust,ignore
+use rupa::dsl_std::lower;
+
+Plan::new()
+    .create_table(Table::of::<Account>())
+    // CREATE UNIQUE INDEX .. ((lower("nick")))
+    .create_index(BTree::on_expr::<Account>("accounts_nick_lower", lower(Account::NICK)).unique())
+    // CREATE UNIQUE INDEX .. ("bucket") WHERE "closed_at" IS NULL
+    .create_index(
+        BTree::on("accounts_open_bucket", Account::BUCKET)
+            .unique()
+            .filter(Account::CLOSED_AT.is_null()),
+    )
+```
+
+Expressions and conditions are rendered in DDL mode, which differs from a
+query in what it may hold: nothing is bound, so every value is written as a
+checked literal (booleans, integers, finite floats, text and JSON; text with a
+NUL, or with a backslash on MySQL, and values with no safe literal form such as
+bytes, UUIDs and dates are refused). A column must belong to the entity the
+index is built for: a typed handle records its table, so a column of another
+entity is refused even when the two have a column of the same name
+(`ExprRefusal::Column`, naming both tables). Hand-written entities build their
+handles with `Column::scalar_in(Self::TABLE, "name")` (or `json_in`,
+`nullable_json_in`) so that they are checked too; `Column::scalar(..)` has no
+table and is only checked by name. Calls to aggregate functions (`count`, `sum`, ..), window
+functions (`row_number`, ..) and well-known volatile built-ins (`now`, `random`,
+`uuid`, `current_timestamp`, ..) are refused after DSL functions are lowered, so
+a function built on one is refused too. The query IR has no subquery node, so
+none can be written. These fail at preflight with
+`SchemaError::Expression { object, dialect, reason: ExprRefusal }`. The same
+renderer will back CHECK constraints.
+
+Volatility is recognized by name, not declared: rupa cannot know whether an
+arbitrary function is immutable, and a `#[dsl::function]` carries no such
+flag. A function outside the recognized list, or one that is volatile through
+its arguments (SQLite `datetime('now')`), reaches the database, which rejects
+it when the migration runs (PostgreSQL requires index functions to be
+`IMMUTABLE`).
+
+| | PostgreSQL | SQLite | MySQL (8.0.13+) |
+|---|---|---|---|
+| expression part | `((expr))` | `((expr))` | `((expr))`, functional key part |
+| expression of unbounded `Text`, `Bytes` or `Json` type | yes | yes | refused: `IndexRefusal::UnboundedExpr` |
+| partial index (`WHERE`) | yes | yes | refused: `IndexRefusal::Partial` |
+
+MySQL refuses an index expression whose result type is unbounded because its
+functional key parts cannot be `TEXT`, `BLOB` or `JSON`. The type is the
+expression's Rust type: DSL text functions such as `lower` return `String`, so
+`lower(Account::NICK)` is refused on MySQL even over a bounded column, while an
+expression typed `VarChar<N>` (`Expr::<VarChar<120>>::call("lower", ..)`) or a
+numeric one is built. Casting to a bounded type is not offered yet.
 
 ### Extending column types
 

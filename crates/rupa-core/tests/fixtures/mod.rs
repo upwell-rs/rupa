@@ -30,13 +30,18 @@ pub struct User {
 }
 
 impl User {
-    pub const ID: Column<User, i64, Scalar> = Column::scalar("id");
-    pub const EMAIL: Column<User, String, Scalar> = Column::scalar("email");
-    pub const NICKNAME: Column<User, Option<String>, Scalar> = Column::scalar("nickname");
-    pub const ACTIVE: Column<User, bool, Scalar> = Column::scalar("active");
-    pub const CREATED_AT: Column<User, DateTime<Utc>, Scalar> = Column::scalar("created");
-    pub const PREFS: Column<User, Prefs, Json> = Column::json("prefs");
-    pub const OLD_PREFS: Column<User, Option<Prefs>, Json> = Column::nullable_json("old_prefs");
+    pub const ID: Column<User, i64, Scalar> = Column::scalar_in(<User as Entity>::TABLE, "id");
+    pub const EMAIL: Column<User, String, Scalar> =
+        Column::scalar_in(<User as Entity>::TABLE, "email");
+    pub const NICKNAME: Column<User, Option<String>, Scalar> =
+        Column::scalar_in(<User as Entity>::TABLE, "nickname");
+    pub const ACTIVE: Column<User, bool, Scalar> =
+        Column::scalar_in(<User as Entity>::TABLE, "active");
+    pub const CREATED_AT: Column<User, DateTime<Utc>, Scalar> =
+        Column::scalar_in(<User as Entity>::TABLE, "created");
+    pub const PREFS: Column<User, Prefs, Json> = Column::json_in(<User as Entity>::TABLE, "prefs");
+    pub const OLD_PREFS: Column<User, Option<Prefs>, Json> =
+        Column::nullable_json_in(<User as Entity>::TABLE, "old_prefs");
 
     pub fn sample() -> Self {
         User {

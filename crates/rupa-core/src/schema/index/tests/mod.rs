@@ -4,19 +4,24 @@ use crate::dialect::DialectId;
 use crate::entity::{Entity, FromRow};
 use crate::error::ResultError;
 use crate::row::Row;
+use crate::schema::{ColumnDef, ColumnType};
 use crate::value::Value;
 use crate::varchar::VarChar;
 
 struct Doc;
 
 impl Doc {
-    const TITLE: Column<Doc, String, Scalar> = Column::scalar("title");
-    const SLUG: Column<Doc, VarChar<64>, Scalar> = Column::scalar("slug");
-    const OWNER: Column<Doc, Option<i64>, Scalar> = Column::scalar("owner");
-    const META: Column<Doc, serde_json::Value, crate::column::Json> = Column::json("meta");
-    const TAGS: Column<Doc, Vec<String>, crate::column::Json> = Column::json("tags");
+    const TITLE: Column<Doc, String, Scalar> = Column::scalar_in(<Doc as Entity>::TABLE, "title");
+    const SLUG: Column<Doc, VarChar<64>, Scalar> =
+        Column::scalar_in(<Doc as Entity>::TABLE, "slug");
+    const OWNER: Column<Doc, Option<i64>, Scalar> =
+        Column::scalar_in(<Doc as Entity>::TABLE, "owner");
+    const META: Column<Doc, serde_json::Value, crate::column::Json> =
+        Column::json_in(<Doc as Entity>::TABLE, "meta");
+    const TAGS: Column<Doc, Vec<String>, crate::column::Json> =
+        Column::json_in(<Doc as Entity>::TABLE, "tags");
     const NOTE: Column<Doc, Option<Vec<String>>, crate::column::Json> =
-        Column::nullable_json("note");
+        Column::nullable_json_in(<Doc as Entity>::TABLE, "note");
 }
 
 impl FromRow for Doc {
@@ -58,7 +63,7 @@ fn typed_handles_give_the_index_its_column_types() {
     assert_eq!(index.table, Doc::TABLE);
     assert!(index.unique);
     assert_eq!(
-        index.columns,
+        index.columns().copied().collect::<Vec<_>>(),
         [IndexColumn::new("slug", ColumnType::VarChar(64))]
     );
 }
@@ -71,7 +76,7 @@ fn builders_add_checked_columns_and_become_indexes() {
         .into();
 
     assert_eq!(
-        index.columns,
+        index.columns().copied().collect::<Vec<_>>(),
         [
             IndexColumn::new("owner", ColumnType::BigInt),
             IndexColumn::new("title", ColumnType::Text),
@@ -135,7 +140,7 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
 
     assert_eq!(index.kind, Gin::METHOD);
     assert_eq!(
-        index.columns,
+        index.columns().copied().collect::<Vec<_>>(),
         [
             IndexColumn::new("tags", ColumnType::Json),
             IndexColumn::new("meta", ColumnType::Json),
@@ -146,5 +151,10 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
     let btree = Index::on("docs_meta", Doc::META);
 
     assert_eq!(btree.kind, BTree::METHOD);
-    assert_eq!(btree.columns, [IndexColumn::new("meta", ColumnType::Json)]);
+    assert_eq!(
+        btree.columns().copied().collect::<Vec<_>>(),
+        [IndexColumn::new("meta", ColumnType::Json)]
+    );
 }
+
+mod expressions;

@@ -6,8 +6,12 @@ use rupa_core::{MySql, Postgres, Reference, Sqlite, Value};
 use super::*;
 
 mod alterations;
+mod expressions;
 mod indexes;
+mod key_parts;
 mod kinds;
+mod literals;
+mod scalar_calls;
 mod tables;
 
 const NOTES: TableRef = TableRef::with_schema("app", "notes");

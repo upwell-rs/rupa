@@ -1,5 +1,6 @@
-use rupa_core::DialectId;
+use rupa_core::ir::TableRef;
 use rupa_core::schema::ColumnType;
+use rupa_core::{DialectId, SqlType};
 
 /// A schema operation a dialect cannot express as written. Nothing is
 /// approximated: the operation must be changed, or written as SQL.
@@ -99,6 +100,63 @@ pub enum SchemaError {
         /// What the dialect refuses.
         reason: IndexRefusal,
     },
+    /// An expression of a schema object that DDL cannot hold.
+    #[error("{dialect:?} cannot use the expression of `{object}`: {reason}")]
+    Expression {
+        /// The schema object (index, constraint) holding the expression.
+        object: &'static str,
+        /// The dialect.
+        dialect: DialectId,
+        /// What DDL refuses.
+        reason: ExprRefusal,
+    },
+}
+
+/// Why an expression cannot be written in DDL. DDL mode binds nothing and
+/// evaluates nowhere, so only what a schema object may hold is accepted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ExprRefusal {
+    /// A call of an aggregate function.
+    #[error("the aggregate `{function}` is not allowed")]
+    Aggregate {
+        /// The function.
+        function: &'static str,
+    },
+    /// A call of a window function.
+    #[error("the window function `{function}` is not allowed")]
+    Window {
+        /// The function.
+        function: &'static str,
+    },
+    /// A call of a function whose result changes between calls, which no
+    /// dialect accepts in an index or constraint. Only well-known built-ins
+    /// are recognized; the database refuses the rest.
+    #[error("the volatile function `{function}` is not allowed")]
+    Volatile {
+        /// The function.
+        function: &'static str,
+    },
+    /// A column the schema object's table does not have: a column of another
+    /// table (`table`, when the typed handle recorded it), a column of a
+    /// joined source, or a name the entity has no column for.
+    #[error("column `{column}`{} is not a column of table `{}`", of_table(.table), qualified(.expected))]
+    Column {
+        /// The column.
+        column: &'static str,
+        /// The table the column's handle belongs to, if it recorded one.
+        table: Option<TableRef>,
+        /// The table the schema object belongs to.
+        expected: TableRef,
+    },
+    /// A bound value with no safe literal form on the dialect (bytes, UUIDs,
+    /// dates and times, non-finite floats, text with a NUL or, on MySQL, a
+    /// backslash).
+    #[error("a {ty:?} value has no safe literal form")]
+    Literal {
+        /// The value's type.
+        ty: SqlType,
+    },
 }
 
 /// Why a dialect cannot build an index.
@@ -133,4 +191,27 @@ pub enum IndexRefusal {
         /// The type.
         ty: ColumnType,
     },
+    /// An expression whose result type the dialect cannot index without a
+    /// length.
+    #[error("an expression of type {ty:?} has no length and cannot be indexed")]
+    UnboundedExpr {
+        /// The expression's result type.
+        ty: ColumnType,
+    },
+    /// The dialect has no partial indexes.
+    #[error("the dialect has no partial indexes")]
+    Partial,
+}
+
+fn qualified(table: &TableRef) -> String {
+    match table.schema {
+        Some(schema) => format!("{schema}.{}", table.name),
+        None => table.name.to_owned(),
+    }
+}
+
+fn of_table(table: &Option<TableRef>) -> String {
+    table.as_ref().map_or_else(String::new, |table| {
+        format!(" of table `{}`", qualified(table))
+    })
 }
