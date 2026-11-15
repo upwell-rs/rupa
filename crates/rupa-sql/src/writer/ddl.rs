@@ -10,89 +10,10 @@ use rupa_core::column::ColumnMeta;
 use rupa_core::ir::{ColumnRef, ExprNode, TableRef};
 use rupa_core::{Dialect, DialectId, Value};
 
+use super::builtins::{self, Builtin};
 use super::{Syntax, Writer, prec};
 use crate::RenderError;
 use crate::ddl::{ExprRefusal, SchemaError, literal};
-
-const AGGREGATES: &[&str] = &[
-    "array_agg",
-    "avg",
-    "bit_and",
-    "bit_or",
-    "bit_xor",
-    "bool_and",
-    "bool_or",
-    "count",
-    "every",
-    "group_concat",
-    "json_agg",
-    "json_arrayagg",
-    "json_group_array",
-    "json_group_object",
-    "json_objectagg",
-    "jsonb_agg",
-    "max",
-    "min",
-    "string_agg",
-    "sum",
-    "total",
-];
-
-const WINDOWS: &[&str] = &[
-    "cume_dist",
-    "dense_rank",
-    "first_value",
-    "lag",
-    "last_value",
-    "lead",
-    "nth_value",
-    "ntile",
-    "percent_rank",
-    "rank",
-    "row_number",
-];
-
-const VOLATILE: &[&str] = &[
-    "changes",
-    "clock_timestamp",
-    "connection_id",
-    "curdate",
-    "current_date",
-    "current_time",
-    "current_timestamp",
-    "current_user",
-    "curtime",
-    "currval",
-    "database",
-    "found_rows",
-    "gen_random_uuid",
-    "last_insert_id",
-    "last_insert_rowid",
-    "lastval",
-    "localtime",
-    "localtimestamp",
-    "nextval",
-    "now",
-    "rand",
-    "random",
-    "randomblob",
-    "row_count",
-    "session_user",
-    "setval",
-    "statement_timestamp",
-    "sysdate",
-    "timeofday",
-    "total_changes",
-    "transaction_timestamp",
-    "user",
-    "utc_date",
-    "utc_time",
-    "utc_timestamp",
-    "uuid",
-    "uuid_generate_v4",
-    "uuid_short",
-    "version",
-];
 
 /// What the writer knows about the schema object it renders for.
 pub(crate) struct Mode<'a> {
@@ -161,10 +82,8 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    /// Refuses calls DDL cannot hold. SQLite's `max` and `min` with several
-    /// arguments are scalar functions and allowed; with one they aggregate.
-    /// PostgreSQL and MySQL have no scalar `max(a, b)` (they spell it
-    /// `greatest`), so there the name alone is refused as an aggregate.
+    /// Refuses calls of the target dialect's built-ins that DDL cannot hold
+    /// (see [`builtins::classify`]).
     pub(super) fn check_function(
         &self,
         name: &'static str,
@@ -174,25 +93,14 @@ impl<'a> Writer<'a> {
             return Ok(());
         }
 
-        let bare = name.rsplit('.').next().unwrap_or(name);
-        let named = |list: &[&str]| list.iter().any(|f| f.eq_ignore_ascii_case(bare));
-        let scalar = self.dialect.id() == DialectId::Sqlite
-            && arguments > 1
-            && (bare.eq_ignore_ascii_case("max") || bare.eq_ignore_ascii_case("min"));
+        let dialect = self.dialect.id();
 
-        if named(AGGREGATES) && !scalar {
-            return Err(self.refuse(ExprRefusal::Aggregate { function: name }));
+        match builtins::classify(name, arguments, dialect) {
+            Some(Builtin::Aggregate) => Err(self.refuse(ExprRefusal::Aggregate { function: name })),
+            Some(Builtin::Window) => Err(self.refuse(ExprRefusal::Window { function: name })),
+            Some(Builtin::Volatile) => Err(self.refuse(ExprRefusal::Volatile { function: name })),
+            None => Ok(()),
         }
-
-        if named(WINDOWS) {
-            return Err(self.refuse(ExprRefusal::Window { function: name }));
-        }
-
-        if named(VOLATILE) {
-            return Err(self.refuse(ExprRefusal::Volatile { function: name }));
-        }
-
-        Ok(())
     }
 
     pub(super) fn check_column(&self, column: ColumnRef) -> Result<(), RenderError> {

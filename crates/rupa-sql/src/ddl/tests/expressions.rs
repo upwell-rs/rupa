@@ -235,18 +235,16 @@ fn calls_ddl_cannot_hold_are_refused_with_their_kind() {
             },
         ),
         (
-            call("now", vec![]),
-            ExprRefusal::Volatile { function: "now" },
-        ),
-        (
-            call("pg_catalog.random", vec![]),
+            call("current_timestamp", vec![]),
             ExprRefusal::Volatile {
-                function: "pg_catalog.random",
+                function: "current_timestamp",
             },
         ),
         (
-            call("lower", vec![call("RANDOM", vec![])]),
-            ExprRefusal::Volatile { function: "RANDOM" },
+            call("lower", vec![call("CURRENT_DATE", vec![])]),
+            ExprRefusal::Volatile {
+                function: "CURRENT_DATE",
+            },
         ),
     ] {
         let rendered = all(&SchemaOp::CreateIndex(on_expression(node.clone())));

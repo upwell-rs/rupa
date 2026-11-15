@@ -70,3 +70,84 @@ fn other_aggregates_stay_refused_on_sqlite_whatever_their_arguments() {
         )
     );
 }
+
+#[test]
+fn only_the_target_dialects_builtins_are_refused() {
+    let index = on_expression(call("total", vec![column("a")]));
+
+    for (dialect, rendered) in DIALECTS.into_iter().zip(all(&SchemaOp::CreateIndex(index))) {
+        match dialect {
+            DialectId::Sqlite => assert_eq!(
+                rendered,
+                refused(
+                    "notes_expr",
+                    dialect,
+                    ExprRefusal::Aggregate { function: "total" }
+                )
+            ),
+            _ => assert!(rendered.is_ok(), "{dialect:?}: {rendered:?}"),
+        }
+    }
+}
+
+#[test]
+fn schema_qualified_functions_are_user_functions() {
+    let index = on_expression(call("billing.total", vec![column("a"), column("b")]));
+
+    for (dialect, rendered) in DIALECTS.into_iter().zip(all(&SchemaOp::CreateIndex(index))) {
+        assert!(rendered.is_ok(), "{dialect:?}: {rendered:?}");
+    }
+}
+
+#[test]
+fn postgres_still_refuses_pg_catalog_builtins() {
+    let index = on_expression(call("pg_catalog.count", vec![column("a")]));
+
+    assert_eq!(
+        render_schema(&SchemaOp::CreateIndex(index), &Postgres),
+        refused(
+            "notes_expr",
+            DialectId::Postgres,
+            ExprRefusal::Aggregate {
+                function: "pg_catalog.count"
+            }
+        )
+    );
+}
+
+#[test]
+fn volatile_builtins_are_refused_where_the_dialect_defines_them() {
+    let [postgres, mysql, sqlite] = [
+        call("pg_catalog.random", vec![]),
+        call("rand", vec![]),
+        call("random", vec![]),
+    ]
+    .map(on_expression);
+
+    assert_eq!(
+        render_schema(&SchemaOp::CreateIndex(postgres), &Postgres),
+        refused(
+            "notes_expr",
+            DialectId::Postgres,
+            ExprRefusal::Volatile {
+                function: "pg_catalog.random"
+            }
+        )
+    );
+    assert_eq!(
+        render_schema(&SchemaOp::CreateIndex(mysql), &MySql),
+        refused(
+            "notes_expr",
+            DialectId::MySql,
+            ExprRefusal::Volatile { function: "rand" }
+        )
+    );
+    assert_eq!(
+        render_schema(&SchemaOp::CreateIndex(sqlite), &Sqlite),
+        refused(
+            "notes_expr",
+            DialectId::Sqlite,
+            ExprRefusal::Volatile { function: "random" }
+        )
+    );
+}

@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod tests;
 
+mod builtins;
 mod ddl;
 mod expr;
 mod syntax;
