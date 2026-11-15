@@ -73,7 +73,7 @@ impl Unique {
     /// [`UniqueBuilder::and`].
     pub fn on<E: Relation, T, K>(name: &'static str, column: Column<E, T, K>) -> UniqueBuilder<E> {
         UniqueBuilder {
-            unique: Self::new(name, [IndexColumn::of(column)]),
+            unique: Self::new(name, [IndexColumn::of_relation(column)]),
             _p: PhantomData,
         }
     }
@@ -103,7 +103,7 @@ pub struct UniqueBuilder<E> {
 impl<E: Relation> UniqueBuilder<E> {
     /// Adds a column of the entity.
     pub fn and<T, K>(mut self, column: Column<E, T, K>) -> Self {
-        self.unique.columns.push(IndexColumn::of(column));
+        self.unique.columns.push(IndexColumn::of_relation(column));
 
         self
     }

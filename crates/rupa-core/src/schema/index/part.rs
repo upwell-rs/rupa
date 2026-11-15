@@ -83,6 +83,15 @@ impl IndexColumn {
         }
     }
 
+    /// The column a field handle of relation `E` describes, recording the
+    /// handle's table, or `E`'s when the handle has none.
+    pub fn of_relation<E: Relation, T, K>(column: Column<E, T, K>) -> Self {
+        Self {
+            table: Some(column.table().unwrap_or(E::TABLE)),
+            ..Self::of(column)
+        }
+    }
+
     /// The column a field handle describes, recording the handle's table.
     pub const fn of<E, T, K>(column: Column<E, T, K>) -> Self {
         Self {
