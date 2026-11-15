@@ -47,11 +47,11 @@ impl Column<Dynamic, (), Json> {
 }
 
 impl<T, K> Column<Dynamic, T, K> {
-    /// The table the handle was declared for.
-    ///
-    /// # Panics
-    /// If the handle was built without one, which [`Column::dynamic`] and its
-    /// siblings never do.
+    /// The table the handle was declared for. Every dynamic handle has one:
+    /// [`Column::dynamic`] and its siblings record it, and the table-less
+    /// constructors (`Column::scalar`, `json`, `nullable_json`,
+    /// `with_encoding`) require a [`Relation`](crate::Relation), which
+    /// [`Dynamic`] is not.
     pub const fn declared_table(&self) -> TableRef {
         match self.table() {
             Some(table) => table,

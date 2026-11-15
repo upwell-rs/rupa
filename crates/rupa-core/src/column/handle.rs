@@ -7,6 +7,7 @@ use super::{
     Codec, ColumnMeta, Encoding, Json, JsonCodec, JsonColumn, KindMarker, NullableJsonCodec,
     Scalar, ScalarCodec, StorageKind,
 };
+use crate::entity::Relation;
 use crate::error::{DecodeError, ResultError};
 use crate::ir::{ColumnRef, SourceId, TableRef};
 use crate::row::Row;
@@ -153,13 +154,10 @@ impl<E, T, K: KindMarker> Column<E, T, K> {
         name: &'static str,
         encoding: Encoding<T>,
     ) -> Self {
-        Self::with_encoding(name, encoding).in_table(table)
+        Self::encoded(name, encoding).in_table(table)
     }
 
-    /// A handle for column `name`, of no known table, stored with
-    /// `encoding`. Fails to compile in a constant when the encoding's kind
-    /// is not `K`.
-    pub const fn with_encoding(name: &'static str, encoding: Encoding<T>) -> Self {
+    const fn encoded(name: &'static str, encoding: Encoding<T>) -> Self {
         assert!(
             matches!(
                 (K::KIND, encoding.kind),
@@ -182,40 +180,55 @@ impl<E, T, K: KindMarker> Column<E, T, K> {
     }
 }
 
+impl<E: Relation, T, K: KindMarker> Column<E, T, K> {
+    /// A handle for column `name`, of no known table, stored with
+    /// `encoding`. Fails to compile in a constant when the encoding's kind
+    /// is not `K`.
+    pub const fn with_encoding(name: &'static str, encoding: Encoding<T>) -> Self {
+        Self::encoded(name, encoding)
+    }
+}
+
 impl<E, T: ScalarColumn> Column<E, T, Scalar> {
+    /// A handle for a scalar column named `name` of `table`.
+    pub const fn scalar_in(table: TableRef, name: &'static str) -> Self {
+        Self::with_codec::<ScalarCodec<T>>(name).in_table(table)
+    }
+}
+
+impl<E: Relation, T: ScalarColumn> Column<E, T, Scalar> {
     /// A handle for a scalar column named `name`, of no known table.
     pub const fn scalar(name: &'static str) -> Self {
         Self::with_codec::<ScalarCodec<T>>(name)
     }
-
-    /// A handle for a scalar column named `name` of `table`.
-    pub const fn scalar_in(table: TableRef, name: &'static str) -> Self {
-        Self::scalar(name).in_table(table)
-    }
 }
 
 impl<E, T: JsonColumn> Column<E, T, Json> {
+    /// A handle for a JSON column named `name` of `table`.
+    pub const fn json_in(table: TableRef, name: &'static str) -> Self {
+        Self::with_codec::<JsonCodec<T>>(name).in_table(table)
+    }
+}
+
+impl<E: Relation, T: JsonColumn> Column<E, T, Json> {
     /// A handle for a JSON column named `name`, of no known table.
     pub const fn json(name: &'static str) -> Self {
         Self::with_codec::<JsonCodec<T>>(name)
     }
-
-    /// A handle for a JSON column named `name` of `table`.
-    pub const fn json_in(table: TableRef, name: &'static str) -> Self {
-        Self::json(name).in_table(table)
-    }
 }
 
 impl<E, T: JsonColumn> Column<E, Option<T>, Json> {
+    /// A handle for a nullable JSON column named `name` of `table`.
+    pub const fn nullable_json_in(table: TableRef, name: &'static str) -> Self {
+        Self::with_codec::<NullableJsonCodec<T>>(name).in_table(table)
+    }
+}
+
+impl<E: Relation, T: JsonColumn> Column<E, Option<T>, Json> {
     /// A handle for a nullable JSON column: `None` is SQL `NULL`. Of no
     /// known table.
     pub const fn nullable_json(name: &'static str) -> Self {
         Self::with_codec::<NullableJsonCodec<T>>(name)
-    }
-
-    /// A handle for a nullable JSON column named `name` of `table`.
-    pub const fn nullable_json_in(table: TableRef, name: &'static str) -> Self {
-        Self::nullable_json(name).in_table(table)
     }
 }
 

@@ -6,6 +6,6 @@ use rupa_core::prelude::*;
 struct Other;
 
 fn main() {
-    let foreign: Column<Other, String, Scalar> = Column::scalar("email");
+    let foreign: Column<Other, String, Scalar> = Column::scalar_in(rupa_core::ir::TableRef::new("o"), "email");
     let _ = update::<User>().set(foreign, &"x".to_string());
 }
