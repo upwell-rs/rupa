@@ -22,8 +22,10 @@ pub(crate) use ddl::Mode as DdlMode;
 use expr::prec;
 pub(crate) use syntax::{NullsOrdering, Syntax, common_tx, isolation_sql};
 
-/// Maximum nesting of DSL lowerings (a lowering may produce further DSL calls).
-pub(crate) const MAX_LOWERING_DEPTH: usize = 32;
+/// Maximum nesting of DSL lowerings (a lowering may produce further DSL
+/// calls). Rendering past it fails; checksums of DSL calls stop at the same
+/// depth, so both agree on what a call renders as.
+pub const MAX_LOWERING_DEPTH: usize = 32;
 
 /// Renders one statement into SQL text and its bound parameters.
 pub(crate) struct Writer<'a> {

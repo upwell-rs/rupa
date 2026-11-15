@@ -5,11 +5,16 @@
 use rupa_core::ir::{BinOp, ColumnRef, DslCall, ExprNode, PathSeg, UnOp};
 use rupa_core::schema::{DdlExpr, Index, IndexPart};
 use rupa_core::{Dialect, MySql, Postgres, Sqlite};
+use rupa_sql::MAX_LOWERING_DEPTH;
 
 use super::Encoder;
 use super::kinds::sql_type_name;
 
-const MAX_LOWERING_DEPTH: usize = 32;
+const LOWERINGS: [(&str, &dyn Dialect); 3] = [
+    ("postgres", &Postgres),
+    ("mysql", &MySql),
+    ("sqlite", &Sqlite),
+];
 
 impl Encoder<'_> {
     /// What an index adds to the record of its columns: where its
@@ -170,12 +175,6 @@ impl Encoder<'_> {
         self.str(column.name);
     }
 }
-
-const LOWERINGS: [(&str, &dyn Dialect); 3] = [
-    ("postgres", &Postgres),
-    ("mysql", &MySql),
-    ("sqlite", &Sqlite),
-];
 
 fn binary_name(op: BinOp) -> &'static str {
     match op {
