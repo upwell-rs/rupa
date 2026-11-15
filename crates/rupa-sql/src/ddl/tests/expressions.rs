@@ -9,7 +9,7 @@ use crate::ExprRefusal;
 pub(super) const DIALECTS: [DialectId; 3] =
     [DialectId::Postgres, DialectId::MySql, DialectId::Sqlite];
 
-const SCOPE: &[ColumnMeta] = &[
+pub(super) const SCOPE: &[ColumnMeta] = &[
     ColumnMeta::new("title", "title", StorageKind::Scalar, SqlType::Text, false),
     ColumnMeta::new("n", "n", StorageKind::Scalar, SqlType::I64, false),
 ];

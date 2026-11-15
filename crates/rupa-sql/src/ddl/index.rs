@@ -62,10 +62,7 @@ impl Ddl<'_> {
 
         self.sql.push(')');
 
-        if let Some(predicate) = &index.predicate {
-            self.sql.push_str(" WHERE ");
-            self.expr(index.name, index.table, predicate)?;
-        }
+        self.predicates(index)?;
 
         Ok(())
     }
@@ -130,7 +127,7 @@ impl Ddl<'_> {
         }
 
         if self.dialect == DialectId::MySql {
-            if index.predicate.is_some() {
+            if !index.predicates.is_empty() {
                 return Err(refuse(IndexRefusal::Partial));
             }
 

@@ -2,7 +2,7 @@
 //! (index parts and predicates, and constraints).
 
 use rupa_core::ir::TableRef;
-use rupa_core::schema::DdlExpr;
+use rupa_core::schema::{DdlExpr, Index};
 
 use super::Ddl;
 use crate::RenderError;
@@ -27,6 +27,29 @@ impl Ddl<'_> {
         let sql = Writer::for_ddl(self.target, self.syntax, mode).ddl_expr(&expr.node)?;
 
         self.sql.push_str(&sql);
+
+        Ok(())
+    }
+
+    /// Writes the `WHERE` clause of a partial index: each condition checked
+    /// against its own scope, parenthesized and ANDed when there are several.
+    pub(super) fn predicates(&mut self, index: &Index) -> Result<(), RenderError> {
+        let several = index.predicates.len() > 1;
+
+        for (position, predicate) in index.predicates.iter().enumerate() {
+            self.sql
+                .push_str(if position == 0 { " WHERE " } else { " AND " });
+
+            if several {
+                self.sql.push('(');
+            }
+
+            self.expr(index.name, index.table, predicate)?;
+
+            if several {
+                self.sql.push(')');
+            }
+        }
 
         Ok(())
     }

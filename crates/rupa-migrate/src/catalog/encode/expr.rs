@@ -42,14 +42,27 @@ impl Encoder<'_> {
             }
         }
 
-        if let Some(predicate) = &index.predicate {
+        if !index.predicates.is_empty() {
             self.str("predicate");
-            self.ddl_expr(predicate);
+            self.conjunction(&index.predicates);
         }
     }
 
     fn ddl_expr(&mut self, expr: &DdlExpr) {
         self.node(&expr.node, None, 0);
+    }
+
+    /// Conditions ANDed in order, recorded as the left-nested `AND` of their
+    /// nodes, so filtering twice records what one filter of both does.
+    fn conjunction(&mut self, conditions: &[DdlExpr]) {
+        for _ in 1..conditions.len() {
+            self.str("binary");
+            self.str(binary_name(BinOp::And));
+        }
+
+        for condition in conditions {
+            self.ddl_expr(condition);
+        }
     }
 
     /// `lowering` is the dialect a DSL call is being lowered for, inside the
