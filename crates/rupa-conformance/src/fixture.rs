@@ -34,6 +34,19 @@ pub struct Item {
     pub extra: Option<Meta>,
 }
 
+rupa::table!(
+    /// The `items` table as a migration sees it: no row type, a subset of its columns.
+    pub ItemRows = "conformance"."items" {
+        #[id]
+        id: i64,
+        name: String,
+        label: Option<String>,
+        qty: i32,
+        active: bool,
+        meta: Meta,
+    }
+);
+
 /// An entity whose id the database generates.
 #[derive(Debug, Clone, PartialEq, Entity, Gettable, Insertable, Updatable, Deletable)]
 #[entity(table = "notes", schema = "conformance")]

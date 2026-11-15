@@ -31,3 +31,6 @@ thiserror.workspace = true
 sha2.workspace = true
 clap = { workspace = true, optional = true }
 futures-util = { workspace = true, optional = true }
+
+[dev-dependencies]
+rupa-macros.workspace = true

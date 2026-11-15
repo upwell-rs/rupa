@@ -55,14 +55,17 @@ users.by_email("a@b.c")?;
 
 ### 1. Compile time: the macros write builder code
 
-`#[derive(Entity)]` (`rupa-macros/src/entity.rs`) implements `Entity`
+`#[derive(Entity)]` (`rupa-macros/src/entity.rs`) implements `Relation`
 (table, ids and the constant `COLUMNS` metadata: kind, SQL type,
-nullability, primary key, generation and foreign-key target) and `FromRow`
-(decode by position) for `User`, plus one typed column handle constant per
+nullability, primary key, generation and foreign-key target), `Entity`
+(the id and field values) and `FromRow` (decode by position) for `User`, plus one typed column handle constant per
 field, such as `User::EMAIL: Column<User, String, Scalar>`. Each handle's kind
 is selected at compile time from the field type
 (`rupa-core/src/column/__private.rs`): scalar for `ScalarColumn` types,
 nullable JSON for `Option` of a serde type, JSON for any other serde type.
+`rupa::table!` (`rupa-macros/src/table.rs`) emits the same `Relation` and
+handles for a unit marker with no row type; schema builders and the `update`
+and `delete` statements need only a `Relation`.
 
 `#[repository]` (`rupa-macros/src/repository.rs`) emits the trait and one
 repository type, `UsersRepo<C>`, which holds a `Connection` `C`: here

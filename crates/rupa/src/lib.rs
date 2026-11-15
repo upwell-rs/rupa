@@ -95,7 +95,7 @@ pub use rupa_core::{
     Updatable, Value, VarChar, bind, delete, get, insert, json, raw, select, update,
 };
 pub use rupa_macros::{
-    Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository,
+    Deletable, Entity, Gettable, Insertable, Joined, Updatable, on, query, repository, table,
 };
 
 /// DSL functions: the built-ins, and the macro to write your own.

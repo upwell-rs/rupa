@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/table_handle_of_another_table.rs:15:59
+   |
+15 |     let _ = Unique::on("accounts_name", Accounts::ID).and(Teams::NAME);
+   |                                                       --- ^^^^^^^^^^^ expected `Column<Accounts, _, _>`, found `Column<Teams, String, Scalar>`
+   |                                                       |
+   |                                                       arguments to this method are incorrect
+   |
+   = note: expected struct `Column<Accounts, _, _>`
+              found struct `Column<Teams, String, rupa::Scalar>`
+note: method defined here
+  --> $WORKSPACE/crates/rupa-core/src/schema/constraint/mod.rs
+   |
+   |     pub fn and<T, K>(mut self, column: Column<E, T, K>) -> Self {
+   |            ^^^

@@ -1,12 +1,14 @@
 //! The query, write and DSL cases every driver must pass.
 
 mod dsl;
+mod relation;
 mod select;
 mod write;
 
 use super::*;
 
 pub use dsl::*;
+pub use relation::*;
 pub use select::*;
 pub use write::*;
 

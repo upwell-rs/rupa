@@ -4,6 +4,7 @@ mod expressions;
 mod lowering;
 mod plans;
 mod snapshots;
+mod typed_tables;
 
 use super::*;
 use crate::{

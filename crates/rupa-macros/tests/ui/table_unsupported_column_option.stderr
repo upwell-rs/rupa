@@ -1,0 +1,5 @@
+error: `table!` columns take only `references = Relation`; the column is named after the field and its kind follows its type
+ --> tests/ui/table_unsupported_column_option.rs:4:14
+  |
+4 |     #[column(name = "mail")]
+  |              ^^^^

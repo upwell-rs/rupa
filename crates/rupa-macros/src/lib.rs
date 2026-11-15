@@ -4,6 +4,8 @@
 //! - `#[derive(Gettable)]`, `#[derive(Insertable)]`, `#[derive(Updatable)]`,
 //!   `#[derive(Deletable)]`: one capability impl each, opted into per entity.
 //!
+//! - `table!`: a typed table snapshot with no row type (`Relation`).
+//!
 //! Generated code refers to `::rupa`; override with `#[rupa(crate = path)]`.
 
 use proc_macro::TokenStream;
@@ -19,6 +21,7 @@ mod model;
 mod on;
 mod query;
 mod repository;
+mod table;
 
 fn run(
     input: TokenStream,
@@ -188,6 +191,37 @@ pub fn derive_joined(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn on(input: TokenStream) -> TokenStream {
     on::on(input.into(), quote::quote!(::rupa::__macro_support))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// A typed table snapshot with no row type: a unit marker implementing
+/// `Relation`, and one typed column handle constant per field, built exactly
+/// as `#[derive(Entity)]` builds them.
+///
+/// ```ignore
+/// rupa::table!(Accounts = "accounts" {
+///     #[id] id: i64,
+///     nick: Option<VarChar<64>>,
+///     prefs: Json<Prefs>,
+/// });
+///
+/// update::<Accounts>().set(Accounts::NICK, &None).filter(Accounts::ID.gt(10))
+/// ```
+///
+/// The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" { field, .. }`,
+/// where a field is `[#[id] | #[id(generated)] | #[column(references = Other)]]
+/// name: Type`. The column is named after the field and its kind follows its
+/// type, as in the derive. More than one `#[id]` declares a composite key.
+/// Handle constants are the upper-cased field names (`Accounts::NICK`).
+///
+/// The marker implements `Updatable` and `Deletable` for itself, with nothing
+/// to apply and no row key: `update::<Accounts>()` and `delete::<Accounts>()`
+/// write through `set` calls and filters. It has no row to read, so selects
+/// and inserts of values need an `Entity`.
+#[proc_macro]
+pub fn table(input: TokenStream) -> TokenStream {
+    table::table(input.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
