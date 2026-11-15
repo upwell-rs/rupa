@@ -236,6 +236,20 @@ value to apply or key to look up, so `update::<T>().one(..)` and
 `Table::named(..)` and `ColumnDef::new(..)` definitions, and so does its
 checksum.
 
+A table the migration cannot declare as a type (a name chosen at run time, or
+one another migration owns) is reachable through a dynamic column:
+`Column::dynamic::<i64>(table, "age")`. The value type is checked by the
+compiler; the table is recorded in the handle, and a dynamic column of table
+`X` used in an index filter, index expression or check on table `Y` is refused
+before the target is touched (`ExprRefusal::Column`). `Index::on_dynamic`,
+`IndexKind::on_dynamic` and `Unique::on_dynamic` start a typed index or
+constraint from one; their `and` methods refuse a column of another table.
+A dynamic column is not a `Relation`, so `update` and `delete` do not take it.
+
+External crates such as `rupa` stay available to both kinds; depending on a
+shared crate is an explicit decision. `Context` exposes typed queries, scripts
+and schema operations only, so repositories cannot run inside a migration.
+
 ## Schema operations
 
 Schema operations are portable DDL in `rupa::migrate::schema`, rendered for the

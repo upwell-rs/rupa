@@ -90,8 +90,8 @@ pub use rupa_core::security::{SecureTransactional, SecureTx, SecurityContext};
 pub use rupa_core::tx::{AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxConnection};
 pub use rupa_core::tx::{IsolationLevel, Transaction, Transactional, Tx, TxConnection, TxOptions};
 pub use rupa_core::{
-    Column, Connection, Deletable, DynRepository, Entity, Expr, ExprOps, FromRow, Gettable,
-    Insertable, Json, Keyed, NoKey, Query, Reference, Relation, Scalar, SqlType, TooLong,
+    Column, Connection, Deletable, DynRepository, Dynamic, Entity, Expr, ExprOps, FromRow,
+    Gettable, Insertable, Json, Keyed, NoKey, Query, Reference, Relation, Scalar, SqlType, TooLong,
     Updatable, Value, VarChar, bind, delete, get, insert, json, raw, select, update,
 };
 pub use rupa_macros::{

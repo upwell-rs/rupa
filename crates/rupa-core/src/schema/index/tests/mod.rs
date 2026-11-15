@@ -5,6 +5,8 @@ use crate::entity::Relation;
 use crate::schema::{ColumnDef, ColumnType};
 use crate::varchar::VarChar;
 
+mod dynamic;
+
 struct Doc;
 
 impl Doc {

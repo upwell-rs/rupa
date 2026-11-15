@@ -325,9 +325,11 @@ impl<T> Encoding<T> {
     }
 }
 
+mod dynamic;
 mod handle;
 
 #[doc(hidden)]
 pub mod __private;
 
+pub use dynamic::Dynamic;
 pub use handle::{Column, ReadAs};
