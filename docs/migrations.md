@@ -260,7 +260,10 @@ as a column of that type would be (`IndexableBy<Kind>` for scalars, a
 `JsonIndexKind` for JSON results), so `Gin::on_expr` over an integer
 expression does not compile. `.filter(condition)` makes the index partial: only
 rows meeting the condition are indexed, and a unique partial index constrains
-only those rows.
+only those rows. Calling `.filter` again ANDs the conditions in order
+(`WHERE (a) AND (b)`). Each condition is checked against its own entity, so
+an unchecked `Index::filter(DdlExpr::new(..))` stays unchecked next to a
+typed one.
 
 ```rust,ignore
 use rupa::dsl_std::lower;
@@ -305,6 +308,12 @@ flag. A function outside the recognized list, or one that is volatile through
 its arguments (SQLite `datetime('now')`), reaches the database, which rejects
 it when the migration runs (PostgreSQL requires index functions to be
 `IMMUTABLE`).
+
+The checksum records a DSL call in an index expression or condition by what it
+lowers to, currently for every dialect (#96 narrows this to the target
+dialect). Changing how a `#[dsl::function]` lowers therefore changes the
+checksum of every applied plan that uses it, so treat a lowering change like
+any other change to an applied migration.
 
 | | PostgreSQL | SQLite | MySQL (8.0.13+) |
 |---|---|---|---|

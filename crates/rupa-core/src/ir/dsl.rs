@@ -13,6 +13,10 @@ pub type LowerFn = fn(&dyn Dialect, Vec<ExprNode>) -> Result<ExprNode, DslError>
 pub type EvalFn = fn(&[Value]) -> Result<Value, DslError>;
 
 /// Static definition of a DSL function.
+///
+/// A call in an index expression or condition is recorded in the migration
+/// checksum by its lowerings, so changing how the function lowers changes
+/// the checksum of every applied plan that uses it.
 pub struct DslFnDef {
     /// The function's name, for errors.
     pub name: &'static str,
