@@ -1,5 +1,6 @@
 use super::*;
 use crate::column::Dynamic;
+use crate::ir::ExprNode;
 use crate::schema::ColumnType;
 
 const LEDGER: TableRef = TableRef::with_schema("billing", "ledger");
@@ -65,6 +66,11 @@ fn a_dynamic_filter_keeps_the_handles_table_in_its_condition() {
 
     assert_eq!(index.predicates.len(), 1);
     assert_eq!(index.predicates[0].scope, None);
+    assert_eq!(
+        index.predicates[0].node,
+        ExprNode::Column(active.column_ref())
+    );
+    assert_eq!(active.column_ref().table, Some(LEDGER));
 }
 
 #[test]
