@@ -18,5 +18,5 @@ help: the following other types implement trait `JsonIndexKind`
 note: required by a bound in `rupa_core::schema::IndexKind::on`
  --> src/schema/index/mod.rs
   |
-  |     fn on<E: Entity, T, C: IndexableColumn<Self, T>>(
-  |                            ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `IndexKind::on`
+  |     fn on<E: Relation, T, C: IndexableColumn<Self, T>>(
+  |                              ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `IndexKind::on`

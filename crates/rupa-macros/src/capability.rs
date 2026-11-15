@@ -202,7 +202,7 @@ pub fn updatable(input: DeriveInput) -> syn::Result<TokenStream> {
             (
                 quote!(#ms::Keyed<<#entity as #ms::Entity>::Id>),
                 quote!(#ms::Keyed(#ms::Clone::clone(&self.#fi))),
-                quote!(if !#ms::is_id_field(<#entity as #ms::Entity>::COLUMNS, #name) { ::core::panic!(#message) }),
+                quote!(if !#ms::is_id_field(<#entity as #ms::Relation>::COLUMNS, #name) { ::core::panic!(#message) }),
             )
         }
         None => (quote!(#ms::NoKey), quote!(#ms::NoKey), quote!()),

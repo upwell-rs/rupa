@@ -1,6 +1,6 @@
 use super::{IndexKind, IndexableColumn};
 use crate::column::{Column, Json, Scalar};
-use crate::entity::Entity;
+use crate::entity::Relation;
 use crate::expr::Expr;
 use crate::schema::{ColumnDef, ColumnType, DdlExpr};
 use crate::value::ScalarColumn;
@@ -42,14 +42,14 @@ impl ExprResult for Option<serde_json::Value> {
 )]
 pub trait IndexableExpr<K: IndexKind> {
     /// The index part, scoped to the columns of entity `E`.
-    fn into_part<E: Entity>(self) -> IndexExpr;
+    fn into_part<E: Relation>(self) -> IndexExpr;
 }
 
 impl<K: IndexKind, T: ExprResult> IndexableExpr<K> for Expr<T>
 where
     T::Kind: IndexableColumn<K, T>,
 {
-    fn into_part<E: Entity>(self) -> IndexExpr {
+    fn into_part<E: Relation>(self) -> IndexExpr {
         IndexExpr {
             expr: DdlExpr::of::<E, T>(self),
             ty: T::COLUMN_TYPE,

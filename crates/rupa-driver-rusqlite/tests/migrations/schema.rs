@@ -60,7 +60,7 @@ fn planned_schema_migrations_create_entity_tables_keys_and_indexes() {
 fn schema_operations_the_dialect_cannot_express_fail_before_bootstrap() {
     let entries = [Planned(Plans(planned("1"), || {
         create_tables().add_column_to(
-            <Post as rupa::Entity>::TABLE,
+            <Post as rupa::Relation>::TABLE,
             ColumnDef::new("subtitle", ColumnType::Text),
         )
     }))];

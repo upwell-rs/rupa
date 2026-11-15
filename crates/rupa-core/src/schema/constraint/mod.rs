@@ -12,7 +12,7 @@ use std::marker::PhantomData;
 
 use super::{DdlExpr, IndexColumn};
 use crate::column::Column;
-use crate::entity::Entity;
+use crate::entity::Relation;
 use crate::expr::IntoCondition;
 use crate::ir::TableRef;
 
@@ -43,7 +43,7 @@ impl Check {
 
     /// A check over `condition`, which may name the columns of entity `E`
     /// only: rendering refuses a column of another table.
-    pub fn on<E: Entity>(name: &'static str, condition: impl IntoCondition) -> Self {
+    pub fn on<E: Relation>(name: &'static str, condition: impl IntoCondition) -> Self {
         Self::new(name, DdlExpr::of::<E, bool>(condition.into_condition()))
     }
 }
@@ -76,7 +76,7 @@ impl Unique {
 
     /// A constraint over one column of entity `E`; add more with
     /// [`UniqueBuilder::and`].
-    pub fn on<E: Entity, T, K>(name: &'static str, column: Column<E, T, K>) -> UniqueBuilder<E> {
+    pub fn on<E: Relation, T, K>(name: &'static str, column: Column<E, T, K>) -> UniqueBuilder<E> {
         UniqueBuilder {
             unique: Self {
                 table: Some(E::TABLE),
@@ -95,7 +95,7 @@ pub struct UniqueBuilder<E> {
     _p: PhantomData<fn() -> E>,
 }
 
-impl<E: Entity> UniqueBuilder<E> {
+impl<E: Relation> UniqueBuilder<E> {
     /// Adds a column of the entity.
     pub fn and<T, K>(mut self, column: Column<E, T, K>) -> Self {
         self.unique.columns.push(IndexColumn::of(column));

@@ -3,7 +3,7 @@
 //! never bound.
 
 use crate::column::ColumnMeta;
-use crate::entity::Entity;
+use crate::entity::Relation;
 use crate::expr::Expr;
 use crate::ir::ExprNode;
 
@@ -26,7 +26,7 @@ impl DdlExpr {
     }
 
     /// An expression over the columns of entity `E`.
-    pub fn of<E: Entity, T>(expr: Expr<T>) -> Self {
+    pub fn of<E: Relation, T>(expr: Expr<T>) -> Self {
         Self {
             node: expr.into_node(),
             scope: Some(E::COLUMNS),

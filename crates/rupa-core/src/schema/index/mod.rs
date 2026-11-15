@@ -13,7 +13,7 @@ use std::marker::PhantomData;
 use super::DdlExpr;
 use crate::column::{Column, Json, Scalar};
 use crate::dialect::DialectId;
-use crate::entity::Entity;
+use crate::entity::Relation;
 use crate::expr::IntoCondition;
 use crate::ir::TableRef;
 
@@ -133,7 +133,7 @@ pub trait IndexKind: Sized + 'static {
 
     /// An index of this kind over one column of entity `E`, which must hold
     /// a type the kind accepts.
-    fn on<E: Entity, T, C: IndexableColumn<Self, T>>(
+    fn on<E: Relation, T, C: IndexableColumn<Self, T>>(
         name: &'static str,
         column: Column<E, T, C>,
     ) -> IndexBuilder<Self, E> {
@@ -146,7 +146,7 @@ pub trait IndexKind: Sized + 'static {
     /// An index of this kind over one expression of entity `E`, which must
     /// evaluate to a type the kind accepts. The entity is named explicitly,
     /// since an expression does not carry it: `BTree::on_expr::<User>(..)`.
-    fn on_expr<E: Entity>(
+    fn on_expr<E: Relation>(
         name: &'static str,
         expr: impl IndexableExpr<Self>,
     ) -> IndexBuilder<Self, E> {
@@ -237,7 +237,7 @@ impl Index {
     }
 
     /// A B-tree index named `name` over one entity column.
-    pub fn on<E: Entity, T, C: IndexableColumn<BTree, T>>(
+    pub fn on<E: Relation, T, C: IndexableColumn<BTree, T>>(
         name: &'static str,
         column: Column<E, T, C>,
     ) -> Self {
@@ -245,7 +245,7 @@ impl Index {
     }
 
     /// A B-tree index named `name` over one expression of entity `E`.
-    pub fn on_expr<E: Entity>(name: &'static str, expr: impl IndexableExpr<BTree>) -> Self {
+    pub fn on_expr<E: Relation>(name: &'static str, expr: impl IndexableExpr<BTree>) -> Self {
         BTree::on_expr::<E>(name, expr).into()
     }
 
@@ -281,7 +281,7 @@ pub struct IndexBuilder<K, E> {
     _p: PhantomData<fn() -> (K, E)>,
 }
 
-impl<K: IndexKind, E: Entity> IndexBuilder<K, E> {
+impl<K: IndexKind, E: Relation> IndexBuilder<K, E> {
     /// Adds a column the kind accepts.
     pub fn and<T, C: IndexableColumn<K, T>>(mut self, column: Column<E, T, C>) -> Self {
         self.index.parts.push(IndexColumn::of(column).into());

@@ -5,7 +5,7 @@ use super::{
     Unique,
 };
 use crate::column::{Column, ColumnMeta, Generated, Reference};
-use crate::entity::Entity;
+use crate::entity::Relation;
 use crate::ir::TableRef;
 use crate::value::ScalarColumn;
 
@@ -147,7 +147,7 @@ impl Table {
     /// The definition follows `E`: if `E` changes later, so does every plan
     /// built from it, and an applied migration's checksum stops matching.
     /// Declare frozen tables with [`Table::named`] or a migration-local entity.
-    pub fn of<E: Entity>() -> Self {
+    pub fn of<E: Relation>() -> Self {
         let mut table = Self::at(E::TABLE);
 
         for meta in E::COLUMNS {
@@ -240,7 +240,7 @@ impl ForeignKey {
     }
 
     /// `columns` referencing the id of entity `E`.
-    pub fn to<E: Entity>(columns: impl IntoIterator<Item = &'static str>) -> Self {
+    pub fn to<E: Relation>(columns: impl IntoIterator<Item = &'static str>) -> Self {
         Self::new(
             columns,
             Reference {

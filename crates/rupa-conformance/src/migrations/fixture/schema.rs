@@ -81,7 +81,7 @@ pub fn create_tables_with_explicit_method() -> Plan {
 pub fn add_pinned() -> Plan {
     Plan::new()
         .add_column_to(
-            <Post as rupa::Entity>::TABLE,
+            <Post as rupa::Relation>::TABLE,
             ColumnDef::new("pinned", ColumnType::Bool)
                 .default(ColumnDefault::Value(rupa::Value::Bool(false))),
         )

@@ -1,6 +1,6 @@
 use rupa::migrate::Planned;
 use rupa::sql::{ExprRefusal, IndexRefusal, SchemaError};
-use rupa::{DialectId, Entity};
+use rupa::{DialectId, Relation};
 
 use super::support::{accounts, add, dialect, planned, refused_at_preflight};
 use super::{Harness, Session, catalog};
@@ -138,8 +138,8 @@ pub(super) fn case_expressions_ddl_cannot_hold_fail_typed_before_acquisition<H: 
             "accounts_foreign",
             ExprRefusal::Column {
                 column: "name",
-                table: Some(<Author as Entity>::TABLE),
-                expected: <Account as Entity>::TABLE,
+                table: Some(<Author as Relation>::TABLE),
+                expected: <Account as Relation>::TABLE,
             },
         ),
         (
@@ -147,8 +147,8 @@ pub(super) fn case_expressions_ddl_cannot_hold_fail_typed_before_acquisition<H: 
             "accounts_same_name",
             ExprRefusal::Column {
                 column: "id",
-                table: Some(<Author as Entity>::TABLE),
-                expected: <Account as Entity>::TABLE,
+                table: Some(<Author as Relation>::TABLE),
+                expected: <Account as Relation>::TABLE,
             },
         ),
     ] {

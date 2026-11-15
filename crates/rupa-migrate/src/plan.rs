@@ -1,5 +1,5 @@
 use rupa_core::Column;
-use rupa_core::entity::Entity;
+use rupa_core::entity::Relation;
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{ColumnDef, Constraint, ConstraintKind, Index, SchemaOp, Table};
 
@@ -65,8 +65,8 @@ impl Plan {
         self.schema(SchemaOp::RenameTable { table, to })
     }
 
-    /// Adds the column an entity field handle describes to its entity's table.
-    pub fn add_column<E: Entity, T, K>(self, column: Column<E, T, K>) -> Self {
+    /// Adds the column a field handle describes to its relation's table.
+    pub fn add_column<E: Relation, T, K>(self, column: Column<E, T, K>) -> Self {
         self.add_column_to(E::TABLE, ColumnDef::of(column))
     }
 

@@ -1,6 +1,6 @@
 use rupa::migrate::Planned;
 use rupa::sql::{ConstraintChange, ExprRefusal, SchemaError};
-use rupa::{DialectId, Entity};
+use rupa::{DialectId, Relation};
 
 use super::support::{accounts, add, dialect, planned, refused_at_preflight};
 use super::{Harness, Session, catalog};
@@ -150,8 +150,8 @@ pub(super) fn case_checks_ddl_cannot_hold_fail_typed_before_acquisition<H: Harne
             "accounts_foreign",
             ExprRefusal::Column {
                 column: "name",
-                table: Some(<Author as Entity>::TABLE),
-                expected: <Account as Entity>::TABLE,
+                table: Some(<Author as Relation>::TABLE),
+                expected: <Account as Relation>::TABLE,
             },
         ),
         (
@@ -181,8 +181,8 @@ pub(super) fn case_a_unique_of_another_entitys_column_is_refused_before_acquisit
         refused_at_preflight(h, create_accounts_with_a_unique_of_a_foreign_column),
         SchemaError::ConstraintTable {
             constraint: "accounts_wrong_table",
-            recorded: <Author as Entity>::TABLE,
-            expected: <Account as Entity>::TABLE,
+            recorded: <Author as Relation>::TABLE,
+            expected: <Account as Relation>::TABLE,
         }
     );
 }

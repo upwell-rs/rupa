@@ -1,6 +1,6 @@
 //! Create the tags table from its entity and index note slugs.
 
-use rupa::Entity;
+use rupa::Relation;
 use rupa::migrate::schema::{Index, Table};
 use rupa::migrate::{Plan, PlannedMigration};
 
