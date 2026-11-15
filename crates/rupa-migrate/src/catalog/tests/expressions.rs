@@ -199,3 +199,28 @@ fn a_columns_recorded_table_is_not_part_of_the_checksum() {
     assert_eq!(untabled, notes);
     assert_eq!(notes, elsewhere);
 }
+
+#[test]
+fn repeated_filters_checksum_as_one_filter_of_both() {
+    assert_eq!(
+        plan_digest(|| {
+            Plan::new().create_index(
+                notes_title()
+                    .filter(DdlExpr::new(closed()))
+                    .filter(DdlExpr::new(equals(Value::I32(1))))
+                    .filter(DdlExpr::new(lower_title())),
+            )
+        }),
+        plan_digest(|| {
+            Plan::new().create_index(filtered(ExprNode::Binary(
+                BinOp::And,
+                Box::new(ExprNode::Binary(
+                    BinOp::And,
+                    Box::new(closed()),
+                    Box::new(equals(Value::I32(1))),
+                )),
+                Box::new(lower_title()),
+            )))
+        })
+    );
+}

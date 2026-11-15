@@ -1,7 +1,7 @@
 use super::*;
 use crate::column::{Column, Scalar};
 use crate::expr::{Expr, ExprOps, IntoExpr};
-use crate::ir::{BinOp, ColumnRef, ExprNode, TableRef};
+use crate::ir::{ColumnRef, ExprNode, TableRef};
 use crate::schema::{DdlExpr, IndexExpr};
 
 fn lower_title() -> Expr<String> {
@@ -72,49 +72,46 @@ fn a_filter_sets_the_predicate_scoped_to_the_entity() {
         .into();
 
     assert_eq!(
-        index.predicate,
-        Some(Box::new(DdlExpr::of::<Doc, bool>(condition.clone())))
+        index.predicates,
+        [DdlExpr::of::<Doc, bool>(condition.clone())]
     );
-    assert_eq!(
-        index
-            .predicate
-            .as_ref()
-            .and_then(|predicate| predicate.scope),
-        Some(Doc::COLUMNS)
-    );
-    assert_eq!(Index::on("plain", Doc::SLUG).predicate, None);
+    assert_eq!(index.predicates[0].scope, Some(Doc::COLUMNS));
+    assert!(Index::on("plain", Doc::SLUG).predicates.is_empty());
     assert_eq!(
         Index::on("literal", Doc::SLUG)
             .filter(DdlExpr::new(condition.into_node()))
-            .predicate
-            .map(|predicate| predicate.scope),
-        Some(None)
+            .predicates[0]
+            .scope,
+        None
     );
 }
 
 #[test]
-fn repeated_filters_are_anded_in_order() {
+fn repeated_filters_keep_their_order_and_their_own_scope() {
     let closed = Doc::OWNER.is_null();
     let titled = Doc::TITLE.eq("a");
     let index: Index = BTree::on("docs_unowned", Doc::SLUG)
         .filter(closed.clone())
         .filter(titled.clone())
         .into();
-    let expected = ExprNode::Binary(
-        BinOp::And,
-        Box::new(closed.into_node()),
-        Box::new(titled.clone().into_node()),
-    );
-    let literal = Index::on("literal", Doc::SLUG)
-        .filter(DdlExpr::new(Doc::OWNER.is_null().into_node()))
-        .filter(DdlExpr::of::<Doc, bool>(titled));
-    let predicate = index.predicate.expect("a predicate");
+    let mixed = Index::on("literal", Doc::SLUG)
+        .filter(DdlExpr::new(closed.clone().into_node()))
+        .filter(DdlExpr::of::<Doc, bool>(titled.clone()));
 
-    assert_eq!(predicate.node, expected);
-    assert_eq!(predicate.scope, Some(Doc::COLUMNS));
     assert_eq!(
-        literal.predicate.and_then(|predicate| predicate.scope),
-        Some(Doc::COLUMNS)
+        index.predicates,
+        [
+            DdlExpr::of::<Doc, bool>(closed),
+            DdlExpr::of::<Doc, bool>(titled)
+        ]
+    );
+    assert_eq!(
+        mixed
+            .predicates
+            .iter()
+            .map(|predicate| predicate.scope)
+            .collect::<Vec<_>>(),
+        [None, Some(Doc::COLUMNS)]
     );
 }
 
@@ -153,16 +150,13 @@ fn handles_record_their_entitys_table_in_conditions_and_expressions() {
         panic!("one expression part");
     };
 
+    assert_eq!(table_of(&filtered.predicates[0]), Some(Doc::TABLE));
     assert_eq!(
-        table_of(filtered.predicate.as_ref().expect("a predicate")),
-        Some(Doc::TABLE)
-    );
-    assert_eq!(
-        table_of(foreign.predicate.as_ref().expect("a predicate")),
+        table_of(&foreign.predicates[0]),
         Some(TableRef::new("others"))
     );
     assert_eq!(table_of(&part.expr), Some(TableRef::new("others")));
-    assert_ne!(filtered.predicate, foreign.predicate);
+    assert_ne!(filtered.predicates, foreign.predicates);
 }
 
 #[test]

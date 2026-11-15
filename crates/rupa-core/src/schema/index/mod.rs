@@ -204,8 +204,10 @@ pub struct Index {
     pub parts: Vec<IndexPart>,
     /// Whether indexed values must be unique.
     pub unique: bool,
-    /// The condition rows must meet to be indexed (a partial index).
-    pub predicate: Option<Box<DdlExpr>>,
+    /// The conditions rows must meet to be indexed (a partial index),
+    /// ANDed in order. Each keeps its own scope, so an unchecked condition
+    /// stays unchecked and a checked one is checked against its own entity.
+    pub predicates: Vec<DdlExpr>,
 }
 
 impl Index {
@@ -222,7 +224,7 @@ impl Index {
             kind: BTree::METHOD,
             parts: columns.into_iter().map(IndexPart::from).collect(),
             unique: false,
-            predicate: None,
+            predicates: Vec::new(),
         }
     }
 
@@ -262,14 +264,10 @@ impl Index {
     }
 
     /// Indexes only the rows meeting `predicate`, unchecked: prefer
-    /// [`IndexBuilder::filter`]. Repeated calls are ANDed, as in queries.
+    /// [`IndexBuilder::filter`]. Repeated calls are ANDed, as in queries,
+    /// and each condition is checked against its own scope.
     pub fn filter(mut self, predicate: DdlExpr) -> Self {
-        let predicate = match self.predicate.take() {
-            Some(existing) => existing.and(predicate),
-            None => predicate,
-        };
-
-        self.predicate = Some(Box::new(predicate));
+        self.predicates.push(predicate);
 
         self
     }

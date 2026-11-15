@@ -11,6 +11,7 @@ mod indexes;
 mod key_parts;
 mod kinds;
 mod literals;
+mod predicates;
 mod scalar_calls;
 mod tables;
 
