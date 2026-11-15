@@ -121,6 +121,26 @@ pub fn as_field<'a, T, C: FieldIs<T>>(_column: &C, value: &'a T) -> &'a C::Field
     C::cast(value)
 }
 
+/// Whether a foreign key column of `column` can hold the single id of the
+/// relation described by `columns` and `ids`: the id column exists and has
+/// the column's SQL type. A composite or missing id never matches.
+pub const fn references_id_type(columns: &[ColumnMeta], ids: &[&str], column: &ColumnMeta) -> bool {
+    if ids.len() != 1 {
+        return false;
+    }
+
+    let mut i = 0;
+    while i < columns.len() {
+        if str_eq(columns[i].name, ids[0]) {
+            return columns[i].sql_type as u8 == column.sql_type as u8;
+        }
+
+        i += 1;
+    }
+
+    false
+}
+
 const fn str_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     if a.len() != b.len() {

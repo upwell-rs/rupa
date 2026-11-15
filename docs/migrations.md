@@ -205,7 +205,8 @@ impl PlannedMigration for BackfillNicks {
 The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" { field, .. }`.
 A field is `[attribute]* name: Type`, with the attributes of `#[derive(Entity)]`:
 `#[id]`, `#[id(generated)]` and `#[column(name = "..", scalar, json, generated,
-references = Other)]`, parsed by the same code as the derive, so a table
+references = Other)]`, parsed by the same code as the derive (`references` needs a
+target with exactly one id of the field's SQL type, checked at compile time), so a table
 snapshot and the entity it was copied from describe identical columns, and
 `Table::of` of either has the same checksum. Several `#[id]` fields declare a
 composite key. Anything else (`#[unique]`, `#[column(relation = ..)]`, which
@@ -229,8 +230,9 @@ update::<Accounts>()
 delete::<Accounts>().filter(Accounts::OWNER_ID.eq(0)).affected().execute(context)?;
 ```
 
-A marker has no row to read, so `select` stays on entities, and it has no
-value to apply or key to look up, so `update::<T>().one(..)` and `apply(..)`,
+A marker has no row to read, so `select` stays on entities, though an
+`Insertable` input struct (`#[insertable(entity = Accounts)]`) can insert into
+it, and it has no value to apply or key to look up, so `update::<T>().one(..)` and `apply(..)`,
 and `delete::<T>().one(..)` and `by_id(..)`, are for entities too. The marker implements
 `Updatable` and `Deletable` for itself, so it writes through `set`,
 `set_expr` and filters. `Table::of::<Accounts>()` equals the literal

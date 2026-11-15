@@ -30,6 +30,8 @@ pub struct Field {
     pub references: Option<Path>,
     /// `#[column(relation = name)]`: the relation accessor's name.
     pub relation: Option<Ident>,
+    /// The field's doc attributes, kept on its handle.
+    pub docs: Vec<syn::Attribute>,
 }
 
 impl Field {
@@ -120,6 +122,7 @@ impl Field {
             has_column_attr: false,
             references: None,
             relation: None,
+            docs: Vec::new(),
         }
     }
 
@@ -131,6 +134,8 @@ impl Field {
                 self.apply_id(attr)?;
             } else if attr.path().is_ident("column") {
                 self.apply_column(attr)?;
+            } else if attr.path().is_ident("doc") {
+                self.docs.push(attr.clone());
             }
         }
 

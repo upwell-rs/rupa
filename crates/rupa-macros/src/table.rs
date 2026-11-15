@@ -12,7 +12,8 @@
 //! ```
 //!
 //! The marker may write through `update` and `delete` with explicit `set`
-//! calls and filters; it has no row to read, insert or look up by id.
+//! calls and filters, and takes inserts of an `Insertable` input struct
+//! (`#[insertable(entity = Marker)]`); it has no row to read or look up by id.
 
 use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
@@ -170,10 +171,12 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
 
     let consts = fields.iter().map(|f| column::handle(&ms, &ident, &vis, f));
     let metas = fields.iter().map(|f| column::meta(&ms, f));
-    let references = fields
-        .iter()
-        .filter_map(|f| f.references.as_ref())
-        .map(|target| references_check(&ms, target));
+    let required = column::insert_required(&ident, &vis, &fields);
+    let references = fields.iter().enumerate().filter_map(|(position, f)| {
+        f.references
+            .as_ref()
+            .map(|target| references_check(&ms, &ident, position, f, target))
+    });
 
     Ok(quote! {
         #(#attrs)*
@@ -182,6 +185,8 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
 
         impl #ident {
             #(#consts)*
+
+            #required
         }
 
         impl #ms::Relation for #ident {
@@ -212,17 +217,39 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
     })
 }
 
-/// A referenced relation must declare an id to point at.
-fn references_check(ms: &TokenStream, target: &Path) -> TokenStream {
-    let message = format!(
-        "`{}` declares no `#[id]` column, so a foreign key cannot point at it",
-        quote!(#target).to_string().replace(' ', "")
+/// A foreign key must point at a relation with a single id column of the
+/// field's SQL type, as the derive checks for entities.
+fn references_check(
+    ms: &TokenStream,
+    owner: &Ident,
+    position: usize,
+    field: &model::Field,
+    target: &Path,
+) -> TokenStream {
+    let target_name = quote!(#target).to_string().replace(' ', "");
+    let arity = format!(
+        "`{target_name}` must declare exactly one `#[id]` column for `{}` to reference it; \
+         a composite key needs a hand-written `ForeignKey`",
+        field.name
+    );
+    let ty = format!(
+        "`{}` does not have the type of the id of `{target_name}`",
+        field.name
     );
 
     quote_spanned! {target.span()=>
         const _: () = ::core::assert!(
-            !<#target as #ms::Relation>::ID_COLUMNS.is_empty(),
-            #message
+            <#target as #ms::Relation>::ID_COLUMNS.len() == 1,
+            #arity
+        );
+
+        const _: () = ::core::assert!(
+            #ms::references_id_type(
+                <#target as #ms::Relation>::COLUMNS,
+                <#target as #ms::Relation>::ID_COLUMNS,
+                &<#owner as #ms::Relation>::COLUMNS[#position],
+            ),
+            #ty
         );
     }
 }

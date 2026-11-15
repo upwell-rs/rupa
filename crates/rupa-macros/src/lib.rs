@@ -218,8 +218,10 @@ pub fn on(input: TokenStream) -> TokenStream {
 ///
 /// The marker implements `Updatable` and `Deletable` for itself, with nothing
 /// to apply and no row key: `update::<Accounts>()` and `delete::<Accounts>()`
-/// write through `set` calls and filters. It has no row to read, so selects,
-/// `update(..).one(..)` and `delete(..).one(..)` need an `Entity`.
+/// write through `set` calls and filters, and `#[derive(Insertable)]` input
+/// structs can target it. It has no row to read, so selects, `get`,
+/// `update(..).one(..)` and `delete(..).one(..)` need an `Entity`. A
+/// `references` target must have exactly one id of the field's SQL type.
 #[proc_macro]
 pub fn table(input: TokenStream) -> TokenStream {
     table::table(input.into())
