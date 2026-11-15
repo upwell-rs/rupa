@@ -14,8 +14,9 @@ mod schema;
 
 pub use constraints::{
     add_account_constraints, create_accounts_checked_by_a_foreign_column,
-    create_accounts_checked_by_an_aggregate, create_accounts_then_add_a_constraint,
-    create_accounts_then_drop_a_constraint, create_accounts_with_a_unique_nickname,
+    create_accounts_checked_by_an_aggregate, create_accounts_checked_by_the_identity,
+    create_accounts_then_add_a_constraint, create_accounts_then_drop_a_constraint,
+    create_accounts_with_a_unique_nickname, create_accounts_with_a_unique_of_a_foreign_column,
     create_accounts_with_constraints, create_plain_accounts, drop_account_constraints,
 };
 pub use expressions::{

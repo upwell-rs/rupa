@@ -1,25 +1,29 @@
 //! `CHECK` and `UNIQUE` constraints: inside `CREATE TABLE` and added to or
 //! dropped from an existing table.
 
-use rupa_core::DialectId;
 use rupa_core::ir::TableRef;
-use rupa_core::schema::{Check, Constraint, ConstraintKind, Table, Unique};
+use rupa_core::schema::{Check, Constraint, ConstraintKind, ReferentialAction, Table, Unique};
+use rupa_core::{DialectId, Generated};
 
 use super::error::ConstraintChange;
-use super::{Ddl, SchemaError, types};
+use super::{Ddl, ExprRefusal, SchemaError, types};
 use crate::RenderError;
 
 impl Ddl<'_> {
     /// The constraints of `table`, after its keys, checked against its
     /// columns where they are known.
     pub(super) fn table_constraints(&mut self, table: &Table) -> Result<(), RenderError> {
+        let restricted = self.restricted_columns(table);
+
         for constraint in &table.constraints {
+            self.belongs_to(table.table, constraint)?;
+
             if let Constraint::Unique(unique) = constraint {
                 self.unique_columns(table, unique)?;
             }
 
             self.sql.push_str(", ");
-            self.constraint(table.table, constraint)?;
+            self.constraint(table.table, constraint, &restricted)?;
         }
 
         Ok(())
@@ -33,6 +37,7 @@ impl Ddl<'_> {
         constraint: &Constraint,
     ) -> Result<(), RenderError> {
         self.alterable(constraint.name(), ConstraintChange::Add)?;
+        self.belongs_to(table, constraint)?;
 
         if let Constraint::Unique(unique) = constraint {
             self.unique_types(unique)?;
@@ -40,7 +45,7 @@ impl Ddl<'_> {
 
         self.alter(table);
         self.sql.push_str(" ADD ");
-        self.constraint(table, constraint)
+        self.constraint(table, constraint, &[])
     }
 
     /// Dropping a check is `DROP CHECK` and a unique constraint `DROP INDEX`
@@ -80,24 +85,80 @@ impl Ddl<'_> {
         Ok(())
     }
 
-    fn constraint(&mut self, table: TableRef, constraint: &Constraint) -> Result<(), RenderError> {
+    /// A unique built from another entity's handles would constrain a
+    /// same-named column of the wrong table.
+    fn belongs_to(&self, table: TableRef, constraint: &Constraint) -> Result<(), SchemaError> {
+        match constraint {
+            Constraint::Unique(Unique {
+                table: Some(recorded),
+                ..
+            }) if *recorded != table => Err(SchemaError::ConstraintTable {
+                constraint: constraint.name(),
+                recorded: *recorded,
+                expected: table,
+            }),
+            Constraint::Unique(_) | Constraint::Check(_) => Ok(()),
+        }
+    }
+
+    fn constraint(
+        &mut self,
+        table: TableRef,
+        constraint: &Constraint,
+        restricted: &[ExprRefusal],
+    ) -> Result<(), RenderError> {
         self.sql.push_str("CONSTRAINT ");
         self.ident(constraint.name());
 
         match constraint {
-            Constraint::Check(check) => self.check(table, check)?,
+            Constraint::Check(check) => self.check(table, check, restricted)?,
             Constraint::Unique(unique) => self.unique(unique)?,
         }
 
         Ok(())
     }
 
-    fn check(&mut self, table: TableRef, check: &Check) -> Result<(), RenderError> {
+    fn check(
+        &mut self,
+        table: TableRef,
+        check: &Check,
+        restricted: &[ExprRefusal],
+    ) -> Result<(), RenderError> {
         self.sql.push_str(" CHECK (");
-        self.expr(check.name, table, &check.condition)?;
+        self.restricted_expr(check.name, table, &check.condition, restricted)?;
         self.sql.push(')');
 
         Ok(())
+    }
+
+    /// The columns of `table` MySQL refuses in a check: its `AUTO_INCREMENT`
+    /// column and the columns of foreign keys that cascade or set null. Other
+    /// dialects have no such restriction.
+    fn restricted_columns(&self, table: &Table) -> Vec<ExprRefusal> {
+        if self.dialect != DialectId::MySql {
+            return Vec::new();
+        }
+
+        let auto_increment = table
+            .columns
+            .iter()
+            .filter(|column| column.generated == Some(Generated::Identity))
+            .map(|column| ExprRefusal::AutoIncrementColumn {
+                column: column.name,
+            });
+        let referential = table
+            .foreign_keys
+            .iter()
+            .filter(|key| {
+                matches!(
+                    key.on_delete,
+                    ReferentialAction::Cascade | ReferentialAction::SetNull
+                )
+            })
+            .flat_map(|key| &key.columns)
+            .map(|column| ExprRefusal::ReferentialActionColumn { column });
+
+        auto_increment.chain(referential).collect()
     }
 
     fn unique(&mut self, unique: &Unique) -> Result<(), SchemaError> {

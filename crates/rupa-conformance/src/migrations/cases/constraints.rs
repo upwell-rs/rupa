@@ -6,8 +6,9 @@ use super::support::{accounts, add, dialect, planned, refused_at_preflight};
 use super::{Harness, Session, catalog};
 use crate::migrations::fixture::{
     Account, Author, Plans, add_account_constraints, create_accounts_checked_by_a_foreign_column,
-    create_accounts_checked_by_an_aggregate, create_accounts_then_add_a_constraint,
-    create_accounts_then_drop_a_constraint, create_accounts_with_a_unique_nickname,
+    create_accounts_checked_by_an_aggregate, create_accounts_checked_by_the_identity,
+    create_accounts_then_add_a_constraint, create_accounts_then_drop_a_constraint,
+    create_accounts_with_a_unique_nickname, create_accounts_with_a_unique_of_a_foreign_column,
     create_accounts_with_constraints, create_plain_accounts, drop_account_constraints,
 };
 
@@ -168,4 +169,51 @@ pub(super) fn case_checks_ddl_cannot_hold_fail_typed_before_acquisition<H: Harne
             }
         );
     }
+}
+
+/// A unique constraint built from another entity's column is refused at
+/// preflight on every engine, even when the table has a column of the same
+/// name.
+pub(super) fn case_a_unique_of_another_entitys_column_is_refused_before_acquisition<H: Harness>(
+    h: &mut H,
+) {
+    assert_eq!(
+        refused_at_preflight(h, create_accounts_with_a_unique_of_a_foreign_column),
+        SchemaError::ConstraintTable {
+            constraint: "accounts_wrong_table",
+            recorded: <Author as Entity>::TABLE,
+            expected: <Account as Entity>::TABLE,
+        }
+    );
+}
+
+/// A check over the auto-increment id works on PostgreSQL and SQLite.
+/// MySQL refuses it at preflight.
+pub(super) fn case_checks_over_the_identity_work_or_fail_typed_before_acquisition<H: Harness>(
+    h: &mut H,
+) {
+    let dialect = dialect(h);
+
+    if dialect == DialectId::MySql {
+        assert_eq!(
+            refused_at_preflight(h, create_accounts_checked_by_the_identity),
+            SchemaError::Expression {
+                object: "accounts_id_positive",
+                dialect,
+                reason: ExprRefusal::AutoIncrementColumn { column: "id" },
+            }
+        );
+
+        return;
+    }
+
+    let entries = [Planned(Plans(
+        planned::<H>("1"),
+        create_accounts_checked_by_the_identity,
+    ))];
+
+    wait!(h, h.connect().apply(&catalog(&entries))).expect("a check over the id applies");
+
+    assert!(add(h, "a@example.com", "a", 1, None));
+    assert_eq!(accounts(h), 1);
 }

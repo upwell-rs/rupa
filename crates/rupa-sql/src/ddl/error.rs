@@ -104,6 +104,21 @@ pub enum SchemaError {
         /// What was attempted.
         change: ConstraintChange,
     },
+    /// A `UNIQUE` constraint built from the columns of one table and used on
+    /// another, which would constrain a same-named column of the wrong table.
+    #[error(
+        "constraint `{constraint}` was built for table `{}` but belongs to table `{}`",
+        qualified(.recorded),
+        qualified(.expected)
+    )]
+    ConstraintTable {
+        /// The constraint.
+        constraint: &'static str,
+        /// The table its column handles belong to.
+        recorded: TableRef,
+        /// The table the constraint belongs to.
+        expected: TableRef,
+    },
     /// An index this dialect cannot build as declared.
     #[error("{dialect:?} cannot build index `{index}`: {reason}")]
     Index {
@@ -127,15 +142,22 @@ pub enum SchemaError {
 }
 
 /// What an alteration of an existing table's constraints attempted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ConstraintChange {
     /// `ADD CONSTRAINT`.
-    #[error("add")]
     Add,
     /// `DROP CONSTRAINT`.
-    #[error("drop")]
     Drop,
+}
+
+impl std::fmt::Display for ConstraintChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Add => "add",
+            Self::Drop => "drop",
+        })
+    }
 }
 
 /// Why an expression cannot be written in DDL. DDL mode binds nothing and
@@ -175,6 +197,22 @@ pub enum ExprRefusal {
         table: Option<TableRef>,
         /// The table the schema object belongs to.
         expected: TableRef,
+    },
+    /// A column MySQL generates values for (`AUTO_INCREMENT`), which it
+    /// refuses in a `CHECK` (error 3818).
+    #[error("the auto-increment column `{column}` cannot be used in a check")]
+    AutoIncrementColumn {
+        /// The column.
+        column: &'static str,
+    },
+    /// A column of a foreign key whose delete action is `CASCADE` or
+    /// `SET NULL`, which MySQL refuses in a `CHECK` (error 3823).
+    #[error(
+        "the column `{column}` has a foreign key with a referential action and cannot be used in a check"
+    )]
+    ReferentialActionColumn {
+        /// The column.
+        column: &'static str,
     },
     /// A bound value with no safe literal form on the dialect (bytes, UUIDs,
     /// dates and times, non-finite floats, text with a NUL or, on MySQL, a

@@ -56,3 +56,15 @@ fn constraints_report_their_name_and_kind() {
         ("u", ConstraintKind::Unique)
     );
 }
+
+#[test]
+fn typed_handles_record_their_entitys_table_and_literals_do_not() {
+    let typed = Unique::on("docs_owner", Doc::OWNER).build();
+    let literal = Unique::new(
+        "docs_owner",
+        [IndexColumn::new("owner", ColumnType::BigInt)],
+    );
+
+    assert_eq!(typed.table, Some(Doc::TABLE));
+    assert_eq!(literal.table, None);
+}

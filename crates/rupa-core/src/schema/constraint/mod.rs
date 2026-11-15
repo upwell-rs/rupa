@@ -14,12 +14,18 @@ use super::{DdlExpr, IndexColumn};
 use crate::column::Column;
 use crate::entity::Entity;
 use crate::expr::IntoCondition;
+use crate::ir::TableRef;
 
 /// A named `CHECK (<condition>)` constraint.
 ///
 /// MySQL enforces `CHECK` from 8.0.16 on; earlier servers parse it and
 /// silently ignore it. rupa cannot tell the server version, so a plan that
 /// relies on a check must target MySQL 8.0.16 or newer.
+///
+/// MySQL also refuses a check over an `AUTO_INCREMENT` column or over a column
+/// of a foreign key whose delete action is `CASCADE` or `SET NULL`. Rendering
+/// a `CREATE TABLE` refuses those, since the table's columns are known; a
+/// check added to an existing table is left to the database.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Check {
     /// The constraint name.
@@ -44,11 +50,15 @@ impl Check {
 
 /// A named, possibly multi-column `UNIQUE` constraint. Columns carry their
 /// types: MySQL refuses unbounded `Text`, `Bytes` and `Json` in a key, which
-/// only rendering can tell.
+/// only rendering can tell. A constraint built from typed handles records
+/// their entity's table, and rendering refuses it on any other table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unique {
     /// The constraint name.
     pub name: &'static str,
+    /// The table the typed handles belong to, if known. It is checked
+    /// against the constrained table, and is not part of the checksum.
+    pub table: Option<TableRef>,
     /// The constrained columns, in order.
     pub columns: Vec<IndexColumn>,
 }
@@ -59,6 +69,7 @@ impl Unique {
     pub fn new(name: &'static str, columns: impl IntoIterator<Item = IndexColumn>) -> Self {
         Self {
             name,
+            table: None,
             columns: columns.into_iter().collect(),
         }
     }
@@ -67,7 +78,10 @@ impl Unique {
     /// [`UniqueBuilder::and`].
     pub fn on<E: Entity, T, K>(name: &'static str, column: Column<E, T, K>) -> UniqueBuilder<E> {
         UniqueBuilder {
-            unique: Self::new(name, [IndexColumn::of(column)]),
+            unique: Self {
+                table: Some(E::TABLE),
+                ..Self::new(name, [IndexColumn::of(column)])
+            },
             _p: PhantomData,
         }
     }
