@@ -178,8 +178,8 @@ impl Table {
     }
 
     /// Removes the column `name`, with its primary key, foreign key and
-    /// `UNIQUE` constraint parts. A check stays: it may name the column, and
-    /// rendering cannot tell for an unchecked one.
+    /// `UNIQUE` constraint parts. A check stays; one that still names the
+    /// column is refused when the table is rendered.
     pub fn without(mut self, name: &str) -> Self {
         self.columns.retain(|c| c.name != name);
         self.primary_key.retain(|c| *c != name);

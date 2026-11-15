@@ -8,6 +8,7 @@
 
 use rupa_core::column::ColumnMeta;
 use rupa_core::ir::{ColumnRef, ExprNode, TableRef};
+use rupa_core::schema::ColumnDef;
 use rupa_core::{Dialect, Value};
 
 use super::builtins::{self, Builtin};
@@ -24,6 +25,9 @@ pub(crate) struct Mode<'a> {
     pub(crate) table: TableRef,
     /// The columns the expression may name, if known.
     pub(crate) scope: Option<&'a [ColumnMeta]>,
+    /// The columns the table is created with, inside `CREATE TABLE`: a
+    /// column it lacks is refused even when the scope names it.
+    pub(crate) defined: Option<&'a [ColumnDef]>,
     /// Refusals for columns the dialect cannot use here, each naming its
     /// column.
     pub(crate) restricted: &'a [ExprRefusal],
@@ -115,7 +119,10 @@ impl<'a> Writer<'a> {
 
         let known = mode
             .scope
-            .is_none_or(|columns| columns.iter().any(|c| c.name == column.name));
+            .is_none_or(|columns| columns.iter().any(|c| c.name == column.name))
+            && mode
+                .defined
+                .is_none_or(|columns| columns.iter().any(|c| c.name == column.name));
         let owned = column.table.is_none_or(|table| table == mode.table);
 
         if column.source.0 != 0 || !known || !owned {

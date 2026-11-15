@@ -2,7 +2,9 @@
 //! dropped from an existing table.
 
 use rupa_core::ir::TableRef;
-use rupa_core::schema::{Check, Constraint, ConstraintKind, ReferentialAction, Table, Unique};
+use rupa_core::schema::{
+    Check, ColumnDef, Constraint, ConstraintKind, ReferentialAction, Table, Unique,
+};
 use rupa_core::{DialectId, Generated};
 
 use super::error::ConstraintChange;
@@ -23,7 +25,7 @@ impl Ddl<'_> {
             }
 
             self.sql.push_str(", ");
-            self.constraint(table.table, constraint, &restricted)?;
+            self.constraint(table.table, constraint, Some(&table.columns), &restricted)?;
         }
 
         Ok(())
@@ -45,7 +47,7 @@ impl Ddl<'_> {
 
         self.alter(table);
         self.sql.push_str(" ADD ");
-        self.constraint(table, constraint, &[])
+        self.constraint(table, constraint, None, &[])
     }
 
     /// Dropping a check is `DROP CHECK` and a unique constraint `DROP INDEX`
@@ -105,13 +107,14 @@ impl Ddl<'_> {
         &mut self,
         table: TableRef,
         constraint: &Constraint,
+        defined: Option<&[ColumnDef]>,
         restricted: &[ExprRefusal],
     ) -> Result<(), RenderError> {
         self.sql.push_str("CONSTRAINT ");
         self.ident(constraint.name());
 
         match constraint {
-            Constraint::Check(check) => self.check(table, check, restricted)?,
+            Constraint::Check(check) => self.check(table, check, defined, restricted)?,
             Constraint::Unique(unique) => self.unique(unique)?,
         }
 
@@ -122,10 +125,11 @@ impl Ddl<'_> {
         &mut self,
         table: TableRef,
         check: &Check,
+        defined: Option<&[ColumnDef]>,
         restricted: &[ExprRefusal],
     ) -> Result<(), RenderError> {
         self.sql.push_str(" CHECK (");
-        self.restricted_expr(check.name, table, &check.condition, restricted)?;
+        self.restricted_expr(check.name, table, &check.condition, defined, restricted)?;
         self.sql.push(')');
 
         Ok(())

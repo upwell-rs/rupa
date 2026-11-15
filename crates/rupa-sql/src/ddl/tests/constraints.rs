@@ -340,3 +340,35 @@ fn a_unique_recorded_for_its_own_table_or_none_is_accepted() {
         .is_ok()
     );
 }
+
+#[test]
+fn a_check_over_a_column_the_table_lacks_is_refused_in_create_table() {
+    let typed = Check::new(
+        "notes_title_typed",
+        DdlExpr {
+            node: column("title"),
+            scope: Some(SCOPE),
+        },
+    );
+
+    for check in [titled(), typed] {
+        let name = check.name;
+        let table = notes().check(check).without("title");
+
+        for (dialect, rendered) in DIALECTS.into_iter().zip(all(&SchemaOp::CreateTable(table))) {
+            assert_eq!(
+                rendered,
+                refused(
+                    name,
+                    dialect,
+                    ExprRefusal::Column {
+                        column: "title",
+                        table: None,
+                        expected: NOTES,
+                    }
+                ),
+                "{name} on {dialect:?}"
+            );
+        }
+    }
+}
