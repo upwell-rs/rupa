@@ -8,7 +8,7 @@
 
 use rupa_core::column::ColumnMeta;
 use rupa_core::ir::{ColumnRef, ExprNode, TableRef};
-use rupa_core::{Dialect, DialectId, Value};
+use rupa_core::{Dialect, Value};
 
 use super::builtins::{self, Builtin};
 use super::{Syntax, Writer, prec};
@@ -62,7 +62,7 @@ impl<'a> Writer<'a> {
         }
 
         let dialect = self.dialect.id();
-        let bigint = dialect == DialectId::Postgres && matches!(value, Value::I64(_));
+        let cast = literal::bound_type(value, dialect);
         let mut literal = String::new();
 
         if literal::write(value, dialect, &mut literal).is_none() {
@@ -71,10 +71,12 @@ impl<'a> Writer<'a> {
             }));
         }
 
-        if bigint {
+        if let Some(ty) = cast {
             self.sql.push_str("CAST(");
             self.sql.push_str(&literal);
-            self.sql.push_str(" AS BIGINT)");
+            self.sql.push_str(" AS ");
+            self.sql.push_str(ty);
+            self.sql.push(')');
         } else {
             self.sql.push_str(&literal);
         }
