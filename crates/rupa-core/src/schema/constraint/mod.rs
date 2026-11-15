@@ -14,7 +14,6 @@ use super::{DdlExpr, IndexColumn};
 use crate::column::{Column, Dynamic};
 use crate::entity::Relation;
 use crate::expr::IntoCondition;
-use crate::ir::TableRef;
 
 /// A named `CHECK (<condition>)` constraint.
 ///
@@ -50,15 +49,12 @@ impl Check {
 
 /// A named, possibly multi-column `UNIQUE` constraint. Columns carry their
 /// types: MySQL refuses unbounded `Text`, `Bytes` and `Json` in a key, which
-/// only rendering can tell. A constraint built from typed handles records
-/// their entity's table, and rendering refuses it on any other table.
+/// only rendering can tell. Typed columns record their table, and rendering
+/// refuses a column of another table than the constrained one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Unique {
     /// The constraint name.
     pub name: &'static str,
-    /// The table the typed handles belong to, if known. It is checked
-    /// against the constrained table, and is not part of the checksum.
-    pub table: Option<TableRef>,
     /// The constrained columns, in order.
     pub columns: Vec<IndexColumn>,
 }
@@ -69,7 +65,6 @@ impl Unique {
     pub fn new(name: &'static str, columns: impl IntoIterator<Item = IndexColumn>) -> Self {
         Self {
             name,
-            table: None,
             columns: columns.into_iter().collect(),
         }
     }
@@ -78,26 +73,19 @@ impl Unique {
     /// [`UniqueBuilder::and`].
     pub fn on<E: Relation, T, K>(name: &'static str, column: Column<E, T, K>) -> UniqueBuilder<E> {
         UniqueBuilder {
-            unique: Self {
-                table: Some(E::TABLE),
-                ..Self::new(name, [IndexColumn::of(column)])
-            },
+            unique: Self::new(name, [IndexColumn::of(column)]),
             _p: PhantomData,
         }
     }
 
     /// A constraint over one column of a table named only by the handle
-    /// ([`Column::dynamic`]); add more with [`UniqueBuilder::and`]. Rendering
-    /// refuses it on any other table.
+    /// ([`Column::dynamic`]); add more with [`UniqueBuilder::and`].
     pub fn on_dynamic<T, K>(
         name: &'static str,
         column: Column<Dynamic, T, K>,
     ) -> UniqueBuilder<Dynamic> {
         UniqueBuilder {
-            unique: Self {
-                table: Some(column.declared_table()),
-                ..Self::new(name, [IndexColumn::of(column)])
-            },
+            unique: Self::new(name, [IndexColumn::of(column)]),
             _p: PhantomData,
         }
     }
@@ -129,17 +117,9 @@ impl<E> UniqueBuilder<E> {
 }
 
 impl UniqueBuilder<Dynamic> {
-    /// Adds a column of the same table.
-    ///
-    /// # Panics
-    /// If the column belongs to another table.
+    /// Adds a column. One of another table is refused when the constraint is
+    /// rendered.
     pub fn and<T, K>(mut self, column: Column<Dynamic, T, K>) -> Self {
-        assert_eq!(
-            Some(column.declared_table()),
-            self.unique.table,
-            "a unique constraint covers columns of one table"
-        );
-
         self.unique.columns.push(IndexColumn::of(column));
 
         self

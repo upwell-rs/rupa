@@ -243,7 +243,10 @@ compiler; the table is recorded in the handle, and a dynamic column of table
 `X` used in an index filter, index expression or check on table `Y` is refused
 before the target is touched (`ExprRefusal::Column`). `Index::on_dynamic`,
 `IndexKind::on_dynamic` and `Unique::on_dynamic` start a typed index or
-constraint from one; their `and` methods refuse a column of another table.
+constraint from one; a column of another table added with `and` is refused when the index or
+constraint is rendered (`SchemaError::ForeignColumn`), like any typed handle
+of another table or entity. Index and unique columns record their table, but
+the table is not part of the checksum.
 A dynamic column is not a `Relation`, so `update` and `delete` do not take it.
 
 External crates such as `rupa` stay available to both kinds; depending on a

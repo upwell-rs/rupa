@@ -5,6 +5,13 @@ use crate::schema::ColumnType;
 const LEDGER: TableRef = TableRef::with_schema("billing", "ledger");
 const OTHER: TableRef = TableRef::new("other");
 
+fn ledger_column(name: &'static str, ty: ColumnType) -> IndexColumn {
+    IndexColumn {
+        table: Some(LEDGER),
+        ..IndexColumn::new(name, ty)
+    }
+}
+
 #[test]
 fn a_dynamic_handle_indexes_the_table_it_names() {
     let age = Column::dynamic::<i64>(LEDGER, "age");
@@ -14,12 +21,12 @@ fn a_dynamic_handle_indexes_the_table_it_names() {
     assert!(index.unique);
     assert_eq!(
         index.columns().copied().collect::<Vec<_>>(),
-        [IndexColumn::new("age", ColumnType::BigInt)]
+        [ledger_column("age", ColumnType::BigInt)]
     );
 }
 
 #[test]
-fn a_dynamic_index_equals_the_literal_one() {
+fn a_dynamic_index_is_the_literal_one_with_recorded_tables() {
     let dynamic: Index = BTree::on_dynamic("ledger_age", Column::dynamic::<i64>(LEDGER, "age"))
         .and(Column::dynamic::<String>(LEDGER, "owner"))
         .into();
@@ -27,8 +34,14 @@ fn a_dynamic_index_equals_the_literal_one() {
         "ledger_age",
         LEDGER,
         [
-            IndexColumn::new("age", ColumnType::BigInt),
-            IndexColumn::new("owner", ColumnType::Text),
+            IndexColumn {
+                table: Some(LEDGER),
+                ..IndexColumn::new("age", ColumnType::BigInt)
+            },
+            IndexColumn {
+                table: Some(LEDGER),
+                ..IndexColumn::new("owner", ColumnType::Text)
+            },
         ],
     );
 
@@ -64,8 +77,13 @@ fn a_dynamic_handle_is_typed_by_its_value() {
 }
 
 #[test]
-#[should_panic(expected = "an index covers columns of one table")]
-fn a_column_of_another_table_is_refused_when_added() {
-    let _ = BTree::on_dynamic("ledger_age", Column::dynamic::<i64>(LEDGER, "age"))
-        .and(Column::dynamic::<i64>(OTHER, "age"));
+fn a_column_of_another_table_is_kept_for_rendering_to_refuse() {
+    let index = BTree::on_dynamic("ledger_age", Column::dynamic::<i64>(LEDGER, "age"))
+        .and(Column::dynamic::<i64>(OTHER, "age"))
+        .build();
+
+    assert_eq!(
+        index.columns().map(|c| c.table).collect::<Vec<_>>(),
+        [Some(LEDGER), Some(OTHER)]
+    );
 }

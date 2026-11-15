@@ -2,6 +2,7 @@ use super::{IndexKind, IndexableColumn};
 use crate::column::{Column, Json, Scalar};
 use crate::entity::Relation;
 use crate::expr::Expr;
+use crate::ir::TableRef;
 use crate::schema::{ColumnDef, ColumnType, DdlExpr};
 use crate::value::ScalarColumn;
 
@@ -58,24 +59,36 @@ where
 }
 
 /// An indexed column: its name and type, so rendering can check the type
-/// against the dialect.
+/// against the dialect, and the table its handle was declared for, so
+/// rendering can refuse a column of another table. The table is not part of
+/// the checksum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IndexColumn {
     /// The column name.
     pub name: &'static str,
     /// The column type, with its length for bounded text.
     pub ty: ColumnType,
+    /// The table the column's handle was declared for, if known. Rendering
+    /// refuses a column recorded for a table other than the indexed one.
+    pub table: Option<TableRef>,
 }
 
 impl IndexColumn {
-    /// A column named `name` of type `ty`.
+    /// A column named `name` of type `ty`, of no known table.
     pub const fn new(name: &'static str, ty: ColumnType) -> Self {
-        Self { name, ty }
+        Self {
+            name,
+            ty,
+            table: None,
+        }
     }
 
-    /// The column an entity field handle describes.
+    /// The column a field handle describes, recording the handle's table.
     pub const fn of<E, T, K>(column: Column<E, T, K>) -> Self {
-        Self::new(column.name(), column.column_type())
+        Self {
+            table: column.table(),
+            ..Self::new(column.name(), column.column_type())
+        }
     }
 }
 

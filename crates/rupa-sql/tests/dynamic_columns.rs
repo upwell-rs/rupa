@@ -8,7 +8,7 @@ use fixtures::User;
 use rupa_core::dialect::Postgres;
 use rupa_core::ir::TableRef;
 use rupa_core::prelude::*;
-use rupa_core::schema::{BTree, Check, IndexKind, SchemaOp, Table};
+use rupa_core::schema::{BTree, Check, Index, IndexKind, SchemaOp, Table, Unique};
 use rupa_core::{Column, DialectId, Dynamic, Scalar};
 use rupa_sql::{ExprRefusal, RenderError, SchemaError, render_schema};
 
@@ -82,4 +82,41 @@ fn a_dynamic_index_renders_on_the_table_its_handle_names() {
         rendered.as_deref(),
         Ok(r#"CREATE UNIQUE INDEX "accounts_email" ON "billing"."accounts" ("email")"#)
     );
+}
+
+fn foreign(object: &'static str) -> RenderError {
+    RenderError::Schema(Box::new(SchemaError::ForeignColumn {
+        object,
+        column: "email",
+        recorded: ACCOUNTS,
+        expected: User::TABLE,
+    }))
+}
+
+#[test]
+fn a_dynamic_column_of_another_table_added_to_an_index_is_refused() {
+    let index: Index = BTree::on_dynamic("users_email", user_email())
+        .and(account_email())
+        .into();
+
+    assert_eq!(
+        render_schema(&SchemaOp::CreateIndex(index), &Postgres),
+        Err(foreign("users_email"))
+    );
+}
+
+#[test]
+fn a_dynamic_column_of_another_table_in_a_unique_is_refused() {
+    let unique = Unique::on_dynamic("users_email", account_email()).build();
+    let op = SchemaOp::CreateTable(Table::of::<User>().unique(unique));
+
+    assert_eq!(render_schema(&op, &Postgres), Err(foreign("users_email")));
+}
+
+#[test]
+fn a_dynamic_unique_of_the_same_table_renders() {
+    let unique = Unique::on_dynamic("users_email", user_email()).build();
+    let op = SchemaOp::CreateTable(Table::of::<User>().unique(unique));
+
+    assert!(render_schema(&op, &Postgres).is_ok());
 }

@@ -2,9 +2,9 @@
 //! (index parts and predicates, and constraints).
 
 use rupa_core::ir::TableRef;
-use rupa_core::schema::{ColumnDef, DdlExpr, Index};
+use rupa_core::schema::{ColumnDef, DdlExpr, Index, IndexColumn};
 
-use super::{Ddl, ExprRefusal};
+use super::{Ddl, ExprRefusal, SchemaError};
 use crate::RenderError;
 use crate::writer::{DdlMode, Writer};
 
@@ -42,6 +42,31 @@ impl Ddl<'_> {
         let sql = Writer::for_ddl(self.target, self.syntax, mode).ddl_expr(&expr.node)?;
 
         self.sql.push_str(&sql);
+
+        Ok(())
+    }
+
+    /// Refuses a column of `object` whose handle was declared for a table
+    /// other than `table`.
+    pub(super) fn owned_columns<'a>(
+        &self,
+        object: &'static str,
+        table: TableRef,
+        columns: impl IntoIterator<Item = &'a IndexColumn>,
+    ) -> Result<(), SchemaError> {
+        for column in columns {
+            match column.table {
+                Some(recorded) if recorded != table => {
+                    return Err(SchemaError::ForeignColumn {
+                        object,
+                        column: column.name,
+                        recorded,
+                        expected: table,
+                    });
+                }
+                Some(_) | None => {}
+            }
+        }
 
         Ok(())
     }

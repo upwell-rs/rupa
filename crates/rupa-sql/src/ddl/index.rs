@@ -12,6 +12,8 @@ impl Ddl<'_> {
     pub(super) fn create_index(&mut self, index: &Index) -> Result<(), RenderError> {
         let using = self.index_method(index)?;
 
+        self.owned_columns(index.name, index.table, index.columns())?;
+
         self.sql.push_str(if index.unique {
             "CREATE UNIQUE INDEX "
         } else {

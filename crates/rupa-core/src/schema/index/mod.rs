@@ -332,17 +332,9 @@ impl<K: IndexKind, E: Relation> IndexBuilder<K, E> {
 }
 
 impl<K: IndexKind> IndexBuilder<K, Dynamic> {
-    /// Adds a column the kind accepts.
-    ///
-    /// # Panics
-    /// If the column belongs to another table than the index.
+    /// Adds a column the kind accepts. One of another table is refused when
+    /// the index is rendered.
     pub fn and<T, C: IndexableColumn<K, T>>(mut self, column: Column<Dynamic, T, C>) -> Self {
-        assert_eq!(
-            column.declared_table(),
-            self.index.table,
-            "an index covers columns of one table"
-        );
-
         self.index.parts.push(IndexColumn::of(column).into());
 
         self

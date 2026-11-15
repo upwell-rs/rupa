@@ -87,19 +87,12 @@ impl Ddl<'_> {
         Ok(())
     }
 
-    /// A unique built from another entity's handles would constrain a
+    /// A unique built from another table's handles would constrain a
     /// same-named column of the wrong table.
     fn belongs_to(&self, table: TableRef, constraint: &Constraint) -> Result<(), SchemaError> {
         match constraint {
-            Constraint::Unique(Unique {
-                table: Some(recorded),
-                ..
-            }) if *recorded != table => Err(SchemaError::ConstraintTable {
-                constraint: constraint.name(),
-                recorded: *recorded,
-                expected: table,
-            }),
-            Constraint::Unique(_) | Constraint::Check(_) => Ok(()),
+            Constraint::Unique(unique) => self.owned_columns(unique.name, table, &unique.columns),
+            Constraint::Check(_) => Ok(()),
         }
     }
 
