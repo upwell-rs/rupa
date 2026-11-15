@@ -17,20 +17,36 @@ fn rendered(value: Value, dialect: &dyn Dialect) -> String {
 
 #[test]
 fn float_literals_always_read_as_floats() {
-    for (value, text) in [
-        (Value::F64(2.0), "2.0"),
-        (Value::F64(-0.0), "-0.0"),
-        (Value::F64(0.5), "0.5"),
-        (Value::F64(f64::MAX), "1.7976931348623157e308"),
-        (Value::F64(1e-300), "1e-300"),
-        (Value::F64(f64::MIN_POSITIVE), "2.2250738585072014e-308"),
-        (Value::F32(3.0), "3.0"),
-        (Value::F32(0.1), "0.10000000149011612"),
-        (Value::F32(f32::MAX), "3.4028234663852886e38"),
+    for (value, text, mysql) in [
+        (Value::F64(2.0), "2.0", "2e0"),
+        (Value::F64(-0.0), "-0.0", "-0e0"),
+        (Value::F64(0.5), "0.5", "5e-1"),
+        (
+            Value::F64(f64::MAX),
+            "1.7976931348623157e308",
+            "1.7976931348623157e308",
+        ),
+        (Value::F64(1e-300), "1e-300", "1e-300"),
+        (
+            Value::F64(f64::MIN_POSITIVE),
+            "2.2250738585072014e-308",
+            "2.2250738585072014e-308",
+        ),
+        (Value::F32(3.0), "3.0", "3e0"),
+        (
+            Value::F32(0.1),
+            "0.10000000149011612",
+            "1.0000000149011612e-1",
+        ),
+        (
+            Value::F32(f32::MAX),
+            "3.4028234663852886e38",
+            "3.4028234663852886e38",
+        ),
     ] {
-        let [postgres, mysql] = match value {
-            Value::F32(_) => ["REAL", "FLOAT"],
-            _ => ["DOUBLE PRECISION", "DOUBLE"],
+        let postgres = match value {
+            Value::F32(_) => "REAL",
+            _ => "DOUBLE PRECISION",
         };
 
         for (dialect, expected) in [
@@ -38,7 +54,7 @@ fn float_literals_always_read_as_floats() {
                 &Postgres as &dyn Dialect,
                 format!(" / CAST({text} AS {postgres})))"),
             ),
-            (&MySql, format!(" / CAST({text} AS {mysql})))")),
+            (&MySql, format!(" / {mysql}))")),
             (&Sqlite, format!(" / {text}))")),
         ] {
             assert!(
@@ -88,7 +104,9 @@ fn float_defaults_are_written_as_float_literals() {
         ColumnDef::new("ratio", ColumnType::Double).default(ColumnDefault::Value(Value::F64(1.0))),
     );
 
-    for sql in ok(&SchemaOp::CreateTable(table)) {
-        assert!(sql.contains("DEFAULT 1.0"), "{sql}");
-    }
+    let [postgres, mysql, sqlite] = ok(&SchemaOp::CreateTable(table));
+
+    assert!(postgres.contains("DEFAULT 1.0"), "{postgres}");
+    assert!(mysql.contains("DEFAULT 1e0"), "{mysql}");
+    assert!(sqlite.contains("DEFAULT 1.0"), "{sqlite}");
 }
