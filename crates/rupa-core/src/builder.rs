@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use crate::capability::{Deletable, Gettable, Insertable, RowKey, Updatable};
 use crate::column::{Column, Scalar};
-use crate::entity::{Entity, IdValues};
+use crate::entity::{Entity, IdValues, Relation};
 use crate::expr::IntoExpr;
 use crate::ir::{
     BinOp, ColumnRef, Delete, ExprNode, FromClause, Insert, OrderBy, RawPart, RawSql, Select,
@@ -150,7 +150,7 @@ fn key_filter(columns: &[&'static str], values: Vec<Value>) -> ExprNode {
 
 /// Starts an insert into `E`. Rows are added with values implementing
 /// [`Insertable<E>`]: the entity itself, or a dedicated input struct.
-pub fn insert<E: Entity>() -> InsertBuilder<E> {
+pub fn insert<E: Relation>() -> InsertBuilder<E> {
     InsertBuilder { _e: PhantomData }
 }
 
@@ -161,7 +161,7 @@ pub struct InsertBuilder<E> {
     _e: PhantomData<fn() -> E>,
 }
 
-impl<E: Entity> InsertBuilder<E> {
+impl<E: Relation> InsertBuilder<E> {
     /// Inserts `value`.
     pub fn value<V: Insertable<E>>(self, value: &V) -> InsertRows<E, V> {
         InsertRows::new().value(value)
@@ -184,7 +184,7 @@ pub struct InsertRows<E, V> {
     _p: PhantomData<fn() -> (E, V)>,
 }
 
-impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
+impl<E: Relation, V: Insertable<E>> InsertRows<E, V> {
     fn new() -> Self {
         Self {
             insert: Insert {
@@ -242,7 +242,9 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
         self.insert.returning = Some(E::COLUMNS.iter().map(|c| ColumnRef::new(c.name)).collect());
         Query::new(Statement::Insert(self.insert), R::EXPECT)
     }
+}
 
+impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
     /// Returns the one inserted row (see [`returning`](Self::returning)).
     pub fn returning_one(self) -> Query<E> {
         self.returning()
@@ -258,9 +260,9 @@ impl<E: Entity, V: Insertable<E>> InsertRows<E, V> {
 // UPDATE
 // ---------------------------------------------------------------------------
 
-/// Starts an update of `E` rows; set columns with `one`, `apply`, `set`
+/// Starts an update of `E` rows, an entity or a `rupa::table!` relation; set columns with `one`, `apply`, `set`
 /// or `set_expr`, and restrict it with `filter`.
-pub fn update<E: Entity>() -> UpdateBuilder<E> {
+pub fn update<E: Relation>() -> UpdateBuilder<E> {
     UpdateBuilder {
         update: Update {
             table: E::TABLE,
@@ -278,7 +280,7 @@ pub struct UpdateBuilder<E> {
     _e: PhantomData<fn() -> E>,
 }
 
-impl<E: Entity> UpdateBuilder<E> {
+impl<E: Relation> UpdateBuilder<E> {
     /// Updates the row `value` identifies: a full entity, or a patch with an id.
     pub fn one<V: Updatable<E>>(mut self, value: &V) -> Self
     where
@@ -355,8 +357,9 @@ impl<E: Entity> UpdateBuilder<E> {
 // DELETE
 // ---------------------------------------------------------------------------
 
-/// Starts a delete from `E`. Requires `E: Deletable<E>`.
-pub fn delete<E: Entity + Deletable<E>>() -> DeleteBuilder<E> {
+/// Starts a delete from `E`, an entity or a `rupa::table!` relation.
+/// Requires `E: Deletable<E>`.
+pub fn delete<E: Relation + Deletable<E>>() -> DeleteBuilder<E> {
     DeleteBuilder {
         delete: Delete {
             table: E::TABLE,
@@ -374,20 +377,22 @@ pub struct DeleteBuilder<E> {
 }
 
 impl<E: Entity + Deletable<E>> DeleteBuilder<E> {
-    /// Deletes the row `value` identifies.
-    pub fn one<V: Deletable<E>>(mut self, value: &V) -> Self {
-        and_filter(
-            &mut self.delete.filter,
-            key_filter(E::ID_COLUMNS, value.delete_key()),
-        );
-        self
-    }
-
     /// Deletes the row with id `id`.
     pub fn by_id(mut self, id: &E::Id) -> Self {
         and_filter(
             &mut self.delete.filter,
             key_filter(E::ID_COLUMNS, id.id_values()),
+        );
+        self
+    }
+}
+
+impl<E: Relation + Deletable<E>> DeleteBuilder<E> {
+    /// Deletes the row `value` identifies.
+    pub fn one<V: Deletable<E>>(mut self, value: &V) -> Self {
+        and_filter(
+            &mut self.delete.filter,
+            key_filter(E::ID_COLUMNS, value.delete_key()),
         );
         self
     }
