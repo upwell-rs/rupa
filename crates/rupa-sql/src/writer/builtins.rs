@@ -1,5 +1,9 @@
 //! Built-in functions a DDL expression cannot hold, per dialect.
 //!
+//! The lists hold each dialect's built-in aggregates and window functions,
+//! and its well-known volatile functions. A user-defined aggregate is not
+//! known here and is refused by the database when the migration runs.
+//!
 //! Only the target dialect's built-ins are refused, so a function another
 //! dialect happens to define (SQLite's aggregate `total`) stays usable. A
 //! schema-qualified name (`billing.total`) is a user function and is left to
@@ -27,6 +31,7 @@ const MY_LITE: &[DialectId] = &[DialectId::MySql, DialectId::Sqlite];
 const ALL: &[DialectId] = &[DialectId::Postgres, DialectId::MySql, DialectId::Sqlite];
 
 const AGGREGATES: &[(&str, &[DialectId])] = &[
+    ("any_value", PG),
     ("array_agg", PG),
     ("avg", ALL),
     ("bit_and", PG_MY),
@@ -34,20 +39,58 @@ const AGGREGATES: &[(&str, &[DialectId])] = &[
     ("bit_xor", PG_MY),
     ("bool_and", PG),
     ("bool_or", PG),
+    ("corr", PG),
     ("count", ALL),
+    ("covar_pop", PG),
+    ("covar_samp", PG),
     ("every", PG),
     ("group_concat", MY_LITE),
+    ("grouping", PG_MY),
     ("json_agg", PG),
-    ("json_arrayagg", MY),
+    ("json_agg_strict", PG),
+    ("json_arrayagg", PG_MY),
     ("json_group_array", LITE),
     ("json_group_object", LITE),
-    ("json_objectagg", MY),
+    ("json_object_agg", PG),
+    ("json_object_agg_strict", PG),
+    ("json_object_agg_unique", PG),
+    ("json_object_agg_unique_strict", PG),
+    ("json_objectagg", PG_MY),
     ("jsonb_agg", PG),
+    ("jsonb_agg_strict", PG),
+    ("jsonb_group_array", LITE),
+    ("jsonb_group_object", LITE),
+    ("jsonb_object_agg", PG),
+    ("jsonb_object_agg_strict", PG),
+    ("jsonb_object_agg_unique", PG),
+    ("jsonb_object_agg_unique_strict", PG),
     ("max", ALL),
     ("min", ALL),
+    ("mode", PG),
+    ("percentile_cont", PG),
+    ("percentile_disc", PG),
+    ("range_agg", PG),
+    ("range_intersect_agg", PG),
+    ("regr_avgx", PG),
+    ("regr_avgy", PG),
+    ("regr_count", PG),
+    ("regr_intercept", PG),
+    ("regr_r2", PG),
+    ("regr_slope", PG),
+    ("regr_sxx", PG),
+    ("regr_sxy", PG),
+    ("regr_syy", PG),
+    ("std", MY),
+    ("stddev", PG_MY),
+    ("stddev_pop", PG_MY),
+    ("stddev_samp", PG_MY),
     ("string_agg", PG_LITE),
     ("sum", ALL),
     ("total", LITE),
+    ("var_pop", PG_MY),
+    ("var_samp", PG_MY),
+    ("variance", PG_MY),
+    ("xmlagg", PG),
 ];
 
 const WINDOWS: &[(&str, &[DialectId])] = &[

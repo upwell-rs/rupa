@@ -117,13 +117,14 @@ pub enum SchemaError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ExprRefusal {
-    /// A call of an aggregate function.
+    /// A call of one of the target dialect's built-in aggregate functions.
+    /// A user-defined aggregate is not recognized; the database refuses it.
     #[error("the aggregate `{function}` is not allowed")]
     Aggregate {
         /// The function.
         function: &'static str,
     },
-    /// A call of a window function.
+    /// A call of one of the target dialect's built-in window functions.
     #[error("the window function `{function}` is not allowed")]
     Window {
         /// The function.

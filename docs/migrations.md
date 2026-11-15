@@ -287,10 +287,14 @@ entity is refused even when the two have a column of the same name
 (`ExprRefusal::Column`, naming both tables). Hand-written entities build their
 handles with `Column::scalar_in(Self::TABLE, "name")` (or `json_in`,
 `nullable_json_in`) so that they are checked too; `Column::scalar(..)` has no
-table and is only checked by name. Calls to aggregate functions (`count`, `sum`, ..), window
-functions (`row_number`, ..) and well-known volatile built-ins (`now`, `random`,
-`uuid`, `current_timestamp`, ..) are refused after DSL functions are lowered, so
-a function built on one is refused too. The query IR has no subquery node, so
+table and is only checked by name. Calls to the target dialect's built-in
+aggregates (`count`, `sum`, `stddev`, ..), window functions (`row_number`, ..)
+and well-known volatile functions (`now`, `random`, `uuid`,
+`current_timestamp`, ..) are refused after DSL functions are lowered, so a
+function built on one is refused too. A schema-qualified name
+(`billing.total`) is a user function, except `pg_catalog.*` on PostgreSQL.
+User-defined aggregates and volatile functions aren't known to rupa; the
+database refuses them when the migration runs. The query IR has no subquery node, so
 none can be written. These fail at preflight with
 `SchemaError::Expression { object, dialect, reason: ExprRefusal }`. The same
 renderer will back CHECK constraints.
