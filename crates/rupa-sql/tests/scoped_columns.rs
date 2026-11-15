@@ -28,6 +28,12 @@ impl Relation for Account {
 
 struct Anonymous;
 
+impl Relation for Anonymous {
+    const TABLE: TableRef = TableRef::new("anonymous");
+    const ID_COLUMNS: &'static [&'static str] = &[];
+    const COLUMNS: &'static [rupa_core::ColumnMeta] = &[];
+}
+
 impl Anonymous {
     const EMAIL: Column<Anonymous, String, Scalar> = Column::scalar("email");
 }
