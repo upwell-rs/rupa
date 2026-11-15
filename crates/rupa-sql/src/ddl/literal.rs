@@ -4,19 +4,17 @@ use std::fmt::Write as _;
 
 use rupa_core::{DialectId, Value};
 
-/// The type `dialect` binds `value` as, when its bare literal would read as
-/// another type: PostgreSQL types `2` as `integer` and `2.0` as `numeric`,
-/// MySQL types `2.0` as `DECIMAL`. An expression writes such a literal cast
-/// to this type, so an index over it matches, and computes like, the same
-/// expression with a bound parameter.
+/// The type PostgreSQL binds `value` as, when its bare literal would read as
+/// another type: `2` is an `integer` and `2.0` a `numeric`. An expression
+/// writes such a literal cast to this type, so an index over it matches, and
+/// computes like, the same expression with a bound parameter. MySQL needs no
+/// cast: its floats are written in exponent form (see [`write`]).
 pub(crate) fn bound_type(value: &Value, dialect: DialectId) -> Option<&'static str> {
     match (dialect, value) {
         (DialectId::Postgres, Value::I16(_)) => Some("SMALLINT"),
         (DialectId::Postgres, Value::I64(_)) => Some("BIGINT"),
         (DialectId::Postgres, Value::F32(_)) => Some("REAL"),
         (DialectId::Postgres, Value::F64(_)) => Some("DOUBLE PRECISION"),
-        (DialectId::MySql, Value::F32(_)) => Some("FLOAT"),
-        (DialectId::MySql, Value::F64(_)) => Some("DOUBLE"),
         _ => None,
     }
 }
@@ -31,7 +29,10 @@ pub(crate) fn bound_type(value: &Value, dialect: DialectId) -> Option<&'static s
 /// float never turns into an integer literal and changes the meaning of the
 /// expression around it. An `f32` is written widened to `f64`, the value
 /// drivers bind and engines compare (`0.1_f32` is `0.10000000149011612`), so a
-/// literal matches the rows a bound parameter would. Text is
+/// literal matches the rows a bound parameter would. MySQL floats are
+/// written in exponent form (`2e0`), which MySQL reads as `DOUBLE` where a
+/// plain `2.0` would be an exact `DECIMAL`; a `CAST(.. AS DOUBLE)` would need
+/// MySQL 8.0.17. Text is
 /// quoted with doubled quotes. A backslash is refused on MySQL, where its
 /// meaning depends on the server's SQL mode, and written as an `E'..'` escape
 /// string on PostgreSQL, which means the same whatever
@@ -43,14 +44,22 @@ pub(crate) fn write(value: &Value, dialect: DialectId, out: &mut String) -> Opti
         Value::I16(n) => _ = write!(out, "{n}"),
         Value::I32(n) => _ = write!(out, "{n}"),
         Value::I64(n) => _ = write!(out, "{n}"),
-        Value::F32(n) if n.is_finite() => _ = write!(out, "{:?}", f64::from(*n)),
-        Value::F64(n) if n.is_finite() => _ = write!(out, "{n:?}"),
+        Value::F32(n) if n.is_finite() => float(f64::from(*n), dialect, out),
+        Value::F64(n) if n.is_finite() => float(*n, dialect, out),
         Value::Text(text) => quoted(text, dialect, out)?,
         Value::Json(json) => quoted(&json.to_string(), dialect, out)?,
         _ => return None,
     }
 
     Some(())
+}
+
+fn float(n: f64, dialect: DialectId, out: &mut String) {
+    if dialect == DialectId::MySql {
+        _ = write!(out, "{n:e}");
+    } else {
+        _ = write!(out, "{n:?}");
+    }
 }
 
 fn quoted(text: &str, dialect: DialectId, out: &mut String) -> Option<()> {
