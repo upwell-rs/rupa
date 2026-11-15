@@ -7,10 +7,17 @@ use rupa::migrate::{
 };
 use rupa::{raw, select};
 
+mod constraints;
 mod expressions;
 mod kinds;
 mod schema;
 
+pub use constraints::{
+    add_account_constraints, create_accounts_checked_by_a_foreign_column,
+    create_accounts_checked_by_an_aggregate, create_accounts_then_add_a_constraint,
+    create_accounts_then_drop_a_constraint, create_accounts_with_a_unique_nickname,
+    create_accounts_with_constraints, create_plain_accounts, drop_account_constraints,
+};
 pub use expressions::{
     Account, NewAccount, create_accounts_indexed_by_a_foreign_column,
     create_accounts_indexed_by_a_same_named_foreign_column,

@@ -34,6 +34,8 @@ mod support;
 mod adoption;
 #[path = "cases/commands.rs"]
 mod commands_cases;
+#[path = "cases/constraints.rs"]
+mod constraints;
 #[path = "cases/control.rs"]
 mod control;
 #[path = "cases/exclusion.rs"]

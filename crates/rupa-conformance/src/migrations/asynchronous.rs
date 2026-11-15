@@ -83,6 +83,9 @@ mod adoption {
 mod commands_cases {
     include!("cases/commands.rs");
 }
+mod constraints {
+    include!("cases/constraints.rs");
+}
 mod control {
     include!("cases/control.rs");
 }

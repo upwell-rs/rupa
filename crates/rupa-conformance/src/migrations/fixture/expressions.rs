@@ -32,7 +32,7 @@ pub struct NewAccount {
     pub closed_at: Option<i64>,
 }
 
-fn create_accounts() -> Plan {
+pub(super) fn create_accounts() -> Plan {
     Plan::new().create_table(Table::of::<Account>())
 }
 
