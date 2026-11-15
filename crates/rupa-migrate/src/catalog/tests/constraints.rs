@@ -121,3 +121,17 @@ fn a_uniques_column_types_are_not_part_of_the_checksum() {
         plan_digest(|| Plan::new().add_constraint(NOTES, Constraint::from(unique())))
     );
 }
+
+fn recorded(table: Option<TableRef>) -> Plan {
+    Plan::new().add_constraint(NOTES, Unique { table, ..unique() })
+}
+
+#[test]
+fn a_uniques_recorded_table_is_not_part_of_the_checksum() {
+    let untabled = plan_digest(|| recorded(None));
+    let notes = plan_digest(|| recorded(Some(NOTES)));
+    let elsewhere = plan_digest(|| recorded(Some(TableRef::new("elsewhere"))));
+
+    assert_eq!(untabled, notes);
+    assert_eq!(notes, elsewhere);
+}

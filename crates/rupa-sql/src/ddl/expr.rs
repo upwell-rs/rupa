@@ -4,7 +4,7 @@
 use rupa_core::ir::TableRef;
 use rupa_core::schema::{DdlExpr, Index};
 
-use super::Ddl;
+use super::{Ddl, ExprRefusal};
 use crate::RenderError;
 use crate::writer::{DdlMode, Writer};
 
@@ -19,10 +19,22 @@ impl Ddl<'_> {
         table: TableRef,
         expr: &DdlExpr,
     ) -> Result<(), RenderError> {
+        self.restricted_expr(object, table, expr, &[])
+    }
+
+    /// [`expr`](Self::expr) that also refuses the columns `restricted` names.
+    pub(super) fn restricted_expr(
+        &mut self,
+        object: &'static str,
+        table: TableRef,
+        expr: &DdlExpr,
+        restricted: &[ExprRefusal],
+    ) -> Result<(), RenderError> {
         let mode = DdlMode {
             object,
             table,
             scope: expr.scope,
+            restricted,
         };
         let sql = Writer::for_ddl(self.target, self.syntax, mode).ddl_expr(&expr.node)?;
 

@@ -12,6 +12,17 @@ fn positive() -> Check {
     )
 }
 
+fn titled() -> Check {
+    Check::new(
+        "notes_title_nonempty",
+        DdlExpr::new(binary(
+            BinOp::Ne,
+            column("title"),
+            param(Value::Text(String::new())),
+        )),
+    )
+}
+
 fn title_author() -> Unique {
     Unique::new(
         "notes_title_author",
@@ -27,7 +38,7 @@ fn body_unique() -> Unique {
 }
 
 fn constrained() -> Table {
-    notes().check(positive()).unique(title_author())
+    notes().check(titled()).unique(title_author())
 }
 
 fn alteration(error: Result<String, RenderError>) -> (&'static str, DialectId, ConstraintChange) {
@@ -50,19 +61,19 @@ fn create_table_writes_named_constraints_after_its_keys() {
 
     assert!(
         postgres.ends_with(
-            r#"ON DELETE SET NULL, CONSTRAINT "notes_author_positive" CHECK ("author_id" > CAST(0 AS BIGINT)), CONSTRAINT "notes_title_author" UNIQUE ("title", "author_id"))"#
+            r#"ON DELETE SET NULL, CONSTRAINT "notes_title_nonempty" CHECK ("title" <> ''), CONSTRAINT "notes_title_author" UNIQUE ("title", "author_id"))"#
         ),
         "{postgres}"
     );
     assert!(
         mysql.ends_with(
-            "ON DELETE SET NULL, CONSTRAINT `notes_author_positive` CHECK (`author_id` > 0), CONSTRAINT `notes_title_author` UNIQUE (`title`, `author_id`))"
+            "ON DELETE SET NULL, CONSTRAINT `notes_title_nonempty` CHECK (`title` <> ''), CONSTRAINT `notes_title_author` UNIQUE (`title`, `author_id`))"
         ),
         "{mysql}"
     );
     assert!(
         sqlite.ends_with(
-            r#"ON DELETE SET NULL, CONSTRAINT "notes_author_positive" CHECK ("author_id" > 0), CONSTRAINT "notes_title_author" UNIQUE ("title", "author_id"))"#
+            r#"ON DELETE SET NULL, CONSTRAINT "notes_title_nonempty" CHECK ("title" <> ''), CONSTRAINT "notes_title_author" UNIQUE ("title", "author_id"))"#
         ),
         "{sqlite}"
     );
@@ -273,4 +284,141 @@ fn a_table_without_constraints_renders_as_before() {
     let [postgres, ..] = ok(&SchemaOp::CreateTable(notes()));
 
     assert!(!postgres.contains("CONSTRAINT"), "{postgres}");
+}
+
+fn check_on(name: &'static str, column_name: &'static str) -> Check {
+    Check::new(
+        name,
+        DdlExpr::new(binary(BinOp::Gt, column(column_name), param(Value::I64(0)))),
+    )
+}
+
+#[test]
+fn mysql_refuses_a_check_over_the_auto_increment_column() {
+    let table = notes().check(check_on("notes_id_positive", "id"));
+    let results = all(&SchemaOp::CreateTable(table));
+
+    assert_eq!(
+        results[1],
+        refused(
+            "notes_id_positive",
+            DialectId::MySql,
+            ExprRefusal::AutoIncrementColumn { column: "id" }
+        )
+    );
+    assert!(results[0].is_ok() && results[2].is_ok());
+}
+
+#[test]
+fn mysql_refuses_a_check_over_a_cascading_foreign_key_column() {
+    for action in [ReferentialAction::Cascade, ReferentialAction::SetNull] {
+        let table = notes()
+            .foreign_key(
+                ForeignKey::new(
+                    ["author_id"],
+                    Reference {
+                        table: TableRef::with_schema("app", "authors"),
+                        columns: &["id"],
+                    },
+                )
+                .on_delete(action),
+            )
+            .check(check_on("notes_author_positive", "author_id"));
+
+        assert_eq!(
+            render_schema(&SchemaOp::CreateTable(table), &MySql),
+            refused(
+                "notes_author_positive",
+                DialectId::MySql,
+                ExprRefusal::ReferentialActionColumn {
+                    column: "author_id"
+                }
+            )
+        );
+    }
+}
+
+#[test]
+fn mysql_allows_a_check_over_a_restricting_foreign_key_column() {
+    for action in [ReferentialAction::NoAction, ReferentialAction::Restrict] {
+        let table = notes()
+            .foreign_key(
+                ForeignKey::new(
+                    ["author_id"],
+                    Reference {
+                        table: TableRef::with_schema("app", "authors"),
+                        columns: &["id"],
+                    },
+                )
+                .on_delete(action),
+            )
+            .check(check_on("notes_author_positive", "author_id"));
+
+        assert!(render_schema(&SchemaOp::CreateTable(table), &MySql).is_ok());
+    }
+}
+
+#[test]
+fn a_restricted_column_is_not_refused_when_added_to_an_existing_table() {
+    let op = SchemaOp::AddConstraint {
+        table: NOTES,
+        constraint: check_on("notes_id_positive", "id").into(),
+    };
+
+    assert!(render_schema(&op, &MySql).is_ok());
+}
+
+fn wrong_table() -> SchemaError {
+    SchemaError::ConstraintTable {
+        constraint: "notes_other",
+        recorded: TableRef::new("other"),
+        expected: NOTES,
+    }
+}
+
+fn other_unique() -> Unique {
+    Unique {
+        table: Some(TableRef::new("other")),
+        ..Unique::new("notes_other", [IndexColumn::new("title", ColumnType::Text)])
+    }
+}
+
+#[test]
+fn a_unique_recorded_for_another_table_is_refused_everywhere() {
+    let create = SchemaOp::CreateTable(notes().unique(other_unique()));
+    let add = SchemaOp::AddConstraint {
+        table: NOTES,
+        constraint: other_unique().into(),
+    };
+
+    for result in all(&create) {
+        assert_eq!(result, Err(RenderError::Schema(Box::new(wrong_table()))));
+    }
+
+    for dialect in [&Postgres as &dyn Dialect, &MySql] {
+        assert_eq!(
+            render_schema(&add, dialect),
+            Err(RenderError::Schema(Box::new(wrong_table())))
+        );
+    }
+}
+
+#[test]
+fn a_unique_recorded_for_its_own_table_or_none_is_accepted() {
+    let own = Unique {
+        table: Some(NOTES),
+        ..other_unique()
+    };
+
+    assert!(render_schema(&SchemaOp::CreateTable(notes().unique(own)), &Postgres).is_ok());
+    assert!(
+        render_schema(
+            &SchemaOp::CreateTable(notes().unique(Unique {
+                table: None,
+                ..other_unique()
+            })),
+            &Postgres
+        )
+        .is_ok()
+    );
 }

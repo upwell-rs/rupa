@@ -89,3 +89,18 @@ pub fn create_accounts_checked_by_an_aggregate() -> Plan {
         )),
     )
 }
+
+/// A unique constraint built from the id of authors, while accounts has an
+/// `id` column of its own.
+pub fn create_accounts_with_a_unique_of_a_foreign_column() -> Plan {
+    Plan::new()
+        .create_table(Table::of::<Account>().unique(Unique::on("accounts_wrong_table", Author::ID)))
+}
+
+/// A check over the auto-increment id, which MySQL refuses.
+pub fn create_accounts_checked_by_the_identity() -> Plan {
+    Plan::new().create_table(Table::of::<Account>().check(Check::on::<Account>(
+        "accounts_id_positive",
+        Account::ID.gt(0),
+    )))
+}

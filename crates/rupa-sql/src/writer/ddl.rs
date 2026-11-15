@@ -24,6 +24,9 @@ pub(crate) struct Mode<'a> {
     pub(crate) table: TableRef,
     /// The columns the expression may name, if known.
     pub(crate) scope: Option<&'a [ColumnMeta]>,
+    /// Refusals for columns the dialect cannot use here, each naming its
+    /// column.
+    pub(crate) restricted: &'a [ExprRefusal],
 }
 
 impl<'a> Writer<'a> {
@@ -123,6 +126,14 @@ impl<'a> Writer<'a> {
             }));
         }
 
+        if let Some(reason) = mode
+            .restricted
+            .iter()
+            .find(|reason| restricted_column(reason) == Some(column.name))
+        {
+            return Err(self.refuse(*reason));
+        }
+
         Ok(())
     }
 
@@ -133,5 +144,13 @@ impl<'a> Writer<'a> {
             reason,
         }
         .into()
+    }
+}
+
+fn restricted_column(reason: &ExprRefusal) -> Option<&'static str> {
+    match reason {
+        ExprRefusal::AutoIncrementColumn { column }
+        | ExprRefusal::ReferentialActionColumn { column } => Some(column),
+        _ => None,
     }
 }

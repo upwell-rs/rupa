@@ -104,6 +104,8 @@ macro_rules! all_cases {
                 case_constraints_alter_or_fail_typed_before_acquisition,
                 case_unique_constraints_over_text_work_or_fail_typed_before_acquisition,
                 case_checks_ddl_cannot_hold_fail_typed_before_acquisition,
+                case_a_unique_of_another_entitys_column_is_refused_before_acquisition,
+                case_checks_over_the_identity_work_or_fail_typed_before_acquisition,
             ],
             kinds: [
                 case_a_kind_stored_everywhere_applies_on_every_dialect,
