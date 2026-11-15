@@ -3,7 +3,7 @@
 ## Role
 
 Derive and attribute macros: `#[derive(Entity)]` and the capability derives,
-`#[derive(Joined)]`, `#[query]`, `#[repository]`, `on!` and
+`#[derive(Joined)]`, `table!`, `#[query]`, `#[repository]`, `on!` and
 `#[rupa::dsl::function]`.
 
 ## Usage
@@ -13,7 +13,7 @@ Through the `rupa` facade (`use rupa::prelude::*`). Generated code refers to
 
 `#[derive(Entity)]` emits one typed column handle constant per field, named
 in uppercase (`created_at` becomes `User::CREATED_AT`), and the constant
-`Entity::COLUMNS` metadata. A field is a scalar column when its type implements
+`Relation::COLUMNS` metadata. A field is a scalar column when its type implements
 `ScalarColumn`, a nullable JSON column when it is an `Option` of a serde type,
 and a JSON column for any other `Serialize + DeserializeOwned` type; the
 choice is made at compile time, and `#[column(scalar | json)]` overrides it.
@@ -23,6 +23,12 @@ editors resolve their handles exactly; other types are selected by evaluating
 a constant (`__RUPA_<FIELD>_ENCODING`). `Uuid` and the chrono types therefore
 need rupa's `uuid`/`chrono` features (on by default); without them, such a
 field fails as "not a scalar column type" unless marked `#[column(json)]`.
+
+`rupa::table!(Accounts = "accounts" { #[id] id: i64, nick: Option<String> })`
+declares a table with no row type: a unit marker implementing `Relation`, and
+the same handle constants and `ColumnMeta`s the derive emits. It takes
+`#[id]`, `#[id(generated)]` and `#[column(references = Other)]`, and refuses
+every other attribute. See the migration guide for the rest of its grammar.
 
 Repositories are dyn-compatible by default: async methods return boxed
 futures, so the trait works as `Arc<dyn Trait>`, which DI frameworks inject.

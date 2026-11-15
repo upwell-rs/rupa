@@ -55,6 +55,43 @@ fn self_contained_migrations_and_external_crates_are_allowed() {
     }
 }
 
+const TYPED_TABLES: &str = r#"
+rupa::table!(Authors = "authors" {
+    #[id]
+    id: i64,
+});
+
+rupa::table!(
+    /// The accounts table as this migration sees it.
+    Accounts = "main"."accounts" {
+        #[id(generated)]
+        id: i64,
+        #[column(references = Authors)]
+        author_id: Option<i64>,
+        nick: Option<rupa::VarChar<64>>,
+    }
+);
+
+fn up() -> rupa::migrate::Plan {
+    rupa::migrate::Plan::new().create_table(rupa::migrate::schema::Table::of::<Accounts>())
+}
+"#;
+
+#[test]
+fn typed_table_declarations_are_self_contained() {
+    assert_eq!(violation(TYPED_TABLES, Layout::File), None);
+}
+
+#[test]
+fn a_typed_table_reaching_application_code_is_rejected() {
+    let source = "rupa::table!(Accounts = \"accounts\" {\n    #[id]\n    id: i64,\n    #[column(references = crate::db::Authors)]\n    author_id: i64,\n});";
+
+    assert_eq!(
+        violation(source, Layout::File),
+        Some(Violation::CratePath("crate::db::Authors".into()))
+    );
+}
+
 #[test]
 fn reaching_application_code_or_foreign_files_is_rejected() {
     let nested = helper(&["slug.rs"]);

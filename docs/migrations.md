@@ -159,19 +159,82 @@ therefore rejects scripted migrations that reach outside their own files:
 modules in single-file migrations, any `include*!` in a single-file migration,
 and includes that leave a directory migration or name an unhashed dotfile.
 Attribute arguments such as `#[derive(crate::Entity)]` are checked too. Declare
-the row shape a scripted migration needs locally, as a private
-`#[derive(rupa::Entity)]` struct, and keep helpers inside a directory migration.
+the tables a scripted migration needs locally with
+[`rupa::table!`](#typed-tables-without-entities), and keep helpers inside a
+directory migration. A migration that must read rows into a struct declares a
+private `#[derive(rupa::Entity)]` for that.
 
 Planned migrations may use shared entities (`Table::of::<crate::Tag>()`), so
 they are not checked. Drift is caught instead of prevented: if an entity
 change alters an applied migration's plan, its checksum no longer matches and
-`apply` refuses to continue. Replace the entity reference with the literal
-definition it used to produce (`Table::named`, `ColumnDef::new`); the same plan
-keeps the same checksum, whatever source produced it.
+`apply` refuses to continue. Declare the table locally with `rupa::table!`
+instead, or replace the entity reference with the literal definition it used to
+produce (`Table::named`, `ColumnDef::new`); the same plan keeps the same
+checksum, whatever source produced it.
 
-External crates such as `rupa` stay available to both kinds; depending on a
-shared crate is an explicit decision. `Context` exposes typed queries, scripts
-and schema operations only, so repositories cannot run inside a migration.
+### Typed tables without entities
+
+`rupa::table!` declares a table snapshot with typed column handles and no row
+struct. It is the recommended way for a migration to name a table, because the
+snapshot is written inside the migration and never follows the application's
+entity:
+
+```rust,ignore
+rupa::table!(Accounts = "main"."accounts" {
+    #[id(generated)]
+    id: i64,
+    #[column(references = Owners)]
+    owner_id: i64,
+    nick: Option<VarChar<64>>,
+    prefs: Prefs,
+});
+
+impl PlannedMigration for BackfillNicks {
+    fn plan(&self) -> Plan {
+        Plan::new()
+            .create_table(Table::of::<Accounts>())
+            .create_index(Index::on("accounts_nick", Accounts::NICK).unique())
+            .add_constraint(
+                Accounts::TABLE,
+                Check::on::<Accounts>("owner_known", Accounts::OWNER_ID.gt(0_i64)),
+            )
+    }
+}
+```
+
+The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" { field, .. }`.
+A field is `[attribute] name: Type`, where the attribute is one of `#[id]`,
+`#[id(generated)]` and `#[column(references = Other)]`; several `#[id]` fields
+declare a composite key. Anything else (`#[column(name = ..)]`, `#[unique]`,
+`#[column(json)]`) is a compile error: the column is named after the field and
+its kind follows its type, exactly as in `#[derive(Entity)]`, so a table
+snapshot and the entity it was copied from describe identical columns.
+
+The macro emits a unit marker implementing `Relation` (the table, its id
+columns and its `ColumnMeta`s, which `Entity` extends with row decoding) and
+one handle constant per column, named like the derive's (`Accounts::NICK`).
+Everything that only needs identity and columns takes a `Relation`:
+`Table::of`, `ColumnDef::of`, `Index::on`, `Check::on`, `Unique::on`,
+`ForeignKey::to`, `Plan::add_column`, and the `update`, `delete` and `insert`
+builders. So a backfill is typed too, without a row struct:
+
+```rust,ignore
+update::<Accounts>()
+    .set(Accounts::NICK, &Some(VarChar::new("anon")?))
+    .filter(Accounts::NICK.is_null())
+    .affected()
+    .execute(context)?;
+
+delete::<Accounts>().filter(Accounts::OWNER_ID.eq(0)).affected().execute(context)?;
+```
+
+A marker has no row to read, so `select` stays on entities, and it has no
+value to apply or key to look up, so `update::<T>().one(..)` and
+`delete::<T>().by_id(..)` are for entities too. The marker implements
+`Updatable` and `Deletable` for itself, so it writes through `set`,
+`set_expr` and filters. `Table::of::<Accounts>()` equals the literal
+`Table::named(..)` and `ColumnDef::new(..)` definitions, and so does its
+checksum.
 
 ## Schema operations
 
