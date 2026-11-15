@@ -159,6 +159,22 @@ fn a_unique_over_another_tables_handle_is_refused_in_both_forms() {
 }
 
 #[test]
+fn a_table_less_handle_of_another_relation_in_a_unique_is_refused() {
+    let unique = Unique::on("users_email", Anonymous::EMAIL).build();
+    let op = SchemaOp::CreateTable(Table::of::<User>().unique(unique));
+
+    assert_eq!(
+        render_schema(&op, &Postgres),
+        Err(RenderError::Schema(Box::new(SchemaError::ForeignColumn {
+            object: "users_email",
+            column: "email",
+            recorded: Anonymous::TABLE,
+            expected: User::TABLE,
+        })))
+    );
+}
+
+#[test]
 fn index_and_unique_columns_of_the_same_table_or_of_none_are_accepted() {
     let own = Index::new("users_email", User::TABLE, [IndexColumn::of(User::EMAIL)]);
     let anonymous = Index::new(
