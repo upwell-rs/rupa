@@ -72,7 +72,9 @@ pub mod __macro_support {
 
 pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
-pub use column::{Column, ColumnMeta, Generated, Json, ReadAs, Reference, Scalar, StorageKind};
+pub use column::{
+    Column, ColumnMeta, Dynamic, Generated, Json, ReadAs, Reference, Scalar, StorageKind,
+};
 pub use config::{DbConfig, PoolConfig};
 pub use connection::{Connection, DynConnection, OpenTransaction, RepoOn, TxEnd};
 pub use dialect::{

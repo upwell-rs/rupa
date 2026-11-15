@@ -11,7 +11,7 @@ mod part;
 use std::marker::PhantomData;
 
 use super::DdlExpr;
-use crate::column::{Column, Json, Scalar};
+use crate::column::{Column, Dynamic, Json, Scalar};
 use crate::dialect::DialectId;
 use crate::entity::Relation;
 use crate::expr::IntoCondition;
@@ -143,6 +143,19 @@ pub trait IndexKind: Sized + 'static {
         }
     }
 
+    /// An index of this kind over one column of a table named only by the
+    /// handle ([`Column::dynamic`]), which must hold a type the kind accepts.
+    fn on_dynamic<T, C: IndexableColumn<Self, T>>(
+        name: &'static str,
+        column: Column<Dynamic, T, C>,
+    ) -> IndexBuilder<Self, Dynamic> {
+        IndexBuilder {
+            index: Index::new(name, column.declared_table(), [IndexColumn::of(column)])
+                .method(Self::METHOD),
+            _p: PhantomData,
+        }
+    }
+
     /// An index of this kind over one expression of entity `E`, which must
     /// evaluate to a type the kind accepts. The entity is named explicitly,
     /// since an expression does not carry it: `BTree::on_expr::<User>(..)`.
@@ -244,6 +257,15 @@ impl Index {
         BTree::on(name, column).into()
     }
 
+    /// A B-tree index named `name` over one column of a table named only by
+    /// the handle ([`Column::dynamic`]).
+    pub fn on_dynamic<T, C: IndexableColumn<BTree, T>>(
+        name: &'static str,
+        column: Column<Dynamic, T, C>,
+    ) -> Self {
+        BTree::on_dynamic(name, column).into()
+    }
+
     /// A B-tree index named `name` over one expression of entity `E`.
     pub fn on_expr<E: Relation>(name: &'static str, expr: impl IndexableExpr<BTree>) -> Self {
         BTree::on_expr::<E>(name, expr).into()
@@ -307,7 +329,37 @@ impl<K: IndexKind, E: Relation> IndexBuilder<K, E> {
 
         self
     }
+}
 
+impl<K: IndexKind> IndexBuilder<K, Dynamic> {
+    /// Adds a column the kind accepts.
+    ///
+    /// # Panics
+    /// If the column belongs to another table than the index.
+    pub fn and<T, C: IndexableColumn<K, T>>(mut self, column: Column<Dynamic, T, C>) -> Self {
+        assert_eq!(
+            column.declared_table(),
+            self.index.table,
+            "an index covers columns of one table"
+        );
+
+        self.index.parts.push(IndexColumn::of(column).into());
+
+        self
+    }
+
+    /// Indexes only the rows meeting `condition`. Columns the condition names
+    /// are checked against the index's table when the index is rendered.
+    pub fn filter(mut self, condition: impl IntoCondition) -> Self {
+        self.index = self
+            .index
+            .filter(DdlExpr::new(condition.into_condition().into_node()));
+
+        self
+    }
+}
+
+impl<K, E> IndexBuilder<K, E> {
     /// Makes indexed values unique.
     pub fn unique(mut self) -> Self {
         self.index.unique = true;

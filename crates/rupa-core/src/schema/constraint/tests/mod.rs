@@ -6,6 +6,7 @@ use crate::schema::{ColumnType, Table};
 use crate::varchar::VarChar;
 
 mod builders;
+mod dynamic;
 mod tables;
 
 struct Doc;

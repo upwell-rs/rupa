@@ -11,7 +11,7 @@
 use std::marker::PhantomData;
 
 use super::{DdlExpr, IndexColumn};
-use crate::column::Column;
+use crate::column::{Column, Dynamic};
 use crate::entity::Relation;
 use crate::expr::IntoCondition;
 use crate::ir::TableRef;
@@ -85,10 +85,27 @@ impl Unique {
             _p: PhantomData,
         }
     }
+
+    /// A constraint over one column of a table named only by the handle
+    /// ([`Column::dynamic`]); add more with [`UniqueBuilder::and`]. Rendering
+    /// refuses it on any other table.
+    pub fn on_dynamic<T, K>(
+        name: &'static str,
+        column: Column<Dynamic, T, K>,
+    ) -> UniqueBuilder<Dynamic> {
+        UniqueBuilder {
+            unique: Self {
+                table: Some(column.declared_table()),
+                ..Self::new(name, [IndexColumn::of(column)])
+            },
+            _p: PhantomData,
+        }
+    }
 }
 
-/// A [`Unique`] over columns of entity `E`. Becomes a [`Unique`] or a
-/// [`Constraint`] where one is expected.
+/// A [`Unique`] over columns of relation `E`, or of one named table for
+/// [`Dynamic`]. Becomes a [`Unique`] or a [`Constraint`] where one is
+/// expected.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UniqueBuilder<E> {
     unique: Unique,
@@ -102,10 +119,30 @@ impl<E: Relation> UniqueBuilder<E> {
 
         self
     }
+}
 
+impl<E> UniqueBuilder<E> {
     /// The finished constraint.
     pub fn build(self) -> Unique {
         self.unique
+    }
+}
+
+impl UniqueBuilder<Dynamic> {
+    /// Adds a column of the same table.
+    ///
+    /// # Panics
+    /// If the column belongs to another table.
+    pub fn and<T, K>(mut self, column: Column<Dynamic, T, K>) -> Self {
+        assert_eq!(
+            Some(column.declared_table()),
+            self.unique.table,
+            "a unique constraint covers columns of one table"
+        );
+
+        self.unique.columns.push(IndexColumn::of(column));
+
+        self
     }
 }
 
