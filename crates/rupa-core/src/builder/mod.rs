@@ -1,4 +1,4 @@
-//! Typed statement builders. Each produces a dialect-free [`Query<R>`]; no IO.
+//! Typed statement builders. Each produces a dialect-free [`Query<R>`](crate::query::Query); no IO.
 
 mod delete;
 mod insert;
