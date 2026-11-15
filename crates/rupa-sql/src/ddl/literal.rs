@@ -4,6 +4,23 @@ use std::fmt::Write as _;
 
 use rupa_core::{DialectId, Value};
 
+/// The type `dialect` binds `value` as, when its bare literal would read as
+/// another type: PostgreSQL types `2` as `integer` and `2.0` as `numeric`,
+/// MySQL types `2.0` as `DECIMAL`. An expression writes such a literal cast
+/// to this type, so an index over it matches, and computes like, the same
+/// expression with a bound parameter.
+pub(crate) fn bound_type(value: &Value, dialect: DialectId) -> Option<&'static str> {
+    match (dialect, value) {
+        (DialectId::Postgres, Value::I16(_)) => Some("SMALLINT"),
+        (DialectId::Postgres, Value::I64(_)) => Some("BIGINT"),
+        (DialectId::Postgres, Value::F32(_)) => Some("REAL"),
+        (DialectId::Postgres, Value::F64(_)) => Some("DOUBLE PRECISION"),
+        (DialectId::MySql, Value::F32(_)) => Some("FLOAT"),
+        (DialectId::MySql, Value::F64(_)) => Some("DOUBLE"),
+        _ => None,
+    }
+}
+
 /// Writes `value` as a literal of `dialect` into `out`, or returns `None`
 /// when it has no safe literal form there.
 ///

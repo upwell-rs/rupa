@@ -28,9 +28,19 @@ fn float_literals_always_read_as_floats() {
         (Value::F32(0.1), "0.10000000149011612"),
         (Value::F32(f32::MAX), "3.4028234663852886e38"),
     ] {
-        let expected = format!(" / {text}))");
+        let [postgres, mysql] = match value {
+            Value::F32(_) => ["REAL", "FLOAT"],
+            _ => ["DOUBLE PRECISION", "DOUBLE"],
+        };
 
-        for dialect in [&Postgres as &dyn Dialect, &MySql, &Sqlite] {
+        for (dialect, expected) in [
+            (
+                &Postgres as &dyn Dialect,
+                format!(" / CAST({text} AS {postgres})))"),
+            ),
+            (&MySql, format!(" / CAST({text} AS {mysql})))")),
+            (&Sqlite, format!(" / {text}))")),
+        ] {
             assert!(
                 rendered(value.clone(), dialect).ends_with(&expected),
                 "{value:?} on {dialect:?}"
@@ -50,13 +60,12 @@ fn integers_stay_integer_literals() {
         }
     }
 
-    for value in [Value::I16(2), Value::I32(2)] {
-        assert!(rendered(value, &Postgres).ends_with(r#""n" / 2))"#));
-    }
+    assert!(rendered(Value::I32(2), &Postgres).ends_with(r#""n" / 2))"#));
 }
 
 #[test]
-fn postgres_keeps_i64_literals_bigint() {
+fn postgres_keeps_small_and_big_integer_literals_their_bound_type() {
+    assert!(rendered(Value::I16(2), &Postgres).ends_with(r#""n" / CAST(2 AS SMALLINT)))"#));
     assert!(
         rendered(Value::I64(1_000_000), &Postgres).ends_with(r#""n" / CAST(1000000 AS BIGINT)))"#)
     );
