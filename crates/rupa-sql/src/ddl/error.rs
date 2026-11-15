@@ -90,6 +90,20 @@ pub enum SchemaError {
     /// An index without columns.
     #[error("index `{0}` has no columns")]
     EmptyIndex(&'static str),
+    /// A constraint without columns.
+    #[error("constraint `{0}` has no columns")]
+    EmptyConstraint(&'static str),
+    /// A constraint added to or dropped from an existing table on a dialect
+    /// that cannot alter constraints.
+    #[error("{dialect:?} cannot {change} constraint `{constraint}` on an existing table")]
+    ConstraintAlteration {
+        /// The constraint.
+        constraint: &'static str,
+        /// The dialect.
+        dialect: DialectId,
+        /// What was attempted.
+        change: ConstraintChange,
+    },
     /// An index this dialect cannot build as declared.
     #[error("{dialect:?} cannot build index `{index}`: {reason}")]
     Index {
@@ -110,6 +124,18 @@ pub enum SchemaError {
         /// What DDL refuses.
         reason: ExprRefusal,
     },
+}
+
+/// What an alteration of an existing table's constraints attempted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConstraintChange {
+    /// `ADD CONSTRAINT`.
+    #[error("add")]
+    Add,
+    /// `DROP CONSTRAINT`.
+    #[error("drop")]
+    Drop,
 }
 
 /// Why an expression cannot be written in DDL. DDL mode binds nothing and

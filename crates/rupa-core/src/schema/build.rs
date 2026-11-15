@@ -1,6 +1,9 @@
 //! Builders for schema definitions, from literals or from entities.
 
-use super::{ColumnDef, ColumnDefault, ColumnType, ForeignKey, ReferentialAction, Table};
+use super::{
+    Check, ColumnDef, ColumnDefault, ColumnType, Constraint, ForeignKey, ReferentialAction, Table,
+    Unique,
+};
 use crate::column::{Column, ColumnMeta, Generated, Reference};
 use crate::entity::Entity;
 use crate::ir::TableRef;
@@ -134,6 +137,7 @@ impl Table {
             columns: Vec::new(),
             primary_key: Vec::new(),
             foreign_keys: Vec::new(),
+            constraints: Vec::new(),
         }
     }
 
@@ -173,11 +177,17 @@ impl Table {
         self
     }
 
-    /// Removes the column `name`, with its primary key and foreign key parts.
+    /// Removes the column `name`, with its primary key, foreign key and
+    /// `UNIQUE` constraint parts. A check stays: it may name the column, and
+    /// rendering cannot tell for an unchecked one.
     pub fn without(mut self, name: &str) -> Self {
         self.columns.retain(|c| c.name != name);
         self.primary_key.retain(|c| *c != name);
         self.foreign_keys.retain(|f| !f.columns.contains(&name));
+        self.constraints.retain(|c| match c {
+            Constraint::Unique(unique) => unique.columns.iter().all(|column| column.name != name),
+            Constraint::Check(_) => true,
+        });
 
         self
     }
@@ -196,6 +206,26 @@ impl Table {
         self.foreign_keys.push(foreign_key);
 
         self
+    }
+
+    /// Adds `constraint`, replacing one of the same name.
+    pub fn constraint(mut self, constraint: impl Into<Constraint>) -> Self {
+        let constraint = constraint.into();
+
+        self.constraints.retain(|c| c.name() != constraint.name());
+        self.constraints.push(constraint);
+
+        self
+    }
+
+    /// Adds a named `CHECK` constraint: [`Check::on`] or [`Check::new`].
+    pub fn check(self, check: Check) -> Self {
+        self.constraint(check)
+    }
+
+    /// Adds a named `UNIQUE` constraint: [`Unique::on`] or [`Unique::new`].
+    pub fn unique(self, unique: impl Into<Unique>) -> Self {
+        self.constraint(unique.into())
     }
 }
 
