@@ -1,12 +1,15 @@
+use rupa::migrate::Planned;
 use rupa::migrate::{
     ApplyOptions, Blocker, Error, Init, Order, Policy, RunError, ValidationError, Version,
     VersionScheme,
 };
 use rupa::sql::{RenderError, SchemaError};
-use rupa::{Dialect, DialectId};
+use rupa::{Dialect, DialectId, VarChar, insert};
 
-use super::{Connection, Harness, Session};
-use crate::migrations::fixture::{Body, planned_with, reversible, snapshot, with_policy};
+use super::{Connection, Harness, Session, catalog};
+use crate::migrations::fixture::{
+    Account, Body, NewAccount, Plans, planned_with, reversible, snapshot, with_policy,
+};
 
 /// Permission to run late artifacts.
 pub(super) const ALLOW_LATE: ApplyOptions = ApplyOptions {
@@ -150,4 +153,50 @@ macro_rules! interrupt {
 
         assert!(interrupted.is_err(), "the body panics");
     }};
+}
+
+/// Inserts one account on its own connection, and whether the database
+/// accepted it.
+pub(super) fn add<H: Harness>(
+    h: &H,
+    email: &str,
+    nick: &str,
+    bucket: i32,
+    closed_at: Option<i64>,
+) -> bool {
+    let session = h.connect();
+    let row = NewAccount {
+        email: VarChar::new(email).expect("a short email"),
+        nick: nick.to_owned(),
+        bucket,
+        closed_at,
+    };
+
+    wait!(
+        h,
+        insert::<Account>()
+            .values(&[row])
+            .affected()
+            .execute(&session)
+    )
+    .is_ok()
+}
+
+pub(super) fn accounts<H: Harness>(h: &H) -> i64 {
+    h.count("SELECT count(*) FROM accounts")
+}
+
+/// Applies `plan` and asserts that preflight refused it, before anything
+/// was acquired or created.
+pub(super) fn refused_at_preflight<H: Harness>(
+    h: &H,
+    plan: fn() -> rupa::migrate::Plan,
+) -> SchemaError {
+    let entries = [Planned(Plans(planned::<H>("1"), plan))];
+    let error = schema_refusal(wait!(h, h.connect().apply(&catalog(&entries))));
+
+    assert!(!h.table_exists("_rupa_migrations"));
+    assert!(!h.table_exists("accounts"));
+
+    error
 }

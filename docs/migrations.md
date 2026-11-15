@@ -204,7 +204,7 @@ replace), `.without(..)` and `.foreign_key(..)`. `ColumnDef::of(Note::TITLE)`
 builds one column from a field handle. `ForeignKey::new(columns, Reference { .. })`
 writes a foreign key by hand; `Reference`, `ForeignKey` and `ReferentialAction` are
 all in `rupa::migrate::schema`. Operations: create/drop/rename table,
-add/drop/rename column, create/drop index.
+add/drop/rename column, create/drop index, add/drop constraint.
 
 Types render as the types each driver binds: for example `Json` is `JSONB`,
 `JSON` and `TEXT`; `Uuid` is `UUID`, `CHAR(36)` and `TEXT`; identity keys are
@@ -300,7 +300,7 @@ User-defined aggregates and volatile functions aren't known to rupa; the
 database refuses them when the migration runs. The query IR has no subquery node, so
 none can be written. These fail at preflight with
 `SchemaError::Expression { object, dialect, reason: ExprRefusal }`. The same
-renderer will back CHECK constraints.
+renderer backs [CHECK constraints](#constraints).
 
 Volatility is recognized by name, not declared: rupa cannot know whether an
 arbitrary function is immutable, and a `#[dsl::function]` carries no such
@@ -327,6 +327,60 @@ expression's Rust type: DSL text functions such as `lower` return `String`, so
 `lower(Account::NICK)` is refused on MySQL even over a bounded column, while an
 expression typed `VarChar<N>` (`Expr::<VarChar<120>>::call("lower", ..)`) or a
 numeric one is built. Casting to a bounded type is not offered yet.
+
+### Constraints
+
+A table carries named `CHECK` and `UNIQUE` constraints next to its keys, and an
+existing table gains or loses one through `add_constraint` and
+`drop_constraint`. A `Check` holds a query condition, rendered in DDL mode like
+an index expression (literals inline, nothing bound, aggregates, window
+functions and volatile functions refused, columns checked against the entity),
+and a `Unique` is built from typed column handles like an index. The existing
+single-column `ColumnDef::unique` flag stays; it is unnamed.
+
+```rust,ignore
+use rupa::migrate::schema::{Check, ConstraintKind, Table, Unique};
+
+Plan::new()
+    .create_table(
+        Table::of::<Post>()
+            // CONSTRAINT "posts_title_nonempty" CHECK (..)
+            .check(Check::on::<Post>("posts_title_nonempty", Post::TITLE.ne(String::new())))
+            // CONSTRAINT "posts_author_slug" UNIQUE ("author_id", "slug")
+            .unique(Unique::on("posts_author_slug", Post::AUTHOR_ID).and(Post::SLUG)),
+    )
+    .add_constraint(Author::TABLE, Unique::on("authors_name", Author::NAME))
+    .drop_constraint(Post::TABLE, "posts_title_nonempty", ConstraintKind::Check)
+```
+
+`Check::on::<E>(name, condition)` is checked against `E`'s columns;
+`Check::new(name, DdlExpr::new(node))` is unchecked. `Unique::new(name, columns)`
+takes `IndexColumn`s for tables written as literals. `Table::constraint(..)`
+takes any `Constraint`; adding a constraint of an existing name replaces it.
+Dropping names the constraint's kind, because MySQL drops a check and a unique
+constraint with different statements. `Table::without(column)` removes the
+unique constraints over that column; a check stays.
+
+| | PostgreSQL | MySQL | SQLite |
+|---|---|---|---|
+| `CHECK` / `UNIQUE` in `CREATE TABLE` | `CONSTRAINT n CHECK (..)` / `CONSTRAINT n UNIQUE (..)` | same, but a check needs 8.0.16+ | same |
+| `AddConstraint` | `ALTER TABLE .. ADD CONSTRAINT` | `ALTER TABLE .. ADD CONSTRAINT` | refused: `SchemaError::ConstraintAlteration` |
+| `DropConstraint` | `DROP CONSTRAINT n` | `DROP CHECK n` / `DROP INDEX n` | refused: `SchemaError::ConstraintAlteration` |
+| `UNIQUE` over unbounded `Text`, `Bytes` or `Json` | yes | refused: `SchemaError::Unindexable` | yes |
+
+**CHECK requires MySQL 8.0.16 or newer.** Earlier servers parse a `CHECK` and
+silently ignore it, and rupa cannot see the server's version, so it renders the
+constraint anyway. SQLite cannot add or drop a constraint on an existing table;
+rupa refuses at preflight rather than approximate it (for instance a `UNIQUE`
+as `CREATE UNIQUE INDEX`, which is a different object). Create the constraint
+with its table, or rebuild the table in a script. A `UNIQUE` created with its
+table is checked against the table's own column types on MySQL; one added to an
+existing table against the types its handles recorded. A constraint violation
+surfaces as a database error; a typed error for it is a separate issue.
+
+The checksum records constraints, in order, only for tables that have them, so
+tables without any keep their checksums. A unique constraint's column types are
+not part of its identity, as for indexes.
 
 ### Extending column types
 

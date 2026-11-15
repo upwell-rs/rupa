@@ -1,53 +1,16 @@
 use rupa::migrate::Planned;
 use rupa::sql::{ExprRefusal, IndexRefusal, SchemaError};
-use rupa::{DialectId, Entity, VarChar, insert};
+use rupa::{DialectId, Entity};
 
-use super::support::{dialect, planned, schema_refusal};
+use super::support::{accounts, add, dialect, planned, refused_at_preflight};
 use super::{Harness, Session, catalog};
 use crate::migrations::fixture::{
-    Account, Author, NewAccount, Plans, create_accounts_indexed_by_a_foreign_column,
+    Account, Author, Plans, create_accounts_indexed_by_a_foreign_column,
     create_accounts_indexed_by_a_same_named_foreign_column,
     create_accounts_indexed_by_a_volatile_function, create_accounts_indexed_by_an_aggregate,
     create_accounts_with_expression_indexes, create_accounts_with_float_expression,
     create_accounts_with_partial_index, create_accounts_with_text_expression,
 };
-
-/// Inserts one account on its own connection, and whether the database
-/// accepted it.
-fn add<H: Harness>(h: &H, email: &str, nick: &str, bucket: i32, closed_at: Option<i64>) -> bool {
-    let session = h.connect();
-    let row = NewAccount {
-        email: VarChar::new(email).expect("a short email"),
-        nick: nick.to_owned(),
-        bucket,
-        closed_at,
-    };
-
-    wait!(
-        h,
-        insert::<Account>()
-            .values(&[row])
-            .affected()
-            .execute(&session)
-    )
-    .is_ok()
-}
-
-fn accounts<H: Harness>(h: &H) -> i64 {
-    h.count("SELECT count(*) FROM accounts")
-}
-
-/// Applies `plan` and asserts that preflight refused it, before anything
-/// was acquired or created.
-fn refused_at_preflight<H: Harness>(h: &H, plan: fn() -> rupa::migrate::Plan) -> SchemaError {
-    let entries = [Planned(Plans(planned::<H>("1"), plan))];
-    let error = schema_refusal(wait!(h, h.connect().apply(&catalog(&entries))));
-
-    assert!(!h.table_exists("_rupa_migrations"));
-    assert!(!h.table_exists("accounts"));
-
-    error
-}
 
 /// A unique index over an expression enforces on every engine: the
 /// lowercased email on all of them, and an arithmetic expression whose
