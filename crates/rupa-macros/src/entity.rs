@@ -10,7 +10,7 @@ use syn::spanned::Spanned;
 use syn::{DeriveInput, Ident, LitStr};
 
 use crate::column;
-use crate::model::{self, const_ident, option_inner};
+use crate::model::{self, const_ident};
 
 pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
     model::reject_generics(&input, "Entity")?;
@@ -51,14 +51,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         quote!(Self::#handle.encode(&self.#fi))
     });
 
-    let required = fields.iter().filter(|f| !f.generated && option_inner(&f.ty).is_none()).map(|f| {
-        let name = &f.name;
-        let message = format!(
-            "this Insertable struct is missing field `{name}` of `{ident}`, which is neither nullable nor generated; \
-             add the field, or mark it `#[column(generated)]` on `{ident}` if the database supplies it"
-        );
-        quote!((#name, #message))
-    });
+    let required = column::insert_required(ident, vis, &fields);
 
     let relations = fields
         .iter()
@@ -75,8 +68,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
         impl #ident {
             #(#consts)*
 
-            #[doc(hidden)]
-            #vis const __RUPA_INSERT_REQUIRED: &'static [(&'static str, &'static str)] = &[#(#required,)*];
+            #required
         }
 
         impl #ms::FromRow for #ident {

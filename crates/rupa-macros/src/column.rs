@@ -88,6 +88,7 @@ pub fn handle(
     let (ty, column, name) = (&f.ty, &f.column, &f.name);
     let handle = const_ident(&f.ident);
     let doc = format!("The `{name}` column.");
+    let docs = &f.docs;
     let scalar = (
         quote!(#ms::Scalar),
         quote!(#ms::Encoding::of::<#ms::ScalarCodec<#ty>>()),
@@ -142,7 +143,34 @@ pub fn handle(
         #selection
 
         #[doc = #doc]
+        #(#docs)*
         #[allow(dead_code, reason = "a derived handle exists for every field, used or not")]
         #vis const #handle: #ms::Column<#owner, #ty, #kind> = #ms::Column::with_encoding_in(<#owner as #ms::Relation>::TABLE, #column, #encoding);
+    }
+}
+
+/// The `__RUPA_INSERT_REQUIRED` constant: the fields an `Insertable` struct
+/// must provide, each with the message reported when it does not.
+pub fn insert_required(
+    owner: &Ident,
+    vis: &syn::Visibility,
+    fields: &[model::Field],
+) -> TokenStream {
+    let required = fields
+        .iter()
+        .filter(|f| !f.generated && option_inner(&f.ty).is_none())
+        .map(|f| {
+            let name = &f.name;
+            let message = format!(
+                "this Insertable struct is missing field `{name}` of `{owner}`, which is neither nullable nor generated; \
+                 add the field, or mark it `#[column(generated)]` on `{owner}` if the database supplies it"
+            );
+
+            quote!((#name, #message))
+        });
+
+    quote! {
+        #[doc(hidden)]
+        #vis const __RUPA_INSERT_REQUIRED: &'static [(&'static str, &'static str)] = &[#(#required,)*];
     }
 }

@@ -33,6 +33,7 @@ struct AccountEntity {
 
 rupa::table!(
     Accounts = "main"."accounts" {
+        /// The surrogate key.
         #[id(generated)]
         id: i64,
         #[column(references = Owner)]
@@ -89,6 +90,15 @@ rupa::table!(
     }
 );
 
+/// Typed insert input for [`Accounts`].
+#[derive(Insertable)]
+#[insertable(entity = Accounts)]
+struct NewAccount {
+    owner_id: i64,
+    email: String,
+    prefs: Prefs,
+}
+
 fn sql<R>(q: &Query<R>) -> String {
     rupa_sql::render_query(q, &Postgres).expect("render").sql
 }
@@ -111,6 +121,23 @@ fn a_marker_takes_every_column_attribute_of_the_derive() {
         "equal definitions have equal checksums"
     );
     assert_eq!(Audit::CREATED_AT.name(), "created");
+}
+
+#[test]
+fn a_marker_inserts_through_a_derived_insertable() {
+    let new = NewAccount {
+        owner_id: 1,
+        email: "a@b.c".into(),
+        prefs: Prefs {
+            theme: "dark".into(),
+        },
+    };
+    let insert = insert::<Accounts>().value(&new).affected();
+
+    assert_eq!(
+        sql(&insert),
+        r#"INSERT INTO "main"."accounts" ("owner_id", "email", "prefs") VALUES ($1, $2, $3)"#
+    );
 }
 
 #[test]
