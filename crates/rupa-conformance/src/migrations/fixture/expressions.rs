@@ -88,11 +88,11 @@ pub fn create_accounts_indexed_by_an_aggregate() -> Plan {
     ))
 }
 
-/// An index over a volatile function.
+/// An index over a volatile function every engine defines.
 pub fn create_accounts_indexed_by_a_volatile_function() -> Plan {
     create_accounts().create_index(BTree::on_expr::<Account>(
-        "accounts_random",
-        Expr::<f64>::call::<f64, 0>("random", []),
+        "accounts_clock",
+        Expr::<i64>::call::<i64, 0>("current_timestamp", []),
     ))
 }
 

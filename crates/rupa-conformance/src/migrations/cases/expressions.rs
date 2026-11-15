@@ -165,8 +165,10 @@ pub(super) fn case_expressions_ddl_cannot_hold_fail_typed_before_acquisition<H: 
         ),
         (
             create_accounts_indexed_by_a_volatile_function,
-            "accounts_random",
-            ExprRefusal::Volatile { function: "random" },
+            "accounts_clock",
+            ExprRefusal::Volatile {
+                function: "current_timestamp",
+            },
         ),
         (
             create_accounts_indexed_by_a_foreign_column,
