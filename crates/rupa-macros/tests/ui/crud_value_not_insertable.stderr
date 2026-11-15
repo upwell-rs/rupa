@@ -38,5 +38,5 @@ error[E0599]: the method `build` exists for struct `InsertRows<_, NotInsertable>
 note: the trait `rupa::Insertable` must be implemented
   --> $WORKSPACE/crates/rupa-core/src/capability.rs
    |
-   | pub trait Insertable<E: Entity> {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | pub trait Insertable<E: Relation> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
