@@ -203,22 +203,23 @@ pub fn on(input: TokenStream) -> TokenStream {
 /// rupa::table!(Accounts = "accounts" {
 ///     #[id] id: i64,
 ///     nick: Option<VarChar<64>>,
-///     prefs: Json<Prefs>,
+///     prefs: Prefs,
 /// });
 ///
 /// update::<Accounts>().set(Accounts::NICK, &None).filter(Accounts::ID.gt(10))
 /// ```
 ///
 /// The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" { field, .. }`,
-/// where a field is `[#[id] | #[id(generated)] | #[column(references = Other)]]
-/// name: Type`. The column is named after the field and its kind follows its
-/// type, as in the derive. More than one `#[id]` declares a composite key.
+/// where a field is `[attribute]* name: Type` and the attributes are the
+/// derive's `#[id]`, `#[id(generated)]` and `#[column(name, scalar, json,
+/// generated, references)]`, parsed by the same code. More than one `#[id]`
+/// declares a composite key. `relation = ..` is refused: it needs a row type.
 /// Handle constants are the upper-cased field names (`Accounts::NICK`).
 ///
 /// The marker implements `Updatable` and `Deletable` for itself, with nothing
 /// to apply and no row key: `update::<Accounts>()` and `delete::<Accounts>()`
-/// write through `set` calls and filters. It has no row to read, so selects
-/// and inserts of values need an `Entity`.
+/// write through `set` calls and filters. It has no row to read, so selects,
+/// `update(..).one(..)` and `delete(..).one(..)` need an `Entity`.
 #[proc_macro]
 pub fn table(input: TokenStream) -> TokenStream {
     table::table(input.into())

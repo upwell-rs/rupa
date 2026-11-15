@@ -203,12 +203,13 @@ impl PlannedMigration for BackfillNicks {
 ```
 
 The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" { field, .. }`.
-A field is `[attribute] name: Type`, where the attribute is one of `#[id]`,
-`#[id(generated)]` and `#[column(references = Other)]`; several `#[id]` fields
-declare a composite key. Anything else (`#[column(name = ..)]`, `#[unique]`,
-`#[column(json)]`) is a compile error: the column is named after the field and
-its kind follows its type, exactly as in `#[derive(Entity)]`, so a table
-snapshot and the entity it was copied from describe identical columns.
+A field is `[attribute]* name: Type`, with the attributes of `#[derive(Entity)]`:
+`#[id]`, `#[id(generated)]` and `#[column(name = "..", scalar, json, generated,
+references = Other)]`, parsed by the same code as the derive, so a table
+snapshot and the entity it was copied from describe identical columns, and
+`Table::of` of either has the same checksum. Several `#[id]` fields declare a
+composite key. Anything else (`#[unique]`, `#[column(relation = ..)]`, which
+needs a row type) is a compile error.
 
 The macro emits a unit marker implementing `Relation` (the table, its id
 columns and its `ColumnMeta`s, which `Entity` extends with row decoding) and
@@ -229,8 +230,8 @@ delete::<Accounts>().filter(Accounts::OWNER_ID.eq(0)).affected().execute(context
 ```
 
 A marker has no row to read, so `select` stays on entities, and it has no
-value to apply or key to look up, so `update::<T>().one(..)` and
-`delete::<T>().by_id(..)` are for entities too. The marker implements
+value to apply or key to look up, so `update::<T>().one(..)` and `apply(..)`,
+and `delete::<T>().one(..)` and `by_id(..)`, are for entities too. The marker implements
 `Updatable` and `Deletable` for itself, so it writes through `set`,
 `set_expr` and filters. `Table::of::<Accounts>()` equals the literal
 `Table::named(..)` and `ColumnDef::new(..)` definitions, and so does its
@@ -370,7 +371,8 @@ entity is refused even when the two have a column of the same name
 (`ExprRefusal::Column`, naming both tables). Hand-written entities build their
 handles with `Column::scalar_in(Self::TABLE, "name")` (or `json_in`,
 `nullable_json_in`) so that they are checked too; `Column::scalar(..)` has no
-table and is only checked by name. Calls to the target dialect's built-in
+table and is only checked by name (it, `json`, `nullable_json` and
+`with_encoding` need a `Relation`, so a dynamic column always has a table). Calls to the target dialect's built-in
 aggregates (`count`, `sum`, `stddev`, ..), window functions (`row_number`, ..)
 and well-known volatile functions (`now`, `random`, `uuid`,
 `current_timestamp`, ..) are refused after DSL functions are lowered, so a

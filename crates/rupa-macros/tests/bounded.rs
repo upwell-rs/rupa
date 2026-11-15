@@ -46,14 +46,20 @@ fn handles_carry_the_length_into_indexes() {
             .columns()
             .copied()
             .collect::<Vec<_>>(),
-        [IndexColumn::new("email", ColumnType::VarChar(255))]
+        [IndexColumn {
+            table: Some(Account::TABLE),
+            ..IndexColumn::new("email", ColumnType::VarChar(255))
+        }]
     );
     assert_eq!(
         Index::on("accounts_bio", Account::BIO)
             .columns()
             .copied()
             .collect::<Vec<_>>(),
-        [IndexColumn::new("bio", ColumnType::Text)]
+        [IndexColumn {
+            table: Some(Account::TABLE),
+            ..IndexColumn::new("bio", ColumnType::Text)
+        }]
     );
 }
 

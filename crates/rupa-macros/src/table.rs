@@ -22,9 +22,10 @@ use syn::spanned::Spanned;
 use syn::{Attribute, Ident, LitStr, Path, Token, Type, Visibility, braced};
 
 use crate::column;
-use crate::model::{self, Kind};
+use crate::model;
 
-const SUPPORTED: &str = "`#[id]`, `#[id(generated)]` and `#[column(references = Relation)]`";
+const SUPPORTED: &str =
+    "`#[id]`, `#[id(generated)]` and `#[column(name, scalar, json, generated, references)]`";
 
 /// A parsed `table!` invocation.
 struct Table {
@@ -75,7 +76,7 @@ impl Parse for Table {
     }
 }
 
-/// One declared column, parsed with its attributes.
+/// One declared column, parsed with the derive's attribute grammar.
 struct FieldDecl(model::Field);
 
 impl Parse for FieldDecl {
@@ -86,23 +87,29 @@ impl Parse for FieldDecl {
         input.parse::<Token![:]>()?;
 
         let ty: Type = input.parse()?;
-        let name = ident.to_string().trim_start_matches("r#").to_owned();
-        let mut field = model::Field {
-            column: LitStr::new(&name, ident.span()),
-            name,
-            ident,
-            ty,
-            id: false,
-            generated: false,
-            identity: false,
-            kind: Kind::Infer,
-            has_column_attr: false,
-            references: None,
-            relation: None,
-        };
+        let mut field = model::Field::new(ident, ty);
 
         for attr in &attrs {
-            field_attr(&mut field, attr)?;
+            if !["id", "column", "doc"]
+                .iter()
+                .any(|name| attr.path().is_ident(name))
+            {
+                return Err(syn::Error::new_spanned(
+                    attr,
+                    format!(
+                        "unsupported attribute in `table!`; the supported ones are {SUPPORTED}"
+                    ),
+                ));
+            }
+        }
+
+        field.apply_attrs(&attrs)?;
+
+        if let Some(relation) = &field.relation {
+            return Err(syn::Error::new(
+                relation.span(),
+                "`table!` declares no relation accessors; drop `relation = ..`",
+            ));
         }
 
         Ok(Self(field))
@@ -137,50 +144,6 @@ fn marker_attrs(all: Vec<Attribute>) -> syn::Result<(Vec<Attribute>, Option<Path
     Ok((kept, krate))
 }
 
-fn field_attr(field: &mut model::Field, attr: &Attribute) -> syn::Result<()> {
-    if attr.path().is_ident("doc") {
-        return Ok(());
-    }
-
-    if attr.path().is_ident("id") {
-        field.id = true;
-
-        if !matches!(attr.meta, syn::Meta::Path(_)) {
-            attr.parse_nested_meta(|m| {
-                if m.path.is_ident("generated") {
-                    field.generated = true;
-                    field.identity = true;
-
-                    Ok(())
-                } else {
-                    Err(m.error("unknown `id` option; expected `generated`"))
-                }
-            })?;
-        }
-
-        return Ok(());
-    }
-
-    if attr.path().is_ident("column") {
-        return attr.parse_nested_meta(|m| {
-            if m.path.is_ident("references") {
-                field.references = Some(m.value()?.parse()?);
-
-                Ok(())
-            } else {
-                Err(m.error(
-                    "`table!` columns take only `references = Relation`; the column is named after the field and its kind follows its type",
-                ))
-            }
-        });
-    }
-
-    Err(syn::Error::new_spanned(
-        attr,
-        format!("unsupported attribute in `table!`; the supported ones are {SUPPORTED}"),
-    ))
-}
-
 /// Expands a `table!` invocation.
 pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
     let table: Table = syn::parse2(input)?;
@@ -203,7 +166,7 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
     };
     let ids: Vec<_> = fields.iter().filter(|f| f.id).map(|f| &f.column).collect();
 
-    column::check_handles(&ident, &fields, "`table!`")?;
+    column::check_handles(&ident, &fields, "table!")?;
 
     let consts = fields.iter().map(|f| column::handle(&ms, &ident, &vis, f));
     let metas = fields.iter().map(|f| column::meta(&ms, f));
