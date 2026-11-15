@@ -1,6 +1,5 @@
-use rupa::migrate::Planned;
 use rupa::migrate::{
-    ApplyOptions, Blocker, Error, Init, Order, Policy, RunError, ValidationError, Version,
+    ApplyOptions, Blocker, Error, Init, Order, Planned, Policy, RunError, ValidationError, Version,
     VersionScheme,
 };
 use rupa::sql::{RenderError, SchemaError};
