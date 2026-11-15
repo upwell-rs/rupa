@@ -30,6 +30,15 @@ pub struct DeleteBuilder<E> {
 }
 
 impl<E: Entity + Deletable<E>> DeleteBuilder<E> {
+    /// Deletes the row `value` identifies.
+    pub fn one<V: Deletable<E>>(mut self, value: &V) -> Self {
+        and_filter(
+            &mut self.delete.filter,
+            key_filter(E::ID_COLUMNS, value.delete_key()),
+        );
+        self
+    }
+
     /// Deletes the row with id `id`.
     pub fn by_id(mut self, id: &E::Id) -> Self {
         and_filter(
@@ -41,15 +50,6 @@ impl<E: Entity + Deletable<E>> DeleteBuilder<E> {
 }
 
 impl<E: Relation + Deletable<E>> DeleteBuilder<E> {
-    /// Deletes the row `value` identifies.
-    pub fn one<V: Deletable<E>>(mut self, value: &V) -> Self {
-        and_filter(
-            &mut self.delete.filter,
-            key_filter(E::ID_COLUMNS, value.delete_key()),
-        );
-        self
-    }
-
     /// Adds a condition; repeated calls are ANDed. Without one, every row is
     /// deleted.
     pub fn filter(mut self, cond: impl IntoExpr<bool>) -> Self {

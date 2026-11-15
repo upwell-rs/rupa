@@ -1,0 +1,16 @@
+error[E0599]: the method `one` exists for struct `DeleteBuilder<Accounts>`, but its trait bounds were not satisfied
+ --> tests/ui/table_delete_one.rs:7:40
+  |
+1 | rupa::table!(Accounts = "accounts" {
+  | --------------------- doesn't satisfy `Accounts: Entity`
+...
+7 |     let _ = rupa::delete::<Accounts>().one(&Accounts);
+  |                                        ^^^
+  |
+  = note: the following trait bounds were not satisfied:
+          `Accounts: Entity`
+note: the trait `Entity` must be implemented
+ --> $WORKSPACE/crates/rupa-core/src/entity.rs
+  |
+  | pub trait Entity: Relation + FromRow {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
