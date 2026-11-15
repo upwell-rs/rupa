@@ -1,6 +1,7 @@
 //! `rupa::table!`: typed table snapshots with no row type.
 
 use rupa::core::ir::TableRef;
+use rupa::core::schema::Table;
 use rupa::prelude::*;
 use rupa::{Postgres, VarChar};
 use serde::{Deserialize, Serialize};
@@ -54,6 +55,40 @@ rupa::table!(
     }
 );
 
+#[derive(Debug, Entity)]
+#[entity(table = "audit", schema = "main")]
+struct AuditEntity {
+    #[id(generated)]
+    id: i64,
+    #[column(name = "created")]
+    created_at: String,
+    #[column(generated)]
+    version: i32,
+    #[column(json)]
+    raw: String,
+    #[column(scalar)]
+    label: String,
+    #[column(name = "owner", references = Owner)]
+    owner_id: i64,
+}
+
+rupa::table!(
+    Audit = "main"."audit" {
+        #[id(generated)]
+        id: i64,
+        #[column(name = "created")]
+        created_at: String,
+        #[column(generated)]
+        version: i32,
+        #[column(json)]
+        raw: String,
+        #[column(scalar)]
+        label: String,
+        #[column(name = "owner", references = Owner)]
+        owner_id: i64,
+    }
+);
+
 fn sql<R>(q: &Query<R>) -> String {
     rupa_sql::render_query(q, &Postgres).expect("render").sql
 }
@@ -63,6 +98,19 @@ fn a_marker_describes_the_columns_its_equivalent_entity_derives() {
     assert_eq!(Accounts::COLUMNS, AccountEntity::COLUMNS);
     assert_eq!(Accounts::TABLE, AccountEntity::TABLE);
     assert_eq!(Accounts::ID_COLUMNS, AccountEntity::ID_COLUMNS);
+}
+
+#[test]
+fn a_marker_takes_every_column_attribute_of_the_derive() {
+    assert_eq!(Audit::COLUMNS, AuditEntity::COLUMNS);
+    assert_eq!(Audit::TABLE, AuditEntity::TABLE);
+    assert_eq!(Audit::ID_COLUMNS, AuditEntity::ID_COLUMNS);
+    assert_eq!(
+        Table::of::<Audit>(),
+        Table::of::<AuditEntity>(),
+        "equal definitions have equal checksums"
+    );
+    assert_eq!(Audit::CREATED_AT.name(), "created");
 }
 
 #[test]

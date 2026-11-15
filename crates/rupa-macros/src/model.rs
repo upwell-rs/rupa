@@ -94,69 +94,101 @@ pub fn fields(input: &DeriveInput, what: &str) -> syn::Result<Vec<Field>> {
         .iter()
         .map(|f| {
             let ident = f.ident.clone().expect("named field");
-            let name = ident.to_string().trim_start_matches("r#").to_owned();
-            let mut field = Field {
-                column: LitStr::new(&name, ident.span()),
-                name,
-                ident,
-                ty: f.ty.clone(),
-                id: false,
-                generated: false,
-                identity: false,
-                kind: Kind::Infer,
-                has_column_attr: false,
-                references: None,
-                relation: None,
-            };
-            for attr in &f.attrs {
-                if attr.path().is_ident("id") {
-                    field.id = true;
-                    if !matches!(attr.meta, syn::Meta::Path(_)) {
-                        attr.parse_nested_meta(|m| {
-                            if m.path.is_ident("generated") {
-                                field.generated = true;
-                                field.identity = true;
-                                Ok(())
-                            } else {
-                                Err(m.error("unknown `id` option; expected `generated`"))
-                            }
-                        })?;
-                    }
-                } else if attr.path().is_ident("column") {
-                    field.has_column_attr = true;
-                    attr.parse_nested_meta(|m| {
-                        if m.path.is_ident("name") {
-                            field.column = m.value()?.parse()?;
-                        } else if m.path.is_ident("scalar") {
-                            field.kind = Kind::Scalar;
-                        } else if m.path.is_ident("json") {
-                            field.kind = Kind::Json;
-                        } else if m.path.is_ident("generated") {
-                            field.generated = true;
-                        } else if m.path.is_ident("references") {
-                            field.references = Some(m.value()?.parse()?);
-                        } else if m.path.is_ident("relation") {
-                            field.relation = Some(m.value()?.parse()?);
-                        } else {
-                            return Err(m.error(
-                                "unknown `column` option; expected `name = \"..\"`, `scalar`, `json`, `generated`, `references = Entity` or `relation = name`",
-                            ));
-                        }
+            let mut field = Field::new(ident, f.ty.clone());
 
-                        Ok(())
-                    })?;
-                    if let (Some(relation), None) = (&field.relation, &field.references) {
-                        return Err(syn::Error::new(
-                            relation.span(),
-                            "`relation` names a `references` relation; add `references = Entity`",
-                        ));
-                    }
-                }
-            }
+            field.apply_attrs(&f.attrs)?;
 
             Ok(field)
         })
         .collect()
+}
+
+impl Field {
+    /// A field with no attributes: a plain column named after the field.
+    pub fn new(ident: Ident, ty: Type) -> Self {
+        let name = ident.to_string().trim_start_matches("r#").to_owned();
+
+        Self {
+            column: LitStr::new(&name, ident.span()),
+            name,
+            ident,
+            ty,
+            id: false,
+            generated: false,
+            identity: false,
+            kind: Kind::Infer,
+            has_column_attr: false,
+            references: None,
+            relation: None,
+        }
+    }
+
+    /// Applies the `#[id]` and `#[column(..)]` attributes among `attrs`, the
+    /// one grammar of every derive and of `table!`.
+    pub fn apply_attrs(&mut self, attrs: &[syn::Attribute]) -> syn::Result<()> {
+        for attr in attrs {
+            if attr.path().is_ident("id") {
+                self.apply_id(attr)?;
+            } else if attr.path().is_ident("column") {
+                self.apply_column(attr)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn apply_id(&mut self, attr: &syn::Attribute) -> syn::Result<()> {
+        self.id = true;
+
+        if !matches!(attr.meta, syn::Meta::Path(_)) {
+            attr.parse_nested_meta(|m| {
+                if m.path.is_ident("generated") {
+                    self.generated = true;
+                    self.identity = true;
+
+                    Ok(())
+                } else {
+                    Err(m.error("unknown `id` option; expected `generated`"))
+                }
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_column(&mut self, attr: &syn::Attribute) -> syn::Result<()> {
+        self.has_column_attr = true;
+
+        attr.parse_nested_meta(|m| {
+            if m.path.is_ident("name") {
+                self.column = m.value()?.parse()?;
+            } else if m.path.is_ident("scalar") {
+                self.kind = Kind::Scalar;
+            } else if m.path.is_ident("json") {
+                self.kind = Kind::Json;
+            } else if m.path.is_ident("generated") {
+                self.generated = true;
+            } else if m.path.is_ident("references") {
+                self.references = Some(m.value()?.parse()?);
+            } else if m.path.is_ident("relation") {
+                self.relation = Some(m.value()?.parse()?);
+            } else {
+                return Err(m.error(
+                    "unknown `column` option; expected `name = \"..\"`, `scalar`, `json`, `generated`, `references = Entity` or `relation = name`",
+                ));
+            }
+
+            Ok(())
+        })?;
+
+        match (&self.relation, &self.references) {
+            (Some(relation), None) => Err(syn::Error::new(
+                relation.span(),
+                "`relation` names a `references` relation; add `references = Entity`",
+            )),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// `Some(U)` if `ty` is syntactically `Option<U>`.
