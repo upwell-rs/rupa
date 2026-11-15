@@ -1,9 +1,8 @@
 use super::*;
 use crate::column::{Column, Scalar};
-use crate::entity::{Entity, FromRow};
-use crate::error::{DecodeError, ResultError};
+use crate::entity::Relation;
+use crate::error::DecodeError;
 use crate::ir::TableRef;
-use crate::row::Row;
 use crate::schema::{ColumnDef, Gin, IndexKind, IndexableBy, column};
 use crate::value::{ScalarColumn, Value};
 
@@ -37,30 +36,15 @@ struct Item;
 
 impl Item {
     const EMBEDDING: Column<Item, Vector<3>, Scalar> =
-        Column::scalar_in(<Item as Entity>::TABLE, "embedding");
+        Column::scalar_in(<Item as Relation>::TABLE, "embedding");
     const MAYBE: Column<Item, Option<Vector<8>>, Scalar> =
-        Column::scalar_in(<Item as Entity>::TABLE, "maybe");
+        Column::scalar_in(<Item as Relation>::TABLE, "maybe");
 }
 
-impl FromRow for Item {
-    fn from_row(_row: &dyn Row) -> Result<Self, ResultError> {
-        Ok(Self)
-    }
-}
-
-impl Entity for Item {
-    type Id = i64;
+impl Relation for Item {
     const TABLE: TableRef = TableRef::new("items");
     const ID_COLUMNS: &'static [&'static str] = &["id"];
     const COLUMNS: &'static [crate::column::ColumnMeta] = &[];
-
-    fn id(&self) -> &i64 {
-        &0
-    }
-
-    fn to_values(&self) -> Vec<Value> {
-        Vec::new()
-    }
 }
 
 #[test]

@@ -1,48 +1,30 @@
 use super::*;
 use crate::column::Scalar;
 use crate::dialect::DialectId;
-use crate::entity::{Entity, FromRow};
-use crate::error::ResultError;
-use crate::row::Row;
+use crate::entity::Relation;
 use crate::schema::{ColumnDef, ColumnType};
-use crate::value::Value;
 use crate::varchar::VarChar;
 
 struct Doc;
 
 impl Doc {
-    const TITLE: Column<Doc, String, Scalar> = Column::scalar_in(<Doc as Entity>::TABLE, "title");
+    const TITLE: Column<Doc, String, Scalar> = Column::scalar_in(<Doc as Relation>::TABLE, "title");
     const SLUG: Column<Doc, VarChar<64>, Scalar> =
-        Column::scalar_in(<Doc as Entity>::TABLE, "slug");
+        Column::scalar_in(<Doc as Relation>::TABLE, "slug");
     const OWNER: Column<Doc, Option<i64>, Scalar> =
-        Column::scalar_in(<Doc as Entity>::TABLE, "owner");
+        Column::scalar_in(<Doc as Relation>::TABLE, "owner");
     const META: Column<Doc, serde_json::Value, crate::column::Json> =
-        Column::json_in(<Doc as Entity>::TABLE, "meta");
+        Column::json_in(<Doc as Relation>::TABLE, "meta");
     const TAGS: Column<Doc, Vec<String>, crate::column::Json> =
-        Column::json_in(<Doc as Entity>::TABLE, "tags");
+        Column::json_in(<Doc as Relation>::TABLE, "tags");
     const NOTE: Column<Doc, Option<Vec<String>>, crate::column::Json> =
-        Column::nullable_json_in(<Doc as Entity>::TABLE, "note");
+        Column::nullable_json_in(<Doc as Relation>::TABLE, "note");
 }
 
-impl FromRow for Doc {
-    fn from_row(_row: &dyn Row) -> Result<Self, ResultError> {
-        Ok(Self)
-    }
-}
-
-impl Entity for Doc {
-    type Id = i64;
+impl Relation for Doc {
     const TABLE: TableRef = TableRef::new("docs");
     const ID_COLUMNS: &'static [&'static str] = &["id"];
     const COLUMNS: &'static [crate::column::ColumnMeta] = &[];
-
-    fn id(&self) -> &i64 {
-        &0
-    }
-
-    fn to_values(&self) -> Vec<Value> {
-        Vec::new()
-    }
 }
 
 struct Brin;

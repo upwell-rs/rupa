@@ -22,7 +22,7 @@ help: the trait `IndexableExpr<K>` is conditionally implemented for `rupa_core::
 note: required by a bound in `on_expr`
   --> src/schema/index/mod.rs
    |
-   |     fn on_expr<E: Entity>(
+   |     fn on_expr<E: Relation>(
    |        ------- required by a bound in this associated function
    |         name: &'static str,
    |         expr: impl IndexableExpr<Self>,

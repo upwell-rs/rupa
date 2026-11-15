@@ -1,6 +1,6 @@
 use super::*;
 use crate::column::{Column, ColumnMeta, Scalar, ScalarCodec, StorageKind, column_meta};
-use crate::entity::{Entity, FromRow};
+use crate::entity::{Entity, FromRow, Relation};
 use crate::error::ResultError;
 use crate::row::Row;
 use crate::varchar::VarChar;
@@ -11,11 +11,12 @@ struct Post {
 }
 
 impl Post {
-    const TITLE: Column<Post, String, Scalar> = Column::scalar_in(<Post as Entity>::TABLE, "title");
+    const TITLE: Column<Post, String, Scalar> =
+        Column::scalar_in(<Post as Relation>::TABLE, "title");
     const AUTHOR: Column<Post, Option<i64>, Scalar> =
-        Column::scalar_in(<Post as Entity>::TABLE, "author_id");
+        Column::scalar_in(<Post as Relation>::TABLE, "author_id");
     const SLUG: Column<Post, VarChar<40>, Scalar> =
-        Column::scalar_in(<Post as Entity>::TABLE, "slug");
+        Column::scalar_in(<Post as Relation>::TABLE, "slug");
 }
 
 const AUTHORS: Reference = Reference {
@@ -29,8 +30,7 @@ impl FromRow for Post {
     }
 }
 
-impl Entity for Post {
-    type Id = i64;
+impl Relation for Post {
     const TABLE: TableRef = TableRef::with_schema("blog", "posts");
     const ID_COLUMNS: &'static [&'static str] = &["id"];
     const COLUMNS: &'static [ColumnMeta] = &[
@@ -41,6 +41,10 @@ impl Entity for Post {
         column_meta::<Option<i64>, ScalarCodec<Option<i64>>>("author", "author_id")
             .references(AUTHORS),
     ];
+}
+
+impl Entity for Post {
+    type Id = i64;
 
     fn id(&self) -> &i64 {
         &self.id

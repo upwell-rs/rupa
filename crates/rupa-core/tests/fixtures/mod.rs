@@ -7,8 +7,8 @@ use rupa_core::capability::key_of;
 use rupa_core::column::{JsonCodec, NullableJsonCodec, ScalarCodec, column_meta};
 use rupa_core::ir::TableRef;
 use rupa_core::{
-    Column, ColumnMeta, Deletable, Entity, FromRow, Gettable, Insertable, Json, Keyed, ResultError,
-    Row, Scalar, Updatable, Value,
+    Column, ColumnMeta, Deletable, Entity, FromRow, Gettable, Insertable, Json, Keyed, Relation,
+    ResultError, Row, Scalar, Updatable, Value,
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,18 +30,19 @@ pub struct User {
 }
 
 impl User {
-    pub const ID: Column<User, i64, Scalar> = Column::scalar_in(<User as Entity>::TABLE, "id");
+    pub const ID: Column<User, i64, Scalar> = Column::scalar_in(<User as Relation>::TABLE, "id");
     pub const EMAIL: Column<User, String, Scalar> =
-        Column::scalar_in(<User as Entity>::TABLE, "email");
+        Column::scalar_in(<User as Relation>::TABLE, "email");
     pub const NICKNAME: Column<User, Option<String>, Scalar> =
-        Column::scalar_in(<User as Entity>::TABLE, "nickname");
+        Column::scalar_in(<User as Relation>::TABLE, "nickname");
     pub const ACTIVE: Column<User, bool, Scalar> =
-        Column::scalar_in(<User as Entity>::TABLE, "active");
+        Column::scalar_in(<User as Relation>::TABLE, "active");
     pub const CREATED_AT: Column<User, DateTime<Utc>, Scalar> =
-        Column::scalar_in(<User as Entity>::TABLE, "created");
-    pub const PREFS: Column<User, Prefs, Json> = Column::json_in(<User as Entity>::TABLE, "prefs");
+        Column::scalar_in(<User as Relation>::TABLE, "created");
+    pub const PREFS: Column<User, Prefs, Json> =
+        Column::json_in(<User as Relation>::TABLE, "prefs");
     pub const OLD_PREFS: Column<User, Option<Prefs>, Json> =
-        Column::nullable_json_in(<User as Entity>::TABLE, "old_prefs");
+        Column::nullable_json_in(<User as Relation>::TABLE, "old_prefs");
 
     pub fn sample() -> Self {
         User {
@@ -83,11 +84,14 @@ impl FromRow for User {
     }
 }
 
-impl Entity for User {
-    type Id = i64;
+impl Relation for User {
     const TABLE: TableRef = TableRef::with_schema("app", "users");
     const ID_COLUMNS: &'static [&'static str] = &["id"];
     const COLUMNS: &'static [ColumnMeta] = &USER_COLUMNS;
+}
+
+impl Entity for User {
+    type Id = i64;
 
     fn id(&self) -> &i64 {
         &self.id

@@ -49,7 +49,7 @@ pub mod __macro_support {
         Reference, Scalar, ScalarCodec, StorageKind, Stored,
     };
     pub use crate::dialect::{Capability, CapabilityMarker, Dialect, DslAvailable, Supports, caps};
-    pub use crate::entity::{Entity, FromRow, IdValues};
+    pub use crate::entity::{Entity, FromRow, IdValues, Relation};
     pub use crate::error::ResultError;
     pub use crate::error::{DslError, DynError};
     pub use crate::exec::ExecError;
@@ -79,7 +79,7 @@ pub use dialect::{
     Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, MySql, Postgres, Sqlite,
     Supports,
 };
-pub use entity::{Entity, FromRow, IdValues};
+pub use entity::{Entity, FromRow, IdValues, Relation};
 #[cfg(all(feature = "dynamic", feature = "async"))]
 pub use erased::{BoxAsyncExecutor, BoxAsyncTx};
 #[cfg(feature = "dynamic")]
@@ -115,6 +115,6 @@ pub use varchar::{TooLong, VarChar};
 pub mod prelude {
     pub use crate::{
         Column, Deletable, Entity, Expr, ExprOps, FromRow, Gettable, Insertable, IntoExpr, Json,
-        Query, Scalar, Updatable, bind, delete, get, insert, raw, select, update,
+        Query, Relation, Scalar, Updatable, bind, delete, get, insert, raw, select, update,
     };
 }

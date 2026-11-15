@@ -218,7 +218,7 @@ fn self_joins() {
 }
 
 /// Schema facts are constants: usable in `const` items, not only at run time.
-const ORDER_COLUMNS: &[rupa::core::ColumnMeta] = <Order as rupa::Entity>::COLUMNS;
+const ORDER_COLUMNS: &[rupa::core::ColumnMeta] = <Order as rupa::Relation>::COLUMNS;
 
 #[test]
 fn references_are_recorded_in_column_metadata() {
@@ -238,7 +238,7 @@ fn references_are_recorded_in_column_metadata() {
     assert_eq!(reference("reviewer"), Some(users));
     assert_eq!(reference("id"), None);
     assert!(
-        <User as rupa::Entity>::COLUMNS
+        <User as rupa::Relation>::COLUMNS
             .iter()
             .any(|c| c.name == "manager_id" && c.references == Some(users)),
         "a self-reference resolves to the entity's own table"

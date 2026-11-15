@@ -3,7 +3,7 @@
 use rupa::core::expr::IntoExpr;
 use rupa::migrate::Plan;
 use rupa::migrate::schema::{Check, ConstraintKind, Table, Unique};
-use rupa::{Entity, Expr, ExprOps};
+use rupa::{Expr, ExprOps, Relation};
 
 use super::Author;
 use super::expressions::{Account, create_accounts};

@@ -23,21 +23,31 @@ impl<T: ScalarColumn> IdValues for T {
     }
 }
 
-/// A table-backed type. Implementing `Entity` grants no insert, update or
-/// delete surface; those are separate capability traits.
+/// A table and its columns: everything a schema, a column handle or a
+/// write statement needs, with no row type. `#[derive(Entity)]` and
+/// `rupa::table!` both implement it.
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` is not an entity",
-    note = "derive or implement `Entity` for it"
+    message = "`{Self}` is not a relation",
+    note = "derive `Entity` for it, or declare it with `rupa::table!`"
 )]
-pub trait Entity: FromRow + 'static {
-    /// The id type: a scalar for single-column ids.
-    type Id: IdValues;
+pub trait Relation: 'static {
     /// The table, with its schema if any.
     const TABLE: TableRef;
     /// Id column names. A slice so that composite ids need no trait change.
     const ID_COLUMNS: &'static [&'static str];
-    /// All columns, in the order used for projection, `to_values` and `from_row`.
+    /// All columns, in the order used for projection and `Entity::to_values`.
     const COLUMNS: &'static [ColumnMeta];
+}
+
+/// A table-backed type with rows to read. Implementing `Entity` grants no
+/// insert, update or delete surface; those are separate capability traits.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not an entity",
+    note = "derive or implement `Entity` for it"
+)]
+pub trait Entity: Relation + FromRow {
+    /// The id type: a scalar for single-column ids.
+    type Id: IdValues;
 
     /// This entity's id.
     fn id(&self) -> &Self::Id;

@@ -187,7 +187,7 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
                 projection.push(quote! {
                     let source = #part_of::ID;
                     columns.extend(
-                        <#entity as #ms::Entity>::COLUMNS
+                        <#entity as #ms::Relation>::COLUMNS
                             .iter()
                             .map(|c| #ms::ColumnRef::of(source, c.name)),
                     );

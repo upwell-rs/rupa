@@ -1,7 +1,7 @@
 //! Derived entities and capabilities, end to end on the memory backend.
 
 use chrono::{DateTime, Utc};
-use rupa::core::{Entity as _, Generated, SqlType, StorageKind, Value};
+use rupa::core::{Generated, SqlType, StorageKind, Value};
 use rupa::prelude::*;
 use rupa_driver_memory::MemoryDb;
 use serde::{Deserialize, Serialize};

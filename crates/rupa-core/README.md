@@ -2,7 +2,7 @@
 
 ## Role
 
-The sans-IO core: values, the query IR, the typed builder, and the entity,
+The sans-IO core: values, the query IR, the typed builder, and the relation, entity,
 row, dialect, executor, transaction, pool and repository traits. Nothing here
 opens a connection.
 
