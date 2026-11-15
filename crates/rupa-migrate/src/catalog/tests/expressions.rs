@@ -1,8 +1,6 @@
-use rupa_core::SqlType;
-use rupa_core::Value;
-use rupa_core::ir::TableRef;
-use rupa_core::ir::{BinOp, ColumnRef, ExprNode, PathSeg, UnOp};
+use rupa_core::ir::{BinOp, ColumnRef, ExprNode, PathSeg, TableRef, UnOp};
 use rupa_core::schema::{ColumnType, DdlExpr, Index, IndexColumn, IndexExpr, IndexPart};
+use rupa_core::{SqlType, Value};
 
 use super::plans::{NOTES, assert_distinct_digests, notes_title, plan_digest};
 use super::*;
