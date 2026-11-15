@@ -3,7 +3,8 @@
 //! What a dialect cannot express is a [`SchemaError`], never a silent
 //! rewrite: SQLite cannot add a `NOT NULL` column without a default, MySQL
 //! cannot key unbounded text, and identity columns follow each dialect's
-//! rules. Operations that need a table rebuild on SQLite are not offered.
+//! rules. Operations that need a table rebuild on SQLite are not offered:
+//! constraints are created with their table there, never added or dropped.
 //!
 //! Checks that need column types or names are made where the operation
 //! carries them: `CREATE TABLE`, `ADD COLUMN` and `CREATE INDEX`, whose
@@ -13,6 +14,7 @@
 //! table names columns without types, so an unknown column is rejected by the
 //! server.
 
+mod constraint;
 mod error;
 mod expr;
 mod index;
@@ -23,7 +25,7 @@ use rupa_core::ir::TableRef;
 use rupa_core::schema::{ColumnDef, ForeignKey, ReferentialAction, SchemaOp, Table};
 use rupa_core::{Dialect, DialectId, Generated};
 
-pub use error::{ExprRefusal, IndexRefusal, SchemaError};
+pub use error::{ConstraintChange, ExprRefusal, IndexRefusal, SchemaError};
 
 use crate::writer::Syntax;
 use crate::{RenderError, syntax_for};
@@ -98,18 +100,24 @@ impl Ddl<'_> {
                     self.table(TableRef { name, ..*table });
                 }
             }
+            SchemaOp::AddConstraint { table, constraint } => {
+                self.add_constraint(*table, constraint)?;
+            }
+            SchemaOp::DropConstraint { table, name, kind } => {
+                self.drop_constraint(*table, name, *kind)?;
+            }
         }
 
         Ok(())
     }
 
-    fn create_table(&mut self, table: &Table) -> Result<(), SchemaError> {
+    fn create_table(&mut self, table: &Table) -> Result<(), RenderError> {
         let name = table.table.name;
         let identity = self.identity(table)?;
         let sqlite_identity = self.dialect == DialectId::Sqlite && identity.is_some();
 
         if table.columns.is_empty() {
-            return Err(SchemaError::NoColumns(name));
+            return Err(SchemaError::NoColumns(name).into());
         }
 
         for column in table
@@ -142,6 +150,8 @@ impl Ddl<'_> {
         for foreign_key in &table.foreign_keys {
             self.foreign_key(&table.table, foreign_key)?;
         }
+
+        self.table_constraints(table)?;
 
         self.sql.push(')');
 

@@ -48,7 +48,7 @@ impl Encoder<'_> {
         }
     }
 
-    fn ddl_expr(&mut self, expr: &DdlExpr) {
+    pub(super) fn ddl_expr(&mut self, expr: &DdlExpr) {
         self.node(&expr.node, None, 0);
     }
 

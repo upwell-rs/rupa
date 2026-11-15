@@ -27,7 +27,7 @@ mod sqlite;
 mod writer;
 
 pub use cache::{CacheStats, CachedSql, RenderCache, render_cache, render_cached};
-pub use ddl::{ExprRefusal, IndexRefusal, SchemaError, render_schema};
+pub use ddl::{ConstraintChange, ExprRefusal, IndexRefusal, SchemaError, render_schema};
 pub use writer::MAX_LOWERING_DEPTH;
 
 /// SQL text and its parameters, in placeholder order.

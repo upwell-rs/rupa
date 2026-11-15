@@ -1,3 +1,4 @@
+mod constraints;
 mod down;
 mod expressions;
 mod lowering;

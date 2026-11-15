@@ -15,6 +15,7 @@
 
 mod build;
 mod column_kind;
+mod constraint;
 mod expr;
 mod index;
 
@@ -25,6 +26,7 @@ use crate::value::{SqlType, Value};
 pub use crate::column::Reference;
 pub use build::column;
 pub use column_kind::{ColumnKind, ColumnSpec, TypeSupport};
+pub use constraint::{Check, Constraint, ConstraintKind, Unique, UniqueBuilder};
 pub use expr::DdlExpr;
 pub use index::{
     BTree, ExprResult, Gin, Gist, Hash, Index, IndexBuilder, IndexColumn, IndexExpr, IndexKind,
@@ -79,6 +81,22 @@ pub enum SchemaOp {
         table: TableRef,
         /// The index name.
         name: &'static str,
+    },
+    /// `ALTER TABLE .. ADD CONSTRAINT`. SQLite cannot, and refuses it.
+    AddConstraint {
+        /// The table to change.
+        table: TableRef,
+        /// The new constraint.
+        constraint: Constraint,
+    },
+    /// Drops a constraint. SQLite cannot, and refuses it.
+    DropConstraint {
+        /// The table to change.
+        table: TableRef,
+        /// The constraint name.
+        name: &'static str,
+        /// The constraint's kind, which MySQL needs to drop it.
+        kind: ConstraintKind,
     },
 }
 
@@ -161,7 +179,7 @@ pub struct ColumnDef {
     pub unique: bool,
 }
 
-/// `CREATE TABLE`: columns, primary key and foreign keys.
+/// `CREATE TABLE`: columns, primary key, foreign keys and constraints.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Table {
     /// The table, with its schema if any.
@@ -172,6 +190,8 @@ pub struct Table {
     pub primary_key: Vec<&'static str>,
     /// Foreign keys.
     pub foreign_keys: Vec<ForeignKey>,
+    /// Named `CHECK` and `UNIQUE` constraints.
+    pub constraints: Vec<Constraint>,
 }
 
 /// A foreign key constraint.

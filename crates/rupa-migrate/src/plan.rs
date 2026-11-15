@@ -1,7 +1,7 @@
 use rupa_core::Column;
 use rupa_core::entity::Entity;
 use rupa_core::ir::TableRef;
-use rupa_core::schema::{ColumnDef, Index, SchemaOp, Table};
+use rupa_core::schema::{ColumnDef, Constraint, ConstraintKind, Index, SchemaOp, Table};
 
 use crate::Operation;
 
@@ -93,5 +93,24 @@ impl Plan {
     /// Drops index `name` of `table`.
     pub fn drop_index(self, table: TableRef, name: &'static str) -> Self {
         self.schema(SchemaOp::DropIndex { table, name })
+    }
+
+    /// Adds `constraint` to `table`. SQLite cannot, and refuses the plan.
+    pub fn add_constraint(self, table: TableRef, constraint: impl Into<Constraint>) -> Self {
+        self.schema(SchemaOp::AddConstraint {
+            table,
+            constraint: constraint.into(),
+        })
+    }
+
+    /// Drops constraint `name` of `table`. SQLite cannot, and refuses the
+    /// plan.
+    pub fn drop_constraint(
+        self,
+        table: TableRef,
+        name: &'static str,
+        kind: ConstraintKind,
+    ) -> Self {
+        self.schema(SchemaOp::DropConstraint { table, name, kind })
     }
 }

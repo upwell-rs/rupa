@@ -15,6 +15,7 @@ use rupa_core::schema::{
 use rupa_core::{Generated, Value};
 use sha2::Sha256;
 
+mod constraints;
 mod expr;
 mod kinds;
 
@@ -64,6 +65,17 @@ impl Encoder<'_> {
                 self.table_ref(*table);
                 self.str(name);
             }
+            SchemaOp::AddConstraint { table, constraint } => {
+                self.str("add-constraint");
+                self.table_ref(*table);
+                self.constraint(constraint);
+            }
+            SchemaOp::DropConstraint { table, name, kind } => {
+                self.str("drop-constraint");
+                self.table_ref(*table);
+                self.str(name);
+                self.constraint_kind(*kind);
+            }
         }
     }
 
@@ -81,6 +93,8 @@ impl Encoder<'_> {
         for foreign_key in &table.foreign_keys {
             self.foreign_key(foreign_key);
         }
+
+        self.table_constraints(&table.constraints);
     }
 
     fn column(&mut self, column: &ColumnDef) {
