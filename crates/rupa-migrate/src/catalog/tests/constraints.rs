@@ -5,7 +5,7 @@ use rupa_core::schema::{
 };
 
 use super::expressions::column;
-use super::plans::{NOTES, assert_distinct_digests, notes, plan_digest};
+use super::plans::{NOTES, assert_distinct_digests, notes, notes_title, plan_digest};
 use super::*;
 
 fn longer_than(column_name: &'static str, n: i64) -> DdlExpr {
@@ -123,15 +123,42 @@ fn a_uniques_column_types_are_not_part_of_the_checksum() {
 }
 
 fn recorded(table: Option<TableRef>) -> Plan {
-    Plan::new().add_constraint(NOTES, Unique { table, ..unique() })
+    let columns = unique()
+        .columns
+        .into_iter()
+        .map(|c| IndexColumn { table, ..c });
+
+    Plan::new().add_constraint(NOTES, Unique::new("notes_title_author", columns))
 }
 
 #[test]
-fn a_uniques_recorded_table_is_not_part_of_the_checksum() {
+fn a_unique_columns_recorded_table_is_not_part_of_the_checksum() {
     let untabled = plan_digest(|| recorded(None));
     let notes = plan_digest(|| recorded(Some(NOTES)));
     let elsewhere = plan_digest(|| recorded(Some(TableRef::new("elsewhere"))));
 
     assert_eq!(untabled, notes);
     assert_eq!(notes, elsewhere);
+}
+
+fn indexed(table: Option<TableRef>) -> Plan {
+    let mut index = notes_title();
+
+    index.parts = vec![
+        IndexColumn {
+            table,
+            ..IndexColumn::new("title", ColumnType::Text)
+        }
+        .into(),
+    ];
+
+    Plan::new().create_index(index)
+}
+
+#[test]
+fn an_index_columns_recorded_table_is_not_part_of_the_checksum() {
+    assert_eq!(
+        plan_digest(|| indexed(None)),
+        plan_digest(|| indexed(Some(TableRef::new("elsewhere"))))
+    );
 }

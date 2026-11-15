@@ -39,6 +39,13 @@ impl IndexableBy<Brin> for i64 {}
 
 impl IndexableBy<Brin> for Option<i64> {}
 
+fn doc_column(name: &'static str, ty: ColumnType) -> IndexColumn {
+    IndexColumn {
+        table: Some(Doc::TABLE),
+        ..IndexColumn::new(name, ty)
+    }
+}
+
 #[test]
 fn typed_handles_give_the_index_its_column_types() {
     let index = Index::on("docs_slug", Doc::SLUG).unique();
@@ -48,7 +55,7 @@ fn typed_handles_give_the_index_its_column_types() {
     assert!(index.unique);
     assert_eq!(
         index.columns().copied().collect::<Vec<_>>(),
-        [IndexColumn::new("slug", ColumnType::VarChar(64))]
+        [doc_column("slug", ColumnType::VarChar(64))]
     );
 }
 
@@ -62,8 +69,8 @@ fn builders_add_checked_columns_and_become_indexes() {
     assert_eq!(
         index.columns().copied().collect::<Vec<_>>(),
         [
-            IndexColumn::new("owner", ColumnType::BigInt),
-            IndexColumn::new("title", ColumnType::Text),
+            doc_column("owner", ColumnType::BigInt),
+            doc_column("title", ColumnType::Text),
         ]
     );
     assert!(index.unique);
@@ -126,9 +133,9 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
     assert_eq!(
         index.columns().copied().collect::<Vec<_>>(),
         [
-            IndexColumn::new("tags", ColumnType::Json),
-            IndexColumn::new("meta", ColumnType::Json),
-            IndexColumn::new("note", ColumnType::Json),
+            doc_column("tags", ColumnType::Json),
+            doc_column("meta", ColumnType::Json),
+            doc_column("note", ColumnType::Json),
         ]
     );
 
@@ -137,7 +144,7 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
     assert_eq!(btree.kind, BTree::METHOD);
     assert_eq!(
         btree.columns().copied().collect::<Vec<_>>(),
-        [IndexColumn::new("meta", ColumnType::Json)]
+        [doc_column("meta", ColumnType::Json)]
     );
 }
 

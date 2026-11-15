@@ -179,8 +179,9 @@ pub(super) fn case_a_unique_of_another_entitys_column_is_refused_before_acquisit
 ) {
     assert_eq!(
         refused_at_preflight(h, create_accounts_with_a_unique_of_a_foreign_column),
-        SchemaError::ConstraintTable {
-            constraint: "accounts_wrong_table",
+        SchemaError::ForeignColumn {
+            object: "accounts_wrong_table",
+            column: "id",
             recorded: <Author as Relation>::TABLE,
             expected: <Account as Relation>::TABLE,
         }

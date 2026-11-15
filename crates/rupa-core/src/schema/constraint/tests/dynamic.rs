@@ -6,7 +6,7 @@ const LEDGER: TableRef = TableRef::with_schema("billing", "ledger");
 const OTHER: TableRef = TableRef::new("other");
 
 #[test]
-fn a_dynamic_unique_records_the_table_its_handles_name() {
+fn a_dynamic_unique_records_the_table_of_each_handle() {
     let unique = Unique::on_dynamic(
         "ledger_owner_age",
         Column::dynamic::<String>(LEDGER, "owner"),
@@ -14,21 +14,31 @@ fn a_dynamic_unique_records_the_table_its_handles_name() {
     .and(Column::dynamic::<i64>(LEDGER, "age"))
     .build();
 
-    assert_eq!(unique.table, Some(LEDGER));
     assert_eq!(
         unique.columns,
         [
-            IndexColumn::new("owner", ColumnType::Text),
-            IndexColumn::new("age", ColumnType::BigInt),
+            IndexColumn {
+                table: Some(LEDGER),
+                ..IndexColumn::new("owner", ColumnType::Text)
+            },
+            IndexColumn {
+                table: Some(LEDGER),
+                ..IndexColumn::new("age", ColumnType::BigInt)
+            },
         ]
     );
 }
 
 #[test]
-#[should_panic(expected = "a unique constraint covers columns of one table")]
-fn a_dynamic_unique_refuses_a_column_of_another_table() {
-    let _ = Unique::on_dynamic("ledger_age", Column::dynamic::<i64>(LEDGER, "age"))
-        .and(Column::dynamic::<i64>(OTHER, "age"));
+fn a_dynamic_unique_keeps_a_column_of_another_table_for_rendering_to_refuse() {
+    let unique = Unique::on_dynamic("ledger_age", Column::dynamic::<i64>(LEDGER, "age"))
+        .and(Column::dynamic::<i64>(OTHER, "age"))
+        .build();
+
+    assert_eq!(
+        unique.columns.iter().map(|c| c.table).collect::<Vec<_>>(),
+        [Some(LEDGER), Some(OTHER)]
+    );
 }
 
 #[test]

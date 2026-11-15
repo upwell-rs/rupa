@@ -8,7 +8,7 @@ use fixtures::User;
 use rupa_core::dialect::{MySql, Postgres, Sqlite};
 use rupa_core::ir::TableRef;
 use rupa_core::prelude::*;
-use rupa_core::schema::{BTree, IndexKind, SchemaOp};
+use rupa_core::schema::{BTree, Index, IndexColumn, IndexKind, SchemaOp, Table, Unique};
 use rupa_core::{Column, DialectId, Scalar};
 use rupa_sql::{ExprRefusal, RenderError, SchemaError, render_schema};
 
@@ -18,6 +18,12 @@ struct Account;
 
 impl Account {
     const EMAIL: Column<Account, String, Scalar> = Column::scalar_in(ACCOUNTS, "email");
+}
+
+impl Relation for Account {
+    const TABLE: TableRef = ACCOUNTS;
+    const ID_COLUMNS: &'static [&'static str] = &[];
+    const COLUMNS: &'static [rupa_core::ColumnMeta] = &[];
 }
 
 struct Anonymous;
@@ -105,4 +111,64 @@ fn mysql_still_refuses_the_partial_index_first() {
         render_schema(&SchemaOp::CreateIndex(index.into()), &MySql),
         Err(RenderError::Schema(schema)) if matches!(*schema, SchemaError::Index { .. })
     ));
+}
+
+fn foreign(object: &'static str) -> RenderError {
+    RenderError::Schema(Box::new(SchemaError::ForeignColumn {
+        object,
+        column: "email",
+        recorded: ACCOUNTS,
+        expected: User::TABLE,
+    }))
+}
+
+#[test]
+fn an_index_over_another_tables_handle_is_refused() {
+    let index = Index::new(
+        "users_email",
+        User::TABLE,
+        [IndexColumn::of(Account::EMAIL)],
+    );
+
+    assert_eq!(
+        render_schema(&SchemaOp::CreateIndex(index), &Postgres),
+        Err(foreign("users_email"))
+    );
+}
+
+#[test]
+fn a_unique_over_another_tables_handle_is_refused_in_both_forms() {
+    let unique = Unique::on("users_email", Account::EMAIL).build();
+    let create = SchemaOp::CreateTable(Table::of::<User>().unique(unique.clone()));
+    let add = SchemaOp::AddConstraint {
+        table: User::TABLE,
+        constraint: unique.into(),
+    };
+
+    assert_eq!(
+        render_schema(&create, &Postgres),
+        Err(foreign("users_email"))
+    );
+    assert_eq!(render_schema(&add, &Postgres), Err(foreign("users_email")));
+}
+
+#[test]
+fn index_and_unique_columns_of_the_same_table_or_of_none_are_accepted() {
+    let own = Index::new("users_email", User::TABLE, [IndexColumn::of(User::EMAIL)]);
+    let anonymous = Index::new(
+        "users_email",
+        User::TABLE,
+        [IndexColumn::of(Anonymous::EMAIL)],
+    );
+    let unique = Unique::on("users_email", User::EMAIL).build();
+
+    assert!(render_schema(&SchemaOp::CreateIndex(own), &Postgres).is_ok());
+    assert!(render_schema(&SchemaOp::CreateIndex(anonymous), &Postgres).is_ok());
+    assert!(
+        render_schema(
+            &SchemaOp::CreateTable(Table::of::<User>().unique(unique)),
+            &Postgres
+        )
+        .is_ok()
+    );
 }

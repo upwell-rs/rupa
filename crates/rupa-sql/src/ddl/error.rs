@@ -104,19 +104,22 @@ pub enum SchemaError {
         /// What was attempted.
         change: ConstraintChange,
     },
-    /// A `UNIQUE` constraint built from the columns of one table and used on
-    /// another, which would constrain a same-named column of the wrong table.
+    /// A column of an index or `UNIQUE` constraint whose handle was declared
+    /// for another table, which would index a same-named column of the wrong
+    /// table.
     #[error(
-        "constraint `{constraint}` was built for table `{}` but belongs to table `{}`",
+        "`{object}` names column `{column}` of table `{}`, but belongs to table `{}`",
         qualified(.recorded),
         qualified(.expected)
     )]
-    ConstraintTable {
-        /// The constraint.
-        constraint: &'static str,
-        /// The table its column handles belong to.
+    ForeignColumn {
+        /// The index or constraint.
+        object: &'static str,
+        /// The column.
+        column: &'static str,
+        /// The table the column's handle was declared for.
         recorded: TableRef,
-        /// The table the constraint belongs to.
+        /// The table the index or constraint belongs to.
         expected: TableRef,
     },
     /// An index this dialect cannot build as declared.

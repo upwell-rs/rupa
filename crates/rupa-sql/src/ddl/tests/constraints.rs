@@ -287,22 +287,30 @@ fn a_table_without_constraints_renders_as_before() {
 }
 
 fn wrong_table() -> SchemaError {
-    SchemaError::ConstraintTable {
-        constraint: "notes_other",
+    SchemaError::ForeignColumn {
+        object: "notes_other",
+        column: "title",
         recorded: TableRef::new("other"),
         expected: NOTES,
     }
 }
 
+fn unique_of(table: Option<TableRef>) -> Unique {
+    Unique::new(
+        "notes_other",
+        [IndexColumn {
+            table,
+            ..IndexColumn::new("title", ColumnType::Text)
+        }],
+    )
+}
+
 fn other_unique() -> Unique {
-    Unique {
-        table: Some(TableRef::new("other")),
-        ..Unique::new("notes_other", [IndexColumn::new("title", ColumnType::Text)])
-    }
+    unique_of(Some(TableRef::new("other")))
 }
 
 #[test]
-fn a_unique_recorded_for_another_table_is_refused_everywhere() {
+fn a_unique_column_recorded_for_another_table_is_refused_everywhere() {
     let create = SchemaOp::CreateTable(notes().unique(other_unique()));
     let add = SchemaOp::AddConstraint {
         table: NOTES,
@@ -322,23 +330,16 @@ fn a_unique_recorded_for_another_table_is_refused_everywhere() {
 }
 
 #[test]
-fn a_unique_recorded_for_its_own_table_or_none_is_accepted() {
-    let own = Unique {
-        table: Some(NOTES),
-        ..other_unique()
-    };
-
-    assert!(render_schema(&SchemaOp::CreateTable(notes().unique(own)), &Postgres).is_ok());
-    assert!(
-        render_schema(
-            &SchemaOp::CreateTable(notes().unique(Unique {
-                table: None,
-                ..other_unique()
-            })),
-            &Postgres
-        )
-        .is_ok()
-    );
+fn a_unique_column_recorded_for_its_own_table_or_none_is_accepted() {
+    for table in [Some(NOTES), None] {
+        assert!(
+            render_schema(
+                &SchemaOp::CreateTable(notes().unique(unique_of(table))),
+                &Postgres
+            )
+            .is_ok()
+        );
+    }
 }
 
 #[test]
