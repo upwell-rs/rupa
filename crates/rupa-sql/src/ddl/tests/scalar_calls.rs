@@ -151,3 +151,27 @@ fn volatile_builtins_are_refused_where_the_dialect_defines_them() {
         )
     );
 }
+
+#[test]
+fn statistical_and_json_aggregates_are_refused() {
+    for (name, dialect) in [
+        ("stddev", &Postgres as &dyn Dialect),
+        ("variance", &MySql),
+        ("std", &MySql),
+        ("jsonb_object_agg", &Postgres),
+        ("regr_slope", &Postgres),
+        ("jsonb_group_array", &Sqlite),
+    ] {
+        let index = on_expression(call(name, vec![column("a")]));
+
+        assert_eq!(
+            render_schema(&SchemaOp::CreateIndex(index), dialect),
+            refused(
+                "notes_expr",
+                dialect.id(),
+                ExprRefusal::Aggregate { function: name }
+            ),
+            "{name} on {dialect:?}"
+        );
+    }
+}
