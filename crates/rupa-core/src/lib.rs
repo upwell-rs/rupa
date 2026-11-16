@@ -58,8 +58,8 @@ pub mod __macro_support {
     pub use crate::ir::{BinOp, DslFnDef, ExprNode, TableRef};
     pub use crate::ir::{ColumnRef, SourceId};
     pub use crate::join::{
-        Admits, At, Fwd, JoinPart, JoinTo, Joined, Opt, PartOf, Plain, RefersTo, Rel, Rev,
-        relation_on, source_col,
+        Admits, At, Fwd, JoinPart, JoinTo, Joined, Opt, PartOf, Plain, Referenced, RefersTo, Rel,
+        Rev, relation_on, source_col,
     };
     pub use crate::query::Query;
     pub use crate::row::Row;
@@ -93,8 +93,8 @@ pub use exec::{Completion, Engine, ExecError, Executed, Executor, Immediate, Out
 pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
 pub use join::{
     Admits, At, Fwd, Has, Inner, IntoJoined, JoinBuilder, JoinOnto, JoinPart, JoinTo, Joined, Left,
-    OffsetRow, Opt, PartOf, PendingJoin, Plain, RefersTo, Rel, Rev, Source, Sources, Src,
-    source_col,
+    OffsetRow, Opt, PartOf, PendingJoin, Plain, Referenced, RefersTo, Rel, Rev, Source, Sources,
+    Src, source_col,
 };
 #[cfg(feature = "async")]
 pub use pool::{AsyncConnect, AsyncPool, OwnedAsyncTx, SingleConnection};

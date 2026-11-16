@@ -261,7 +261,8 @@ The macro then emits a struct `AccountRow` with the fields, the derives
 and `Deletable`, the field attributes and docs, and `type Accounts = AccountRow;`.
 The marker and the row are one type, so `Accounts::NICK`, `AccountRow::NICK`,
 `Table::of::<Accounts>()` and `select::<Accounts>()` are the same thing, with
-the same columns and checksum as the plain marker. The form is opt-in so a
+the same columns and checksum as the plain marker. `as Row` needs exactly one `#[id]` field, like `#[derive(Entity)]`: composite
+keys work in the plain form only, until entities support them. The form is opt-in so a
 plain snapshot stays a zero-sized marker. Its fields take the table's
 visibility, and it requires the `rupa` facade (or a crate re-exporting the
 derives at `#[rupa(crate = ..)]`). `#[column(relation = ..)]` is accepted

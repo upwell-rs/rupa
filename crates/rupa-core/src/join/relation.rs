@@ -79,6 +79,15 @@ impl<R> fmt::Debug for Rel<R> {
     }
 }
 
+/// A relation with a single id column, and that column's Rust type: what a
+/// `references` field is checked against. Every `#[derive(Entity)]` and every
+/// `rupa::table!` with exactly one `#[id]` implements it; the entity's own
+/// `Entity::Id` is the same type.
+pub trait Referenced: crate::entity::Relation {
+    /// The id column's Rust type.
+    type Id;
+}
+
 /// The value types a `#[column(references = E)]` field may have: `E`'s id
 /// type, or an `Option` of it.
 #[diagnostic::on_unimplemented(

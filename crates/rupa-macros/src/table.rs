@@ -167,8 +167,8 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
         Some(path) => (quote!(#path), quote!(#path::__macro_support)),
         None => (quote!(::rupa), quote!(::rupa::__macro_support)),
     };
-    let schema_lit = schema.clone();
-    let schema = match schema {
+    let schema_lit = schema;
+    let schema = match &schema_lit {
         Some(schema) => quote!(#ms::Option::Some(#schema)),
         None => quote!(#ms::Option::None),
     };
@@ -177,11 +177,31 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
     column::check_handles(&ident, &fields, "table!")?;
 
     if let Some(row) = row {
+        let ids = fields.iter().filter(|f| f.id).count();
+
+        if ids != 1 {
+            return Err(syn::Error::new(
+                row.span(),
+                "`as Row` needs exactly one `#[id]` field, like `#[derive(Entity)]`; \
+                 declare a composite-key table without `as Row`",
+            ));
+        }
+
         let rupa_attr = krate.map(|path| quote!(#[rupa(crate = #path)]));
 
-        return Ok(row_form(
-            &root, rupa_attr, &attrs, &vis, &ident, &row, schema_lit, &name, &fields, raw,
-        ));
+        return Ok(RowForm {
+            root,
+            rupa_attr,
+            docs: &attrs,
+            vis: &vis,
+            marker: &ident,
+            row: &row,
+            schema: schema_lit.as_ref(),
+            name: &name,
+            fields: &fields,
+            raw,
+        }
+        .expand());
     }
 
     if let Some(relation) = fields.iter().find_map(|f| f.relation.as_ref()) {
@@ -194,6 +214,23 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
     let consts = fields.iter().map(|f| column::handle(&ms, &ident, &vis, f));
     let metas = fields.iter().map(|f| column::meta(&ms, f));
     let required = column::insert_required(&ident, &vis, &fields);
+    let referenced = match fields
+        .iter()
+        .filter(|f| f.id)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [id] => {
+            let ty = &id.ty;
+
+            quote! {
+                impl #ms::Referenced for #ident {
+                    type Id = #ty;
+                }
+            }
+        }
+        _ => TokenStream::new(),
+    };
     let references = fields.iter().enumerate().filter_map(|(position, f)| {
         f.references
             .as_ref()
@@ -216,6 +253,8 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
             const ID_COLUMNS: &'static [&'static str] = &[#(#ids),*];
             const COLUMNS: &'static [#ms::ColumnMeta] = &[#(#metas),*];
         }
+
+        #referenced
 
         impl #ms::Updatable<#ident> for #ident {
             type Key = #ms::NoKey;
@@ -277,50 +316,65 @@ fn references_check(
     }
 }
 
-/// The `as Row` form: a row struct carrying the derives, and the marker name
-/// as an alias of it, so there is one type and one set of handles.
-#[allow(clippy::too_many_arguments)]
-fn row_form(
-    root: &TokenStream,
+/// The parts of the `as Row` form: a row struct carrying the derives, and the
+/// marker name as an alias of it, so there is one type and one set of handles.
+struct RowForm<'a> {
+    root: TokenStream,
     rupa_attr: Option<TokenStream>,
-    docs: &[Attribute],
-    vis: &Visibility,
-    marker: &Ident,
-    row: &Ident,
-    schema: Option<LitStr>,
-    name: &LitStr,
-    fields: &[model::Field],
+    docs: &'a [Attribute],
+    vis: &'a Visibility,
+    marker: &'a Ident,
+    row: &'a Ident,
+    schema: Option<&'a LitStr>,
+    name: &'a LitStr,
+    fields: &'a [model::Field],
     raw: Vec<Vec<Attribute>>,
-) -> TokenStream {
-    let entity_attr = match schema {
-        Some(schema) => quote!(#[entity(table = #name, schema = #schema)]),
-        None => quote!(#[entity(table = #name)]),
-    };
-    let members = fields.iter().zip(raw).map(|(f, attrs)| {
-        let (ident, ty) = (&f.ident, &f.ty);
+}
 
-        quote!(#(#attrs)* #vis #ident: #ty)
-    });
+impl RowForm<'_> {
+    fn expand(self) -> TokenStream {
+        let Self {
+            root,
+            rupa_attr,
+            docs,
+            vis,
+            marker,
+            row,
+            schema,
+            name,
+            fields,
+            raw,
+        } = self;
+        let entity_attr = match schema {
+            Some(schema) => quote!(#[entity(table = #name, schema = #schema)]),
+            None => quote!(#[entity(table = #name)]),
+        };
+        let members = fields.iter().zip(raw).map(|(f, attrs)| {
+            let (ident, ty) = (&f.ident, &f.ty);
 
-    quote! {
-        #(#docs)*
-        #[derive(
-            ::core::fmt::Debug,
-            ::core::clone::Clone,
-            ::core::cmp::PartialEq,
-            #root::Entity,
-            #root::Gettable,
-            #root::Insertable,
-            #root::Updatable,
-            #root::Deletable,
-        )]
-        #entity_attr
-        #rupa_attr
-        #vis struct #row {
-            #(#members,)*
+            quote!(#(#attrs)* #vis #ident: #ty)
+        });
+
+        quote! {
+            #(#docs)*
+            #[derive(
+                ::core::fmt::Debug,
+                ::core::clone::Clone,
+                ::core::cmp::PartialEq,
+                #root::Entity,
+                #root::Gettable,
+                #root::Insertable,
+                #root::Updatable,
+                #root::Deletable,
+            )]
+            #entity_attr
+            #rupa_attr
+            #vis struct #row {
+                #(#members,)*
+            }
+
+            #[doc = "The table, as the row type declared beside it."]
+            #vis type #marker = #row;
         }
-
-        #[doc = "The table, as the row type declared beside it."]
-        #vis type #marker = #row;
     }
 }

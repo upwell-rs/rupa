@@ -83,6 +83,10 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
             const COLUMNS: &'static [#ms::ColumnMeta] = &[#(#metas),*];
         }
 
+        impl #ms::Referenced for #ident {
+            type Id = #id_ty;
+        }
+
         impl #ms::Entity for #ident {
             type Id = #id_ty;
 
@@ -179,7 +183,7 @@ fn relation(
         #vis struct #marker;
 
         const _: () = {
-            fn check<F: #ms::RefersTo<<#target as #ms::Entity>::Id>>() {}
+            fn check<F: #ms::RefersTo<<#target as #ms::Referenced>::Id>>() {}
             let _ = check::<#ty>;
         };
 
