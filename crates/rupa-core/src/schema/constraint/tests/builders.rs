@@ -2,13 +2,6 @@ use super::*;
 use crate::expr::ExprOps;
 use crate::schema::{DdlExpr, IndexColumn};
 
-fn doc_column(name: &'static str, ty: ColumnType) -> IndexColumn {
-    IndexColumn {
-        table: Some(Doc::TABLE),
-        ..IndexColumn::new(name, ty)
-    }
-}
-
 #[test]
 fn a_typed_check_is_scoped_to_its_entity() {
     let check = Check::on::<Doc>("docs_owner_positive", Doc::OWNER.gt(0_i64));
@@ -39,8 +32,8 @@ fn a_unique_builder_collects_typed_columns_in_order() {
     assert_eq!(
         unique.columns,
         [
-            doc_column("owner", ColumnType::BigInt),
-            doc_column("slug", ColumnType::VarChar(64)),
+            IndexColumn::new("owner", ColumnType::BigInt).in_table(Doc::TABLE),
+            IndexColumn::new("slug", ColumnType::VarChar(64)).in_table(Doc::TABLE),
         ]
     );
 }
@@ -76,10 +69,7 @@ fn typed_handles_record_their_tables_and_literals_do_not() {
     assert_eq!(literal.columns[0].table, None);
     assert_eq!(
         Unique {
-            columns: vec![IndexColumn {
-                table: Some(Doc::TABLE),
-                ..literal.columns[0]
-            }],
+            columns: vec![literal.columns[0].in_table(Doc::TABLE)],
             ..literal
         },
         typed

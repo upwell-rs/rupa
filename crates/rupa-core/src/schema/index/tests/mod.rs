@@ -39,13 +39,6 @@ impl IndexableBy<Brin> for i64 {}
 
 impl IndexableBy<Brin> for Option<i64> {}
 
-fn doc_column(name: &'static str, ty: ColumnType) -> IndexColumn {
-    IndexColumn {
-        table: Some(Doc::TABLE),
-        ..IndexColumn::new(name, ty)
-    }
-}
-
 #[test]
 fn typed_handles_give_the_index_its_column_types() {
     let index = Index::on("docs_slug", Doc::SLUG).unique();
@@ -55,7 +48,7 @@ fn typed_handles_give_the_index_its_column_types() {
     assert!(index.unique);
     assert_eq!(
         index.columns().copied().collect::<Vec<_>>(),
-        [doc_column("slug", ColumnType::VarChar(64))]
+        [IndexColumn::new("slug", ColumnType::VarChar(64)).in_table(Doc::TABLE)]
     );
 }
 
@@ -69,8 +62,8 @@ fn builders_add_checked_columns_and_become_indexes() {
     assert_eq!(
         index.columns().copied().collect::<Vec<_>>(),
         [
-            doc_column("owner", ColumnType::BigInt),
-            doc_column("title", ColumnType::Text),
+            IndexColumn::new("owner", ColumnType::BigInt).in_table(Doc::TABLE),
+            IndexColumn::new("title", ColumnType::Text).in_table(Doc::TABLE),
         ]
     );
     assert!(index.unique);
@@ -133,9 +126,9 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
     assert_eq!(
         index.columns().copied().collect::<Vec<_>>(),
         [
-            doc_column("tags", ColumnType::Json),
-            doc_column("meta", ColumnType::Json),
-            doc_column("note", ColumnType::Json),
+            IndexColumn::new("tags", ColumnType::Json).in_table(Doc::TABLE),
+            IndexColumn::new("meta", ColumnType::Json).in_table(Doc::TABLE),
+            IndexColumn::new("note", ColumnType::Json).in_table(Doc::TABLE),
         ]
     );
 
@@ -144,7 +137,7 @@ fn json_columns_of_any_type_are_accepted_by_json_kinds() {
     assert_eq!(btree.kind, BTree::METHOD);
     assert_eq!(
         btree.columns().copied().collect::<Vec<_>>(),
-        [doc_column("meta", ColumnType::Json)]
+        [IndexColumn::new("meta", ColumnType::Json).in_table(Doc::TABLE)]
     );
 }
 

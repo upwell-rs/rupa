@@ -6,13 +6,6 @@ use crate::schema::ColumnType;
 const LEDGER: TableRef = TableRef::with_schema("billing", "ledger");
 const OTHER: TableRef = TableRef::new("other");
 
-fn ledger_column(name: &'static str, ty: ColumnType) -> IndexColumn {
-    IndexColumn {
-        table: Some(LEDGER),
-        ..IndexColumn::new(name, ty)
-    }
-}
-
 #[test]
 fn a_dynamic_handle_indexes_the_table_it_names() {
     let age = Column::dynamic::<i64>(LEDGER, "age");
@@ -22,7 +15,7 @@ fn a_dynamic_handle_indexes_the_table_it_names() {
     assert!(index.unique);
     assert_eq!(
         index.columns().copied().collect::<Vec<_>>(),
-        [ledger_column("age", ColumnType::BigInt)]
+        [IndexColumn::new("age", ColumnType::BigInt).in_table(LEDGER)]
     );
 }
 
@@ -35,14 +28,8 @@ fn a_dynamic_index_is_the_literal_one_with_recorded_tables() {
         "ledger_age",
         LEDGER,
         [
-            IndexColumn {
-                table: Some(LEDGER),
-                ..IndexColumn::new("age", ColumnType::BigInt)
-            },
-            IndexColumn {
-                table: Some(LEDGER),
-                ..IndexColumn::new("owner", ColumnType::Text)
-            },
+            IndexColumn::new("age", ColumnType::BigInt).in_table(LEDGER),
+            IndexColumn::new("owner", ColumnType::Text).in_table(LEDGER),
         ],
     );
 

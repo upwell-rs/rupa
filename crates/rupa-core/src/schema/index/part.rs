@@ -83,13 +83,20 @@ impl IndexColumn {
         }
     }
 
+    /// The same column, recorded for `table`: rendering then refuses it in
+    /// an index or unique of any other table.
+    pub const fn in_table(mut self, table: TableRef) -> Self {
+        self.table = Some(table);
+
+        self
+    }
+
     /// The column a field handle of relation `E` describes, recording the
     /// handle's table, or `E`'s when the handle has none.
     pub fn of_relation<E: Relation, T, K>(column: Column<E, T, K>) -> Self {
-        Self {
-            table: Some(column.table().unwrap_or(E::TABLE)),
-            ..Self::of(column)
-        }
+        let table = column.table().unwrap_or(E::TABLE);
+
+        Self::of(column).in_table(table)
     }
 
     /// The column a field handle describes, recording the handle's table.
