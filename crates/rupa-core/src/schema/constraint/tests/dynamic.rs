@@ -17,14 +17,8 @@ fn a_dynamic_unique_records_the_table_of_each_handle() {
     assert_eq!(
         unique.columns,
         [
-            IndexColumn {
-                table: Some(LEDGER),
-                ..IndexColumn::new("owner", ColumnType::Text)
-            },
-            IndexColumn {
-                table: Some(LEDGER),
-                ..IndexColumn::new("age", ColumnType::BigInt)
-            },
+            IndexColumn::new("owner", ColumnType::Text).in_table(LEDGER),
+            IndexColumn::new("age", ColumnType::BigInt).in_table(LEDGER),
         ]
     );
 }
