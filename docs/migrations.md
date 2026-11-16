@@ -452,10 +452,12 @@ unique constraints over that column; a check stays.
 | `DropConstraint` | `DROP CONSTRAINT n` | `DROP CHECK n` / `DROP INDEX n` | refused: `SchemaError::ConstraintAlteration` |
 | `UNIQUE` over unbounded `Text`, `Bytes` or `Json` | yes | refused: `SchemaError::Unindexable` | yes |
 
-A `Unique` built from typed handles records their entity's table, and
-rendering refuses it on any other table with `SchemaError::ConstraintTable`,
-so `Unique::on("u", Account::ID)` cannot silently constrain `authors.id`. The
-recorded table is not part of the checksum. `Unique::new` records none.
+Each column of a `Unique` or an `Index` built from typed or dynamic handles
+records its table (`IndexColumn::table`), and rendering refuses a column of
+another table with `SchemaError::ForeignColumn`, so `Unique::on("u",
+Account::ID)` cannot silently constrain `authors.id`. A table-less handle of a
+relation records the relation's table. `Unique::new` and `IndexColumn::new`
+record none, and the recorded table is not part of the checksum.
 
 MySQL refuses a `CHECK` over an `AUTO_INCREMENT` column (error 3818) and over a
 column of a foreign key whose delete action is `CASCADE` or `SET NULL` (error
