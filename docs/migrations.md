@@ -161,8 +161,9 @@ and includes that leave a directory migration or name an unhashed dotfile.
 Attribute arguments such as `#[derive(crate::Entity)]` are checked too. Declare
 the tables a scripted migration needs locally with
 [`rupa::table!`](#typed-tables-without-entities), and keep helpers inside a
-directory migration. A migration that must read rows into a struct declares a
-private `#[derive(rupa::Entity)]` for that.
+directory migration. A migration that must read rows declares its table with
+[`rupa::table!(.. as Row { .. })`](#typed-tables-without-entities), which also
+emits the row type.
 
 Planned migrations may use shared entities (`Table::of::<crate::Tag>()`), so
 they are not checked. Drift is caught instead of prevented: if an entity
