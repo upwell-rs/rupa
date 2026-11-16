@@ -1,4 +1,4 @@
-//! `table!`: a typed table snapshot with no row type. It emits a unit marker
+//! `table!`: a typed table snapshot, with no row type unless declared `as Row`. It emits a unit marker
 //! implementing `Relation`, plus the same typed column handle constants and
 //! `ColumnMeta` values `#[derive(Entity)]` emits for an equivalent struct.
 //!
@@ -35,7 +35,9 @@ struct Table {
     ident: Ident,
     schema: Option<LitStr>,
     name: LitStr,
+    row: Option<Ident>,
     fields: Vec<model::Field>,
+    raw: Vec<Vec<Attribute>>,
     krate: Option<Path>,
 }
 
@@ -56,14 +58,21 @@ impl Parse for Table {
         } else {
             (None, first)
         };
+        let row = if input.peek(Token![as]) {
+            input.parse::<Token![as]>()?;
+
+            Some(input.parse::<Ident>().map_err(|e| {
+                syn::Error::new(e.span(), "expected the name of the row type after `as`")
+            })?)
+        } else {
+            None
+        };
         let body;
 
         braced!(body in input);
 
-        let fields = Punctuated::<FieldDecl, Token![,]>::parse_terminated(&body)?
-            .into_iter()
-            .map(|field| field.0)
-            .collect();
+        let decls = Punctuated::<FieldDecl, Token![,]>::parse_terminated(&body)?;
+        let (fields, raw) = decls.into_iter().map(|d| (d.0, d.1)).unzip();
 
         Ok(Self {
             attrs,
@@ -71,14 +80,16 @@ impl Parse for Table {
             ident,
             schema,
             name,
+            row,
             fields,
+            raw,
             krate,
         })
     }
 }
 
 /// One declared column, parsed with the derive's attribute grammar.
-struct FieldDecl(model::Field);
+struct FieldDecl(model::Field, Vec<Attribute>);
 
 impl Parse for FieldDecl {
     fn parse(input: ParseStream) -> syn::Result<Self> {
@@ -106,14 +117,7 @@ impl Parse for FieldDecl {
 
         field.apply_attrs(&attrs)?;
 
-        if let Some(relation) = &field.relation {
-            return Err(syn::Error::new(
-                relation.span(),
-                "`table!` declares no relation accessors; drop `relation = ..`",
-            ));
-        }
-
-        Ok(Self(field))
+        Ok(Self(field, attrs))
     }
 }
 
@@ -154,13 +158,16 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
         ident,
         schema,
         name,
+        row,
         fields,
+        raw,
         krate,
     } = table;
-    let ms = match krate {
-        Some(path) => quote!(#path::__macro_support),
-        None => quote!(::rupa::__macro_support),
+    let (root, ms) = match &krate {
+        Some(path) => (quote!(#path), quote!(#path::__macro_support)),
+        None => (quote!(::rupa), quote!(::rupa::__macro_support)),
     };
+    let schema_lit = schema.clone();
     let schema = match schema {
         Some(schema) => quote!(#ms::Option::Some(#schema)),
         None => quote!(#ms::Option::None),
@@ -168,6 +175,21 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
     let ids: Vec<_> = fields.iter().filter(|f| f.id).map(|f| &f.column).collect();
 
     column::check_handles(&ident, &fields, "table!")?;
+
+    if let Some(row) = row {
+        let rupa_attr = krate.map(|path| quote!(#[rupa(crate = #path)]));
+
+        return Ok(row_form(
+            &root, rupa_attr, &attrs, &vis, &ident, &row, schema_lit, &name, &fields, raw,
+        ));
+    }
+
+    if let Some(relation) = fields.iter().find_map(|f| f.relation.as_ref()) {
+        return Err(syn::Error::new(
+            relation.span(),
+            "`relation = ..` needs a row type: declare the table `as Row`",
+        ));
+    }
 
     let consts = fields.iter().map(|f| column::handle(&ms, &ident, &vis, f));
     let metas = fields.iter().map(|f| column::meta(&ms, f));
@@ -252,5 +274,53 @@ fn references_check(
             ),
             #ty
         );
+    }
+}
+
+/// The `as Row` form: a row struct carrying the derives, and the marker name
+/// as an alias of it, so there is one type and one set of handles.
+#[allow(clippy::too_many_arguments)]
+fn row_form(
+    root: &TokenStream,
+    rupa_attr: Option<TokenStream>,
+    docs: &[Attribute],
+    vis: &Visibility,
+    marker: &Ident,
+    row: &Ident,
+    schema: Option<LitStr>,
+    name: &LitStr,
+    fields: &[model::Field],
+    raw: Vec<Vec<Attribute>>,
+) -> TokenStream {
+    let entity_attr = match schema {
+        Some(schema) => quote!(#[entity(table = #name, schema = #schema)]),
+        None => quote!(#[entity(table = #name)]),
+    };
+    let members = fields.iter().zip(raw).map(|(f, attrs)| {
+        let (ident, ty) = (&f.ident, &f.ty);
+
+        quote!(#(#attrs)* #vis #ident: #ty)
+    });
+
+    quote! {
+        #(#docs)*
+        #[derive(
+            ::core::fmt::Debug,
+            ::core::clone::Clone,
+            ::core::cmp::PartialEq,
+            #root::Entity,
+            #root::Gettable,
+            #root::Insertable,
+            #root::Updatable,
+            #root::Deletable,
+        )]
+        #entity_attr
+        #rupa_attr
+        #vis struct #row {
+            #(#members,)*
+        }
+
+        #[doc = "The table, as the row type declared beside it."]
+        #vis type #marker = #row;
     }
 }

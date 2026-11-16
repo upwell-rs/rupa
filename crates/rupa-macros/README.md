@@ -28,7 +28,9 @@ field fails as "not a scalar column type" unless marked `#[column(json)]`.
 declares a table with no row type: a unit marker implementing `Relation`, and
 the same handle constants and `ColumnMeta`s the derive emits. It takes
 the derive's `#[id]` and `#[column(..)]` attributes (parsed by the same code)
-and refuses every other attribute. See the migration guide for the rest of its grammar.
+and refuses every other attribute. `table!(.. as Row { .. })` also emits the row struct with the entity derives,
+and makes the marker an alias of it, for migrations that read rows. See the
+migration guide for the rest of its grammar.
 
 Repositories are dyn-compatible by default: async methods return boxed
 futures, so the trait works as `Arc<dyn Trait>`, which DI frameworks inject.

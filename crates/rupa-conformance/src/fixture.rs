@@ -47,6 +47,17 @@ rupa::table!(
     }
 );
 
+rupa::table!(
+    /// The `items` table as a data-shifting migration reads it: a row type
+    /// for a subset of its columns.
+    pub Stock = "conformance"."items" as StockRow {
+        #[id]
+        id: i64,
+        name: String,
+        qty: i32,
+    }
+);
+
 /// An entity whose id the database generates.
 #[derive(Debug, Clone, PartialEq, Entity, Gettable, Insertable, Updatable, Deletable)]
 #[entity(table = "notes", schema = "conformance")]

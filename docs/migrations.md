@@ -202,7 +202,7 @@ impl PlannedMigration for BackfillNicks {
 }
 ```
 
-The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" { field, .. }`.
+The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" [as Row] { field, .. }`.
 A field is `[attribute]* name: Type`, with the attributes of `#[derive(Entity)]`:
 `#[id]`, `#[id(generated)]` and `#[column(name = "..", scalar, json, generated,
 references = Other)]`, parsed by the same code as the derive (`references` needs a
@@ -230,7 +230,8 @@ update::<Accounts>()
 delete::<Accounts>().filter(Accounts::OWNER_ID.eq(0)).affected().execute(context)?;
 ```
 
-A marker has no row to read, so `select` and `get` stay on entities. It
+A plain marker has no row to read, so `select` and `get` need a row type (see
+`as Row` below). It
 writes through input structs like an entity does: an `Insertable`
 (`#[insertable(entity = Accounts)]`) inserts into it, and an `Updatable` patch
 (`#[updatable(entity = Accounts)]`) is applied with `update::<Accounts>()
@@ -241,6 +242,30 @@ writes through `set`, `set_expr` and filters; applying the marker itself
 assigns nothing, and rendering refuses the empty update. `Table::of::<Accounts>()` equals the literal
 `Table::named(..)` and `ColumnDef::new(..)` definitions, and so does its
 checksum.
+
+A migration that shifts data reads rows, so a table can also declare its row
+type with `as Row`:
+
+```rust,ignore
+rupa::table!(Accounts = "main"."accounts" as AccountRow {
+    #[id(generated)] id: i64,
+    nick: Option<VarChar<64>>,
+});
+
+let rows: Vec<AccountRow> = select::<Accounts>().filter(Accounts::NICK.is_null()).all();
+update::<Accounts>().one(&AccountRow { nick: Some("anon".into()), ..row })
+```
+
+The macro then emits a struct `AccountRow` with the fields, the derives
+`Debug`, `Clone`, `PartialEq`, `Entity`, `Gettable`, `Insertable`, `Updatable`
+and `Deletable`, the field attributes and docs, and `type Accounts = AccountRow;`.
+The marker and the row are one type, so `Accounts::NICK`, `AccountRow::NICK`,
+`Table::of::<Accounts>()` and `select::<Accounts>()` are the same thing, with
+the same columns and checksum as the plain marker. The form is opt-in so a
+plain snapshot stays a zero-sized marker. Its fields take the table's
+visibility, and it requires the `rupa` facade (or a crate re-exporting the
+derives at `#[rupa(crate = ..)]`). `#[column(relation = ..)]` is accepted
+only in this form, since relation accessors need an entity.
 
 A table the migration cannot declare as a type (a name chosen at run time, or
 one another migration owns) is reachable through a dynamic column:
