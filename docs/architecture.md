@@ -63,7 +63,7 @@ field, such as `User::EMAIL: Column<User, String, Scalar>`. Each handle's kind
 is selected at compile time from the field type
 (`rupa-core/src/column/__private.rs`): scalar for `ScalarColumn` types,
 nullable JSON for `Option` of a serde type, JSON for any other serde type.
-`rupa::table!` (`rupa-macros/src/table.rs`) emits the same `Relation` and
+`rupa::table!` (`rupa-macros/src/table/`) emits the same `Relation` and
 handles for a unit marker with no row type; schema builders and the `update`
 and `delete` statements need only a `Relation`.
 
