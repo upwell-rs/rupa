@@ -7,7 +7,7 @@
 //!     #[id(generated)] id: i64,
 //!     nick: Option<VarChar<64>>,
 //!     #[column(references = Owner)] owner_id: i64,
-//!     prefs: Json<Prefs>,
+//!     prefs: Prefs,
 //! });
 //! ```
 //!
@@ -244,7 +244,8 @@ fn references_check(
         );
 
         const _: () = ::core::assert!(
-            #ms::references_id_type(
+            <#target as #ms::Relation>::ID_COLUMNS.len() != 1
+                || #ms::references_id_type(
                 <#target as #ms::Relation>::COLUMNS,
                 <#target as #ms::Relation>::ID_COLUMNS,
                 &<#owner as #ms::Relation>::COLUMNS[#position],

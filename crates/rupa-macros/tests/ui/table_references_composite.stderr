@@ -3,9 +3,3 @@ error[E0080]: evaluation panicked: `Memberships` must declare exactly one `#[id]
    |
 11 |     #[column(references = Memberships)]
    |                           ^^^^^^^^^^^ evaluation of `_` failed here
-
-error[E0080]: evaluation panicked: `membership_id` does not have the type of the id of `Memberships`
-  --> tests/ui/table_references_composite.rs:11:27
-   |
-11 |     #[column(references = Memberships)]
-   |                           ^^^^^^^^^^^ evaluation of `_` failed here
