@@ -79,13 +79,21 @@ impl<R> fmt::Debug for Rel<R> {
     }
 }
 
-/// A relation with a single id column, and that column's Rust type: what a
-/// `references` field is checked against. Every `#[derive(Entity)]` and every
-/// `rupa::table!` with exactly one `#[id]` implements it; the entity's own
-/// `Entity::Id` is the same type.
+/// A relation a `references` field can point at, and the Rust type of its
+/// id: what the field is checked against. Every entity is one, with its own
+/// `Entity::Id`; a `rupa::table!` marker with exactly one `#[id]` (which is
+/// not an entity) implements it itself.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` cannot be referenced: it needs exactly one id column",
+    note = "reference an entity, or a `rupa::table!` with exactly one `#[id]`; a composite key needs a hand-written `ForeignKey`"
+)]
 pub trait Referenced: crate::entity::Relation {
     /// The id column's Rust type.
     type Id;
+}
+
+impl<E: Entity> Referenced for E {
+    type Id = E::Id;
 }
 
 /// The value types a `#[column(references = E)]` field may have: `E`'s id

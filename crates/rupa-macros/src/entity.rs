@@ -83,10 +83,6 @@ pub fn derive(input: DeriveInput) -> syn::Result<TokenStream> {
             const COLUMNS: &'static [#ms::ColumnMeta] = &[#(#metas),*];
         }
 
-        impl #ms::Referenced for #ident {
-            type Id = #id_ty;
-        }
-
         impl #ms::Entity for #ident {
             type Id = #id_ty;
 

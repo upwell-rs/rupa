@@ -65,8 +65,9 @@ impl<I: IdValues> RowKey for Keyed<I> {
     note = "derive `Updatable` on `{E}`, or on a patch struct with `#[updatable(entity = {E})]`"
 )]
 pub trait Updatable<E: Relation> {
-    /// [`Keyed<E::Id>`] when the value identifies its row (update by id),
-    /// [`NoKey`] when it must be combined with a filter.
+    /// [`Keyed`] over the entity's id type (`Keyed<<E as Entity>::Id>`) when
+    /// the value identifies its row (update by id), [`NoKey`] when it must
+    /// be combined with a filter.
     type Key;
 
     /// The row this value targets, or [`NoKey`].

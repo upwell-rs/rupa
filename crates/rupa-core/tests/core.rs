@@ -364,3 +364,12 @@ fn up_to_ten_sources() {
     );
     let _: &Query<Vec<Ten>> = &q;
 }
+
+#[test]
+fn a_hand_written_entity_is_referenced_by_its_own_id() {
+    fn id_of<R: rupa_core::Referenced<Id = i64>>() -> &'static [&'static str] {
+        R::ID_COLUMNS
+    }
+
+    assert_eq!(id_of::<User>(), &["id"]);
+}
