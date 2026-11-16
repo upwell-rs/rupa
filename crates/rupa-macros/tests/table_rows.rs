@@ -108,3 +108,45 @@ fn the_row_form_takes_relations() {
     assert!(sql(&join).contains("INNER JOIN"));
     let _ = NoteRow::author();
 }
+
+rupa::table!(Authors = "authors" { #[id] id: i64 });
+
+rupa::table!(
+    Posts = "posts" as PostRow {
+        #[id]
+        id: i64,
+        #[column(references = Authors)]
+        author_id: i64,
+        #[column(references = Accounts)]
+        account_id: Option<i64>,
+    }
+);
+
+rupa::table!(
+    Comments = "comments" {
+        #[id]
+        id: i64,
+        #[column(references = Posts)]
+        post_id: i64,
+    }
+);
+
+#[derive(Entity)]
+#[entity(table = "reviews")]
+struct Review {
+    #[id]
+    id: i64,
+    #[column(references = Authors)]
+    author_id: i64,
+}
+
+#[test]
+fn references_cross_every_form() {
+    let post = Table::of::<Posts>();
+    let comment = Table::of::<Comments>();
+    let review = Table::of::<Review>();
+
+    assert_eq!(post.foreign_keys.len(), 2);
+    assert_eq!(comment.foreign_keys[0].references.table, Posts::TABLE);
+    assert_eq!(review.foreign_keys[0].references.table, Authors::TABLE);
+}

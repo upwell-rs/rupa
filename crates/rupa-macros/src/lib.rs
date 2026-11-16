@@ -227,7 +227,9 @@ pub fn on(input: TokenStream) -> TokenStream {
 /// the table's visibility), the `Entity`, `Gettable`, `Insertable`, `Updatable`
 /// and `Deletable` derives, and `type Marker = Row;`: one type, with selects,
 /// `get` and keyed writes. Use it to read rows in a data-shifting migration;
-/// plain snapshots stay a zero-sized marker.
+/// plain snapshots stay a zero-sized marker. It needs exactly one `#[id]`
+/// (composite keys work in the plain form only). `references` accepts a target
+/// of any form, a derived entity, a plain marker or a row.
 #[proc_macro]
 pub fn table(input: TokenStream) -> TokenStream {
     table::table(input.into())

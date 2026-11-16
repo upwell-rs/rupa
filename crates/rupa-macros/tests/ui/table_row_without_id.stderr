@@ -1,0 +1,5 @@
+error: `as Row` needs exactly one `#[id]` field, like `#[derive(Entity)]`; declare a composite-key table without `as Row`
+ --> tests/ui/table_row_without_id.rs:1:31
+  |
+1 | rupa::table!(Logs = "logs" as LogRow {
+  |                               ^^^^^^
