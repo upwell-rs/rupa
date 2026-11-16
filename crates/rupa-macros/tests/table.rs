@@ -99,6 +99,13 @@ struct NewAccount {
     prefs: Prefs,
 }
 
+/// Typed update patch for [`Accounts`].
+#[derive(Updatable)]
+#[updatable(entity = Accounts)]
+struct Rename {
+    email: Option<String>,
+}
+
 fn sql<R>(q: &Query<R>) -> String {
     rupa_sql::render_query(q, &Postgres).expect("render").sql
 }
@@ -185,4 +192,29 @@ fn a_marker_updates_and_deletes_without_a_row_type() {
         r#"UPDATE "main"."accounts" SET "email" = $1, "old_prefs" = $2 WHERE "id" > $3"#
     );
     assert!(sql(&delete).starts_with(r#"DELETE FROM "main"."accounts" WHERE"#));
+}
+
+#[test]
+fn a_marker_applies_a_derived_patch() {
+    let update = update::<Accounts>()
+        .apply(&Rename {
+            email: Some("a@b.c".to_owned()),
+        })
+        .filter(Accounts::ID.eq(1))
+        .affected();
+
+    assert_eq!(
+        sql(&update),
+        r#"UPDATE "main"."accounts" SET "email" = $1 WHERE "id" = $2"#
+    );
+}
+
+#[test]
+fn applying_the_marker_itself_leaves_an_update_rendering_refuses() {
+    let update = update::<Accounts>().apply(&Accounts).affected();
+
+    assert_eq!(
+        rupa_sql::render_query(&update, &Postgres).map(|rendered| rendered.sql),
+        Err(rupa_sql::RenderError::EmptyUpdate)
+    );
 }
