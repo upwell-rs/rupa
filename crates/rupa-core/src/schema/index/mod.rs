@@ -138,7 +138,8 @@ pub trait IndexKind: Sized + 'static {
         column: Column<E, T, C>,
     ) -> IndexBuilder<Self, E> {
         IndexBuilder {
-            index: Index::new(name, E::TABLE, [IndexColumn::of(column)]).method(Self::METHOD),
+            index: Index::new(name, E::TABLE, [IndexColumn::of_relation(column)])
+                .method(Self::METHOD),
             _p: PhantomData,
         }
     }
@@ -306,7 +307,9 @@ pub struct IndexBuilder<K, E> {
 impl<K: IndexKind, E: Relation> IndexBuilder<K, E> {
     /// Adds a column the kind accepts.
     pub fn and<T, C: IndexableColumn<K, T>>(mut self, column: Column<E, T, C>) -> Self {
-        self.index.parts.push(IndexColumn::of(column).into());
+        self.index
+            .parts
+            .push(IndexColumn::of_relation(column).into());
 
         self
     }
