@@ -10,10 +10,10 @@ pub trait FromRow: Sized {
     fn from_row(row: &dyn Row) -> Result<Self, ResultError>;
 }
 
-/// An entity id, as the values of its id columns (in `Entity::ID_COLUMNS` order).
+/// An entity id, as the values of its id columns (in `Relation::ID_COLUMNS` order).
 /// Only single scalar ids are implemented; composite ids would add tuple impls.
 pub trait IdValues {
-    /// The id column values, in `Entity::ID_COLUMNS` order.
+    /// The id column values, in `Relation::ID_COLUMNS` order.
     fn id_values(&self) -> Vec<Value>;
 }
 

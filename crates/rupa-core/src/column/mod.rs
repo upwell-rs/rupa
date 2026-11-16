@@ -49,7 +49,7 @@ pub struct Reference {
 }
 
 /// Static description of one entity column: everything a schema needs to
-/// know about it, available as a constant (`Entity::COLUMNS`).
+/// know about it, available as a constant (`Relation::COLUMNS`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColumnMeta {
     /// The Rust field name.
