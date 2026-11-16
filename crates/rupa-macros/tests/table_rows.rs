@@ -6,6 +6,7 @@ use rupa::{Postgres, VarChar};
 
 rupa::table!(
     /// A table that is also read.
+    #[derive(Debug, Clone, PartialEq)]
     Accounts = "main"."accounts" as AccountRow {
         /// The surrogate key.
         #[id(generated)]
@@ -93,6 +94,7 @@ fn the_row_form_still_writes_through_set_and_filters() {
 }
 
 rupa::table!(
+    #[derive(Debug, Clone, PartialEq)]
     Notes = "notes" as NoteRow {
         #[id]
         id: i64,
@@ -112,6 +114,7 @@ fn the_row_form_takes_relations() {
 rupa::table!(Authors = "authors" { #[id] id: i64 });
 
 rupa::table!(
+    #[derive(Debug, Clone, PartialEq)]
     Posts = "posts" as PostRow {
         #[id]
         id: i64,
@@ -149,4 +152,29 @@ fn references_cross_every_form() {
     assert_eq!(post.foreign_keys.len(), 2);
     assert_eq!(comment.foreign_keys[0].references.table, Posts::TABLE);
     assert_eq!(review.foreign_keys[0].references.table, Authors::TABLE);
+}
+
+/// A JSON payload with no `Debug`, `Clone` or `PartialEq`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Opaque {
+    raw: Vec<f64>,
+}
+
+rupa::table!(
+    Payloads = "payloads" as PayloadRow {
+        #[id]
+        id: i64,
+        body: Opaque,
+    }
+);
+
+#[test]
+fn a_row_needs_no_std_derives_its_fields_lack() {
+    let row = PayloadRow {
+        id: 1,
+        body: Opaque { raw: vec![0.5] },
+    };
+    let query = update::<Payloads>().one(&row).affected();
+
+    assert!(sql(&query).starts_with(r#"UPDATE "payloads" SET"#));
 }

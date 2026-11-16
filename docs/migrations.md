@@ -248,7 +248,7 @@ A migration that shifts data reads rows, so a table can also declare its row
 type with `as Row`:
 
 ```rust,ignore
-rupa::table!(Accounts = "main"."accounts" as AccountRow {
+rupa::table!(#[derive(Debug, Clone)] Accounts = "main"."accounts" as AccountRow {
     #[id(generated)] id: i64,
     nick: Option<VarChar<64>>,
 });
@@ -258,8 +258,10 @@ update::<Accounts>().one(&AccountRow { nick: Some("anon".into()), ..row })
 ```
 
 The macro then emits a struct `AccountRow` with the fields, the derives
-`Debug`, `Clone`, `PartialEq`, `Entity`, `Gettable`, `Insertable`, `Updatable`
-and `Deletable`, the field attributes and docs, and `type Accounts = AccountRow;`.
+`Entity`, `Gettable`, `Insertable`, `Updatable` and `Deletable`, the field
+attributes and docs, and `type Accounts = AccountRow;`. Other derives are the
+row's to choose: a `#[derive(..)]` on the table (`Debug`, `Clone`, `Serialize`,
+..) is forwarded to the row, and the plain form refuses one.
 The marker and the row are one type, so `Accounts::NICK`, `AccountRow::NICK`,
 `Table::of::<Accounts>()` and `select::<Accounts>()` are the same thing, with
 the same columns and checksum as the plain marker. `as Row` needs exactly one `#[id]` field, like `#[derive(Entity)]`: composite
