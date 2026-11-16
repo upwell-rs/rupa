@@ -172,14 +172,19 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
         Some(schema) => quote!(#ms::Option::Some(#schema)),
         None => quote!(#ms::Option::None),
     };
-    let ids: Vec<_> = fields.iter().filter(|f| f.id).map(|f| &f.column).collect();
+    let id_fields: Vec<&model::Field> = fields.iter().filter(|f| f.id).collect();
 
     column::check_handles(&ident, &fields, "table!")?;
 
     if let Some(row) = row {
-        let ids = fields.iter().filter(|f| f.id).count();
+        if row == ident {
+            return Err(syn::Error::new(
+                row.span(),
+                "the row type needs a name other than the table marker's, e.g. `Accounts = \"accounts\" as AccountRow`",
+            ));
+        }
 
-        if ids != 1 {
+        if id_fields.len() != 1 {
             return Err(syn::Error::new(
                 row.span(),
                 "`as Row` needs exactly one `#[id]` field, like `#[derive(Entity)]`; \
@@ -214,12 +219,8 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
     let consts = fields.iter().map(|f| column::handle(&ms, &ident, &vis, f));
     let metas = fields.iter().map(|f| column::meta(&ms, f));
     let required = column::insert_required(&ident, &vis, &fields);
-    let referenced = match fields
-        .iter()
-        .filter(|f| f.id)
-        .collect::<Vec<_>>()
-        .as_slice()
-    {
+    let ids = id_fields.iter().map(|f| &f.column);
+    let referenced = match id_fields.as_slice() {
         [id] => {
             let ty = &id.ty;
 
