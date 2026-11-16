@@ -1,0 +1,5 @@
+error: `#[derive(..)]` applies to a row type: declare the table `as Row`
+ --> tests/ui/table_derive_without_row.rs:2:5
+  |
+2 |     #[derive(Debug)]
+  |     ^^^^^^^^^^^^^^^^

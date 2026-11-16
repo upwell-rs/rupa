@@ -25,12 +25,17 @@ use syn::{Attribute, Ident, LitStr, Path, Token, Type, Visibility, braced};
 use crate::column;
 use crate::model;
 
+mod row;
+
+use row::RowForm;
+
 const SUPPORTED: &str =
     "`#[id]`, `#[id(generated)]` and `#[column(name, scalar, json, generated, references)]`";
 
 /// A parsed `table!` invocation.
 struct Table {
     attrs: Vec<Attribute>,
+    derives: Vec<Attribute>,
     vis: Visibility,
     ident: Ident,
     schema: Option<LitStr>,
@@ -44,7 +49,7 @@ struct Table {
 impl Parse for Table {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let all = input.call(Attribute::parse_outer)?;
-        let (attrs, krate) = marker_attrs(all)?;
+        let (attrs, derives, krate) = marker_attrs(all)?;
         let vis = input.parse()?;
         let ident = input.parse()?;
 
@@ -76,6 +81,7 @@ impl Parse for Table {
 
         Ok(Self {
             attrs,
+            derives,
             vis,
             ident,
             schema,
@@ -121,13 +127,20 @@ impl Parse for FieldDecl {
     }
 }
 
-fn marker_attrs(all: Vec<Attribute>) -> syn::Result<(Vec<Attribute>, Option<Path>)> {
+/// Doc comments, the `#[derive(..)]`s meant for the row type, and the
+/// `#[rupa(crate = ..)]` path, from the attributes on the table.
+type MarkerAttrs = (Vec<Attribute>, Vec<Attribute>, Option<Path>);
+
+fn marker_attrs(all: Vec<Attribute>) -> syn::Result<MarkerAttrs> {
     let mut krate = None;
     let mut kept = Vec::new();
+    let mut derives = Vec::new();
 
     for attr in all {
         if attr.path().is_ident("doc") {
             kept.push(attr);
+        } else if attr.path().is_ident("derive") {
+            derives.push(attr);
         } else if attr.path().is_ident("rupa") {
             attr.parse_nested_meta(|m| {
                 if m.path.is_ident("crate") {
@@ -141,12 +154,13 @@ fn marker_attrs(all: Vec<Attribute>) -> syn::Result<(Vec<Attribute>, Option<Path
         } else {
             return Err(syn::Error::new_spanned(
                 &attr,
-                "`table!` takes doc comments and `#[rupa(crate = path)]` on the table",
+                "`table!` takes doc comments, `#[derive(..)]` for an `as Row` type and \
+                 `#[rupa(crate = path)]` on the table",
             ));
         }
     }
 
-    Ok((kept, krate))
+    Ok((kept, derives, krate))
 }
 
 /// Expands a `table!` invocation.
@@ -154,6 +168,7 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
     let table: Table = syn::parse2(input)?;
     let Table {
         attrs,
+        derives,
         vis,
         ident,
         schema,
@@ -198,6 +213,7 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
             root,
             rupa_attr,
             docs: &attrs,
+            derives: &derives,
             vis: &vis,
             marker: &ident,
             row: &row,
@@ -207,6 +223,13 @@ pub fn table(input: TokenStream) -> syn::Result<TokenStream> {
             raw,
         }
         .expand());
+    }
+
+    if let Some(derive) = derives.first() {
+        return Err(syn::Error::new_spanned(
+            derive,
+            "`#[derive(..)]` applies to a row type: declare the table `as Row`",
+        ));
     }
 
     if let Some(relation) = fields.iter().find_map(|f| f.relation.as_ref()) {
@@ -314,68 +337,5 @@ fn references_check(
             ),
             #ty
         );
-    }
-}
-
-/// The parts of the `as Row` form: a row struct carrying the derives, and the
-/// marker name as an alias of it, so there is one type and one set of handles.
-struct RowForm<'a> {
-    root: TokenStream,
-    rupa_attr: Option<TokenStream>,
-    docs: &'a [Attribute],
-    vis: &'a Visibility,
-    marker: &'a Ident,
-    row: &'a Ident,
-    schema: Option<&'a LitStr>,
-    name: &'a LitStr,
-    fields: &'a [model::Field],
-    raw: Vec<Vec<Attribute>>,
-}
-
-impl RowForm<'_> {
-    fn expand(self) -> TokenStream {
-        let Self {
-            root,
-            rupa_attr,
-            docs,
-            vis,
-            marker,
-            row,
-            schema,
-            name,
-            fields,
-            raw,
-        } = self;
-        let entity_attr = match schema {
-            Some(schema) => quote!(#[entity(table = #name, schema = #schema)]),
-            None => quote!(#[entity(table = #name)]),
-        };
-        let members = fields.iter().zip(raw).map(|(f, attrs)| {
-            let (ident, ty) = (&f.ident, &f.ty);
-
-            quote!(#(#attrs)* #vis #ident: #ty)
-        });
-
-        quote! {
-            #(#docs)*
-            #[derive(
-                ::core::fmt::Debug,
-                ::core::clone::Clone,
-                ::core::cmp::PartialEq,
-                #root::Entity,
-                #root::Gettable,
-                #root::Insertable,
-                #root::Updatable,
-                #root::Deletable,
-            )]
-            #entity_attr
-            #rupa_attr
-            #vis struct #row {
-                #(#members,)*
-            }
-
-            #[doc = "The table, as the row type declared beside it."]
-            #vis type #marker = #row;
-        }
     }
 }

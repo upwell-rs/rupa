@@ -50,6 +50,7 @@ rupa::table!(
 rupa::table!(
     /// The `items` table as a data-shifting migration reads it: a row type
     /// for a subset of its columns.
+    #[derive(Debug, Clone, PartialEq)]
     pub Stock = "conformance"."items" as StockRow {
         #[id]
         id: i64,
