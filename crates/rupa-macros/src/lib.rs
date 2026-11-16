@@ -209,11 +209,11 @@ pub fn on(input: TokenStream) -> TokenStream {
 /// update::<Accounts>().set(Accounts::NICK, &None).filter(Accounts::ID.gt(10))
 /// ```
 ///
-/// The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" { field, .. }`,
+/// The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" [as Row] { field, .. }`,
 /// where a field is `[attribute]* name: Type` and the attributes are the
 /// derive's `#[id]`, `#[id(generated)]` and `#[column(name, scalar, json,
 /// generated, references)]`, parsed by the same code. More than one `#[id]`
-/// declares a composite key. `relation = ..` is refused: it needs a row type.
+/// declares a composite key. `relation = ..` is refused without `as Row`.
 /// Handle constants are the upper-cased field names (`Accounts::NICK`).
 ///
 /// The marker implements `Updatable` and `Deletable` for itself, with nothing
@@ -222,6 +222,12 @@ pub fn on(input: TokenStream) -> TokenStream {
 /// structs can target it. It has no row to read, so selects, `get`,
 /// `update(..).one(..)` and `delete(..).one(..)` need an `Entity`. A
 /// `references` target must have exactly one id of the field's SQL type.
+///
+/// With `as Row` the macro instead emits a struct `Row` with the fields (at
+/// the table's visibility), the `Entity`, `Gettable`, `Insertable`, `Updatable`
+/// and `Deletable` derives, and `type Marker = Row;`: one type, with selects,
+/// `get` and keyed writes. Use it to read rows in a data-shifting migration;
+/// plain snapshots stay a zero-sized marker.
 #[proc_macro]
 pub fn table(input: TokenStream) -> TokenStream {
     table::table(input.into())

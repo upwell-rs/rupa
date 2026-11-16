@@ -63,6 +63,7 @@ pub async fn run<H: Harness>(h: &mut H) {
         case_update,
         case_delete,
         case_update_and_delete_through_a_table_marker,
+        case_backfill_reads_rows_and_writes_them_back,
         case_json_paths,
         case_nullable_json,
         case_timestamps,

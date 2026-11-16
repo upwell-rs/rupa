@@ -43,7 +43,7 @@ pub trait Relation: 'static {
 /// insert, update or delete surface; those are separate capability traits.
 #[diagnostic::on_unimplemented(
     message = "`{Self}` is not an entity",
-    note = "derive or implement `Entity` for it"
+    note = "derive or implement `Entity` for it; a `rupa::table!` relation is one when declared `as Row`"
 )]
 pub trait Entity: Relation + FromRow {
     /// The id type: a scalar for single-column ids.
