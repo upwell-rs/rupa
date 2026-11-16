@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use crate::capability::{RowKey, Updatable};
 use crate::column::{Column, Scalar};
-use crate::entity::{Entity, Relation};
+use crate::entity::Relation;
 use crate::expr::IntoExpr;
 use crate::ir::{ExprNode, Statement, Update};
 use crate::query::{AffectedResult, Expect, Query};
@@ -33,7 +33,7 @@ pub struct UpdateBuilder<E> {
     _e: PhantomData<fn() -> E>,
 }
 
-impl<E: Entity> UpdateBuilder<E> {
+impl<E: Relation> UpdateBuilder<E> {
     /// Updates the row `value` identifies: a full entity, or a patch with an id.
     pub fn one<V: Updatable<E>>(mut self, value: &V) -> Self
     where
@@ -47,7 +47,9 @@ impl<E: Entity> UpdateBuilder<E> {
         self
     }
 
-    /// Adds `value`'s assignments without restricting rows; combine with `filter`.
+    /// Adds `value`'s assignments without restricting rows; combine with
+    /// `filter`. A value with no assignments (a `table!` marker itself)
+    /// leaves the update empty, which rendering refuses.
     pub fn apply<V: Updatable<E>>(mut self, value: &V) -> Self {
         self.push_values(value);
         self
@@ -61,9 +63,7 @@ impl<E: Entity> UpdateBuilder<E> {
                 .map(|(c, v)| (c, ExprNode::Param(v))),
         );
     }
-}
 
-impl<E: Relation> UpdateBuilder<E> {
     /// Sets a column of `E` to a field value, encoded as the entity stores it
     /// (scalar or JSON). Requires `E: Updatable<E>`.
     pub fn set<T, K>(mut self, column: Column<E, T, K>, value: &T) -> Self

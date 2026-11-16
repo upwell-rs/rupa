@@ -230,12 +230,15 @@ update::<Accounts>()
 delete::<Accounts>().filter(Accounts::OWNER_ID.eq(0)).affected().execute(context)?;
 ```
 
-A marker has no row to read, so `select` stays on entities, though an
-`Insertable` input struct (`#[insertable(entity = Accounts)]`) can insert into
-it, and it has no value to apply or key to look up, so `update::<T>().one(..)` and `apply(..)`,
-and `delete::<T>().one(..)` and `by_id(..)`, are for entities too. The marker implements
-`Updatable` and `Deletable` for itself, so it writes through `set`,
-`set_expr` and filters. `Table::of::<Accounts>()` equals the literal
+A marker has no row to read, so `select` and `get` stay on entities. It
+writes through input structs like an entity does: an `Insertable`
+(`#[insertable(entity = Accounts)]`) inserts into it, and an `Updatable` patch
+(`#[updatable(entity = Accounts)]`) is applied with `update::<Accounts>()
+.apply(..)` and a filter, or with `one(..)` when the patch has an `#[id]`.
+The marker itself has no key, so `delete::<T>().one(..)` and `by_id(..)` stay
+on entities. It implements `Updatable` and `Deletable` for itself, so it
+writes through `set`, `set_expr` and filters; applying the marker itself
+assigns nothing, and rendering refuses the empty update. `Table::of::<Accounts>()` equals the literal
 `Table::named(..)` and `ColumnDef::new(..)` definitions, and so does its
 checksum.
 
