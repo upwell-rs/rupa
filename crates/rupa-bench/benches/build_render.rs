@@ -14,12 +14,12 @@ use rupa_bench::{User, new_users};
 fn select_page() -> Query<Vec<User>> {
     select::<User>()
         .filter(
-            col!(User::active)
+            User::ACTIVE
                 .eq(true)
-                .and(col!(User::email).like("user1%"))
-                .and(col!(User::prefs).path("theme").cast::<String>().eq("dark")),
+                .and(User::EMAIL.like("user1%"))
+                .and(User::PREFS.path("theme").cast::<String>().eq("dark")),
         )
-        .order_by(col!(User::id).asc())
+        .order_by(User::ID.asc())
         .limit(50)
         .all()
 }

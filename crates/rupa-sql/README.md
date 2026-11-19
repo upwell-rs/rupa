@@ -16,6 +16,8 @@ parameters; `render_tx` renders transaction control.
   dialect (`postgres`, `mysql`, `sqlite`).
 - `cache` caches rendered SQL by statement shape (never by value), in a
   sharded LRU (`hashlink`). See `docs/design/caching.md`.
+- `ddl` renders `rupa_core::schema` operations to one DDL statement per
+  dialect, with typed `SchemaError`s for what a dialect cannot express.
 - `driver_error!` declares the error enum every SQL driver shares.
 
 ## Feature flags

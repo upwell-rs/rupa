@@ -36,6 +36,8 @@ impl crate::sealed::Sealed for sqlx::MySql {}
 
 impl Backend for sqlx::MySql {
     type Dialect = rupa_core::MySql;
+    #[cfg(feature = "migrations")]
+    type Migration = rupa_migrate::protocol::mysql::State;
     const DRIVER: &'static str = "sqlx-mysql";
     const SCHEMES: &'static [&'static str] = &["mysql"];
 

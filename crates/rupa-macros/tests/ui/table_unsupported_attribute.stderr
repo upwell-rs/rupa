@@ -1,0 +1,5 @@
+error: unsupported attribute in `table!`; the supported ones are `#[id]`, `#[id(generated)]` and `#[column(name, scalar, json, generated, references)]`
+ --> tests/ui/table_unsupported_attribute.rs:4:5
+  |
+4 |     #[unique]
+  |     ^^^^^^^^^

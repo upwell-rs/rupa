@@ -10,10 +10,10 @@ pub trait FromRow: Sized {
     fn from_row(row: &dyn Row) -> Result<Self, ResultError>;
 }
 
-/// An entity id, as the values of its id columns (in `Entity::ID_COLUMNS` order).
+/// An entity id, as the values of its id columns (in `Relation::ID_COLUMNS` order).
 /// Only single scalar ids are implemented; composite ids would add tuple impls.
 pub trait IdValues {
-    /// The id column values, in `Entity::ID_COLUMNS` order.
+    /// The id column values, in `Relation::ID_COLUMNS` order.
     fn id_values(&self) -> Vec<Value>;
 }
 
@@ -23,26 +23,35 @@ impl<T: ScalarColumn> IdValues for T {
     }
 }
 
-/// A table-backed type. Implementing `Entity` grants no insert, update or
-/// delete surface; those are separate capability traits.
+/// A table and its columns: everything a schema, a column handle or a
+/// write statement needs, with no row type. `#[derive(Entity)]` and
+/// `rupa::table!` both implement it.
 #[diagnostic::on_unimplemented(
-    message = "`{Self}` is not an entity",
-    note = "derive or implement `Entity` for it"
+    message = "`{Self}` is not a relation",
+    note = "derive `Entity` for it, or declare it with `rupa::table!`"
 )]
-pub trait Entity: FromRow + 'static {
-    /// The id type: a scalar for single-column ids.
-    type Id: IdValues;
+pub trait Relation: 'static {
     /// The table, with its schema if any.
     const TABLE: TableRef;
     /// Id column names. A slice so that composite ids need no trait change.
     const ID_COLUMNS: &'static [&'static str];
+    /// All columns, in the order used for projection and `Entity::to_values`.
+    const COLUMNS: &'static [ColumnMeta];
+}
 
-    /// All columns, in the order used for projection, `to_values` and `from_row`.
-    fn columns() -> &'static [ColumnMeta];
+/// A table-backed type with rows to read. Implementing `Entity` grants no
+/// insert, update or delete surface; those are separate capability traits.
+#[diagnostic::on_unimplemented(
+    message = "`{Self}` is not an entity",
+    note = "derive or implement `Entity` for it; a `rupa::table!` relation is one when declared `as Row`"
+)]
+pub trait Entity: Relation + FromRow {
+    /// The id type: a scalar for single-column ids.
+    type Id: IdValues;
 
     /// This entity's id.
     fn id(&self) -> &Self::Id;
 
-    /// Field values in `columns()` order.
+    /// Field values in `COLUMNS` order.
     fn to_values(&self) -> Vec<Value>;
 }

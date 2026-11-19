@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "examples/migrations/*"]
 
 [workspace.package]
 # Lockstep versioning: every member shares this version (see docs/design/versioning.md).
@@ -11,6 +11,9 @@ license = "Apache-2.0"
 repository = "https://github.com/upwell-rs/rupa"
 
 [workspace.dependencies]
+rupa-migrate = { path = "crates/rupa-migrate", version = "=0.1.0" }
+rupa-build = { path = "crates/rupa-build", version = "=0.1.0" }
+sha2 = "0.11"
 # Intra-workspace crates are pinned exactly: macros emit paths into rupa-core's
 # hidden API, so mismatched versions must be impossible to resolve.
 rupa-core = { path = "crates/rupa-core", version = "=0.1.0", default-features = false }
@@ -30,6 +33,7 @@ quote = "1"
 syn = { version = "2", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde-saphyr = { version = "2", default-features = false, features = ["deserialize"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
 uuid = { version = "1", features = ["serde"] }
 trybuild = "1"
@@ -38,6 +42,11 @@ pollster = "1"
 tokio = { version = "1", features = ["rt", "macros"] }
 hashlink = "0.11"
 thiserror = "2"
+clap = { version = "4", features = ["derive", "env"] }
+# Upwell at a pinned commit (conditional components, upwell-rs/upwell#212)
+# until it is released to crates.io; crates.io rejects git dependencies, so
+# rupa-upwell cannot be published before then.
+upwell = { git = "https://github.com/upwell-rs/upwell", rev = "655866dde24373f10bf9ffc6a190737d425ebddc", default-features = false, features = ["cli"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 postgres = { version = "0.19", features = ["with-serde_json-1"] }
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
@@ -49,6 +58,9 @@ rusqlite = "0.39"
 mysql = { version = "28", default-features = false, features = ["default-rust"] }
 # The runtime and databases are chosen by rupa-driver-sqlx's features.
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "json"] }
+# The SQLite sqlx links, for the migration authorizer sqlx does not expose;
+# its version must stay within sqlx-sqlite's range.
+libsqlite3-sys = { version = "0.37", default-features = false }
 r2d2 = "0.8"
 tokio-postgres-rustls = "0.14"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

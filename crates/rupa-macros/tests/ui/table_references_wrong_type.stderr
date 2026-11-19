@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: `owner_id` does not have the type of the id of `Owners`
+ --> tests/ui/table_references_wrong_type.rs:9:27
+  |
+9 |     #[column(references = Owners)]
+  |                           ^^^^^^ evaluation of `_` failed here

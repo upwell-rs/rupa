@@ -1,10 +1,13 @@
-error[E0609]: no field `mail` on type `__RupaFieldsUser`
+error[E0599]: no associated function or constant named `MAIL` found for struct `User` in the current scope
   --> tests/ui/repo_bad_column_in_method.rs:10:22
    |
+ 6 | pub struct User { #[id] id: i64, email: String }
+   | --------------- associated function or constant `MAIL` not found for this struct
+ 7 |
+ 8 | #[repository]
+   | ------------- in this attribute macro expansion
+ 9 | pub trait R {
 10 |     #[query(filter = mail == $m)]
-   |                      ^^^^ unknown field
+   |                      ^^^^ associated function or constant not found in `User`
    |
-help: a field with a similar name exists
-   |
-10 |     #[query(filter = email == $m)]
-   |                      +
+   = note: this error originates in the attribute macro `repository` (in Nightly builds, run with -Z macro-backtrace for more info)

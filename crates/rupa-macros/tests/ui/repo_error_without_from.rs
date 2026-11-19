@@ -13,7 +13,7 @@ pub trait R {
     fn a(&self, id: i64) -> Result<Option<User>, MyError>;
 }
 fn check(db: rupa_driver_memory::MemoryDb) {
-    let repo = RRepo::shared(db);
+    let repo = RRepo::new(db);
     let _ = R::a(&repo, 1);
 }
 fn main() {}

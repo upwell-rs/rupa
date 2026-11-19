@@ -9,7 +9,7 @@ pub struct Pair { #[from(User::id)] id: i64 }
 
 fn main() {
     let _ = select::<User>()
-        .left_join_on::<User>(|(e, m)| m.col(col!(User::id)).eq(e.col(col!(User::manager_id))))
+        .left_join_on::<User>(|(e, m)| m.col(User::ID).eq(e.col(User::MANAGER_ID)))
         .into::<Pair>()
         .all();
 }

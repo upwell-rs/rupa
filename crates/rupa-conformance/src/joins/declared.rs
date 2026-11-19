@@ -10,18 +10,16 @@ use super::*;
 /// The reverse: Item joined onto Review, naming the relation.
 ///
 /// The relation can be to any earlier source, here the second.
-pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &E) {
     seed(e).await;
 
-    let rows = e
-        .run(
-            select::<Item>()
-                .join::<Review>()
-                .left()
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
-                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
-                .all(),
-        )
+    let rows = select::<Item>()
+        .join::<Review>()
+        .left()
+        .order_by(|(i, _)| i.col(Item::ID).asc())
+        .order_by(|(_, r)| r.col(Review::ID).asc())
+        .all()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(
@@ -35,14 +33,12 @@ pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &mut E) {
         ]
     );
 
-    let rows = e
-        .run(
-            select::<Review>()
-                .join::<Item>()
-                .inner_via(Review::item())
-                .order_by(|(r, _)| r.col(col!(Review::id)).desc())
-                .all(),
-        )
+    let rows = select::<Review>()
+        .join::<Item>()
+        .inner_via(Review::item())
+        .order_by(|(r, _)| r.col(Review::ID).desc())
+        .all()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(
@@ -64,17 +60,18 @@ pub async fn case_join_declared_relations<E: AsyncExecutor>(e: &mut E) {
             pinned: false,
         },
     ];
-    e.run(insert::<Note>().values(&notes).affected())
+    insert::<Note>()
+        .values(&notes)
+        .affected()
+        .execute(e)
         .await
         .unwrap();
-    let rows = e
-        .run(
-            select::<Note>()
-                .inner_join_on::<Item>(rupa::on!(Item::name == Note::title))
-                .join::<Review>()
-                .inner()
-                .all(),
-        )
+    let rows = select::<Note>()
+        .inner_join_on::<Item>(rupa::on!(Item::name == Note::title))
+        .join::<Review>()
+        .inner()
+        .all()
+        .execute(e)
         .await
         .unwrap();
     let got: Vec<_> = rows
@@ -110,18 +107,16 @@ pub struct Reviewed {
     stars: i32,
 }
 
-pub async fn case_join_into_merged_struct<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_into_merged_struct<E: AsyncExecutor>(e: &E) {
     seed(e).await;
-    let rows = e
-        .run(
-            select::<Item>()
-                .join::<Review>()
-                .left()
-                .order_by(|(i, _)| i.col(col!(Item::id)).asc())
-                .order_by(|(_, r)| r.col(col!(Review::id)).asc())
-                .into::<ItemReview>()
-                .all(),
-        )
+    let rows = select::<Item>()
+        .join::<Review>()
+        .left()
+        .order_by(|(i, _)| i.col(Item::ID).asc())
+        .order_by(|(_, r)| r.col(Review::ID).asc())
+        .into::<ItemReview>()
+        .all()
+        .execute(e)
         .await
         .unwrap();
     let expected = |id: i64, r: Option<i64>| {
@@ -145,15 +140,13 @@ pub async fn case_join_into_merged_struct<E: AsyncExecutor>(e: &mut E) {
         ]
     );
 
-    let one = e
-        .run(
-            select::<Item>()
-                .join::<Review>()
-                .inner()
-                .filter(rupa::on!(Review::id == 12))
-                .into::<Reviewed>()
-                .one(),
-        )
+    let one = select::<Item>()
+        .join::<Review>()
+        .inner()
+        .filter(rupa::on!(Review::id == 12))
+        .into::<Reviewed>()
+        .one()
+        .execute(e)
         .await
         .unwrap();
     assert_eq!(
@@ -176,12 +169,12 @@ fn reviewed(min: i32) -> Vec<(Item, Review)>;
 fn uncommented() -> Vec<ItemReview>;
 
 /// Joins declared with `#[query]`.
-pub async fn case_join_query_attribute<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_query_attribute<E: AsyncExecutor>(e: &E) {
     seed(e).await;
-    let rows = e.run(reviewed(4)).await.unwrap();
+    let rows = reviewed(4).execute(e).await.unwrap();
     assert_eq!(rows, [(item(1), review(10)), (item(3), review(12))]);
 
-    let rows = e.run(uncommented()).await.unwrap();
+    let rows = uncommented().execute(e).await.unwrap();
     let got: Vec<_> = rows
         .iter()
         .map(|r| (r.item.as_str(), r.review.as_ref().map(|r| r.id)))
@@ -223,9 +216,9 @@ pub struct StockPair {
 fn stock_pairs() -> Vec<StockPair>;
 
 /// The self-join of `case_join_self_left_join_decodes_none`, through aliases.
-pub async fn case_join_self_join_aliases<E: AsyncExecutor>(e: &mut E) {
+pub async fn case_join_self_join_aliases<E: AsyncExecutor>(e: &E) {
     seed(e).await;
-    let rows = e.run(more_stock()).await.unwrap();
+    let rows = more_stock().execute(e).await.unwrap();
     let ids: Vec<_> = rows
         .iter()
         .map(|(a, b)| (a.id, b.as_ref().map(|b| b.id)))
@@ -241,7 +234,7 @@ pub async fn case_join_self_join_aliases<E: AsyncExecutor>(e: &mut E) {
         ]
     );
 
-    let pairs = e.run(stock_pairs()).await.unwrap();
+    let pairs = stock_pairs().execute(e).await.unwrap();
     let pair = |name: &str, more: Option<&str>| StockPair {
         name: name.into(),
         more: more.map(Into::into),

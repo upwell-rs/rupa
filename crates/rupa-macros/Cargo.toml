@@ -13,6 +13,10 @@ proc-macro = true
 [features]
 # `async fn` methods in `#[repository]`; set by the `rupa` facade's `async`.
 async = []
+# `#[repository(database = ..)]`: the repository registers itself as an
+# Upwell provider over a declared database; set by the `rupa` facade's
+# `upwell-database`.
+upwell = []
 
 [dependencies]
 proc-macro2.workspace = true

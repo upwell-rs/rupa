@@ -12,8 +12,8 @@
 //! - A repository trait shared as `Arc<dyn Trait>`, the way DI holds it.
 
 use chrono::{DateTime, Utc};
-use rupa::core::{Dialect, DialectId, DslError, Postgres, Value};
 use rupa::prelude::*;
+use rupa::{Dialect, DialectId, DslError, Postgres, Value};
 use rupa_driver_memory::MemoryDb;
 use serde::{Deserialize, Serialize};
 
@@ -66,7 +66,7 @@ struct UserPatch {
 /// A repository: declared queries, implemented for its own view and owned type. `async` and
 /// receivers are the author's choice; this one is dyn-compatible (the
 /// default), so it can be shared as `Arc<dyn UserRepository>`.
-#[repository(dynamic_dispatch)]
+#[repository]
 trait UserRepository: Send + Sync {
     #[query(filter = email == $email)]
     async fn by_email(&self, email: &str) -> Result<Option<User>, rupa::DynError>;
@@ -134,7 +134,7 @@ fn ci_eq(dialect: &dyn Dialect, a: Expr<String>, b: Expr<String>) -> Result<Expr
 fn eval_ci_eq(args: &[Value]) -> Result<Value, DslError> {
     match args {
         [Value::Text(a), Value::Text(b)] => Ok(Value::Bool(a.eq_ignore_ascii_case(b))),
-        _ => Ok(Value::Null(rupa::core::SqlType::Bool)),
+        _ => Ok(Value::Null(rupa::SqlType::Bool)),
     }
 }
 
@@ -154,13 +154,13 @@ fn main() {
         .value(&new_user("ada@example.com", Some("ada"), true, "dark", 1))
         .returning_one();
     let active_dark = select::<User>()
-        .filter(col!(User::active).eq(true))
-        .filter(col!(User::prefs).path("theme").text().eq("dark"))
-        .order_by(col!(User::created_at).desc())
+        .filter(User::ACTIVE.eq(true))
+        .filter(User::PREFS.path("theme").text().eq("dark"))
+        .order_by(User::CREATED_AT.desc())
         .limit(10)
         .all();
     let by_email = select::<User>()
-        .filter(ci_eq(col!(User::email), "ADA@EXAMPLE.COM"))
+        .filter(ci_eq(User::EMAIL, "ADA@EXAMPLE.COM"))
         .optional();
     let patch = update::<User>()
         .one(&UserPatch {
@@ -180,8 +180,8 @@ fn main() {
     // The same query for other dialects: same meaning, dialect-specific SQL
     // (MySQL needs emulated NULL ordering and JSON null handling).
     for (name, dialect) in [
-        ("MySQL", &rupa::core::MySql as &dyn rupa::core::Dialect),
-        ("SQLite", &rupa::core::Sqlite),
+        ("MySQL", &rupa::MySql as &dyn rupa::Dialect),
+        ("SQLite", &rupa::Sqlite),
     ] {
         let r = rupa::sql::render_query(&active_dark, dialect).expect("render");
         println!("   {name}: {}", r.sql);
@@ -202,7 +202,9 @@ fn main() {
 fn run_repository(db: MemoryDb) {
     use std::sync::Arc;
 
-    let users: Arc<dyn UserRepository> = Arc::new(UserRepositoryRepo::shared(db.into_async()));
+    // An async repository runs on the sync database directly: its futures
+    // are already complete, so no runtime or adapter is involved.
+    let users: Arc<dyn UserRepository> = Arc::new(UserRepositoryRepo::new(db));
     println!(
         "
 Repository behind Arc<dyn UserRepository>:"
@@ -229,23 +231,24 @@ fn run_in_memory(
     by_email: Query<Option<User>>,
     patch: Query<u64>,
 ) -> MemoryDb {
-    use rupa::core::exec::Executor;
-    use rupa::core::tx::Transactional;
+    use rupa::Transactional;
     use rupa_driver_memory::MemoryError;
 
     println!("\nExecuted on the memory backend:");
     let mut db = MemoryDb::new();
     db.register::<User>();
 
-    let ada = db.run(signup).unwrap();
+    let ada = signup.execute(&db).unwrap();
     println!("   inserted {} with generated id {}", ada.email, ada.id);
     let others = [
         new_user("grace@example.com", None, true, "dark", 2),
         new_user("linus@example.com", Some("torvalds"), false, "dark", 3),
         new_user("barbara@example.com", Some("barb"), true, "light", 4),
     ];
-    let rest = db
-        .run(insert::<User>().values(&others).returning_all())
+    let rest = insert::<User>()
+        .values(&others)
+        .returning_all()
+        .execute(&db)
         .unwrap();
     println!(
         "   inserted {} more, ids {:?}",
@@ -253,44 +256,43 @@ fn run_in_memory(
         rest.iter().map(|u| u.id).collect::<Vec<_>>()
     );
 
-    let found = db.run(active_dark).unwrap();
+    let found = active_dark.execute(&db).unwrap();
     println!(
         "   active + dark, newest first: {:?}",
         found.iter().map(|u| &u.email).collect::<Vec<_>>()
     );
 
-    let by_ci = db.run(by_email).unwrap();
+    let by_ci = by_email.execute(&db).unwrap();
     println!(
         "   ci_eq lookup (evaluated, not lowered): {:?}",
         by_ci.map(|u| u.email)
     );
 
-    db.run(patch).unwrap();
-    let mut ada = db.run(get::<User>(&1)).unwrap().expect("ada exists");
+    patch.execute(&db).unwrap();
+    let mut ada = get::<User>(&1).execute(&db).unwrap().expect("ada exists");
     println!("   after the patch, ada's nickname is {:?}", ada.nickname);
 
     // One model: update the whole entity by its id.
     ada.prefs.theme = "light".into();
-    db.run(update::<User>().one(&ada).affected()).unwrap();
+    update::<User>().one(&ada).affected().execute(&db).unwrap();
     println!(
         "   full update -> theme is now {:?}",
-        db.run(get::<User>(&1)).unwrap().unwrap().prefs.theme
+        get::<User>(&1).execute(&db).unwrap().unwrap().prefs.theme
     );
 
     // Transactions. The closure form commits on Ok and rolls back on Err;
     // a nested call is a savepoint, so its failure leaves the outer work intact.
     let outcome = db.transaction(|tx| {
-        tx.run(
-            update::<User>()
-                .one(&UserPatch {
-                    id: 2,
-                    nickname: Some(Some("amazing grace".into())),
-                    active: None,
-                })
-                .affected(),
-        )?;
+        update::<User>()
+            .one(&UserPatch {
+                id: 2,
+                nickname: Some(Some("amazing grace".into())),
+                active: None,
+            })
+            .affected()
+            .execute(tx)?;
         let nested: Result<(), MemoryError> = tx.transaction(|inner| {
-            inner.run(delete::<User>().by_id(&1).affected())?;
+            delete::<User>().by_id(&1).affected().execute(inner)?;
             Err(MemoryError::Unsupported("changed my mind".into()))
         });
         println!("   nested transaction rolled back: {}", nested.is_err());
@@ -299,32 +301,33 @@ fn run_in_memory(
     outcome.unwrap();
     println!(
         "   after commit: grace is {:?}, ada still exists: {}",
-        db.run(get::<User>(&2)).unwrap().unwrap().nickname,
-        db.run(get::<User>(&1)).unwrap().is_some()
+        get::<User>(&2).execute(&db).unwrap().unwrap().nickname,
+        get::<User>(&1).execute(&db).unwrap().is_some()
     );
 
     // The guard form: a dropped `Tx` rolls back.
     {
-        let mut tx = db.begin().unwrap();
-        tx.run(delete::<User>().filter(col!(User::id).gt(0)).affected())
+        let tx = db.begin().unwrap();
+        delete::<User>()
+            .filter(User::ID.gt(0))
+            .affected()
+            .execute(&tx)
             .unwrap();
     }
     println!(
         "   dropped tx (deleted everything) -> {} users still there",
-        db.run(select::<User>().all()).unwrap().len()
+        select::<User>().all().execute(&db).unwrap().len()
     );
 
-    let removed = db
-        .run(
-            delete::<User>()
-                .filter(col!(User::active).eq(false))
-                .affected(),
-        )
+    let removed = delete::<User>()
+        .filter(User::ACTIVE.eq(false))
+        .affected()
+        .execute(&db)
         .unwrap();
     println!("   deleted {removed} inactive user(s)");
 
     // Result shapes are checked: `.one()` on several rows is an error, not a silent pick.
-    let err = db.run(select::<User>().one()).unwrap_err();
+    let err = select::<User>().one().execute(&db).unwrap_err();
     println!("   .one() over several rows -> {err}");
 
     db
@@ -332,21 +335,25 @@ fn run_in_memory(
 
 /// 4. An executor chosen at run time: boxed, dialect known only dynamically.
 fn run_boxed(db: MemoryDb) -> MemoryDb {
-    use rupa::core::erased::BoxAsyncExecutor;
-    use rupa::core::exec::{AsyncExecutor, ExecError};
+    use rupa::BoxAsyncExecutor;
+    use rupa::{AsyncExecutor, ExecError};
 
-    let mut dynamic = BoxAsyncExecutor::new(db.clone().into_async());
+    let dynamic = BoxAsyncExecutor::new(db.clone().into_async());
     println!(
         "\nBoxed async executor, dialect {:?}:",
         dynamic.dialect().id()
     );
-    let count = pollster::block_on(dynamic.run(select::<User>().all()))
+    let count = pollster::block_on(select::<User>().all().execute(&dynamic))
         .unwrap()
         .len();
     println!("   {count} user(s) remain");
-    let missing =
-        pollster::block_on(dynamic.run(select::<User>().filter(col!(User::id).eq(99)).one()))
-            .unwrap_err();
+    let missing = pollster::block_on(
+        select::<User>()
+            .filter(User::ID.eq(99))
+            .one()
+            .execute(&dynamic),
+    )
+    .unwrap_err();
     println!(
         "   missing row -> {:?} (inspectable through any driver)",
         missing.result_error()

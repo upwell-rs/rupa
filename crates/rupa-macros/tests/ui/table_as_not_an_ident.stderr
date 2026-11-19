@@ -1,0 +1,5 @@
+error: expected the name of the row type after `as`
+ --> tests/ui/table_as_not_an_ident.rs:1:39
+  |
+1 | rupa::table!(Accounts = "accounts" as "Row" {
+  |                                       ^^^^^

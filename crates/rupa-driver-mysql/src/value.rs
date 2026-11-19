@@ -62,7 +62,7 @@ pub(crate) fn to_mysql(v: &Value) -> Result<mysql::Value, MySqlError> {
     })
 }
 
-fn from_mysql(v: &mysql::Value, want: SqlType) -> Result<Value, RowError> {
+pub(crate) fn from_mysql(v: &mysql::Value, want: SqlType) -> Result<Value, RowError> {
     use mysql::Value as M;
     let bad = || RowError::Driver(format!("cannot read {v:?} as {want:?}"));
     let text = |b: &[u8]| String::from_utf8(b.to_vec()).map_err(|_| bad());

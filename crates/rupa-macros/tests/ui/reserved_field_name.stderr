@@ -1,0 +1,5 @@
+error: field `__rupa_insert_required` would get the column handle `T::__RUPA_INSERT_REQUIRED`, which `#[derive(Entity)]` reserves; rename it
+ --> tests/ui/reserved_field_name.rs:5:27
+  |
+5 | struct T { #[id] id: i64, __rupa_insert_required: i64 }
+  |                           ^^^^^^^^^^^^^^^^^^^^^^

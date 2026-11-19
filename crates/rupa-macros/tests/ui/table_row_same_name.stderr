@@ -1,0 +1,5 @@
+error: the row type needs a name other than the table marker's, e.g. `Accounts = "accounts" as AccountRow`
+ --> tests/ui/table_row_same_name.rs:1:39
+  |
+1 | rupa::table!(Accounts = "accounts" as Accounts {
+  |                                       ^^^^^^^^

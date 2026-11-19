@@ -4,12 +4,15 @@
 //! - `#[derive(Gettable)]`, `#[derive(Insertable)]`, `#[derive(Updatable)]`,
 //!   `#[derive(Deletable)]`: one capability impl each, opted into per entity.
 //!
+//! - `table!`: a typed table snapshot with no row type (`Relation`).
+//!
 //! Generated code refers to `::rupa`; override with `#[rupa(crate = path)]`.
 
 use proc_macro::TokenStream;
 use syn::{DeriveInput, parse_macro_input};
 
 mod capability;
+mod column;
 mod dsl;
 mod dsl_fn;
 mod entity;
@@ -18,6 +21,7 @@ mod model;
 mod on;
 mod query;
 mod repository;
+mod table;
 
 fn run(
     input: TokenStream,
@@ -110,7 +114,7 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
     .into()
 }
 
-/// A repository trait with a distinct owned type and borrowed view.
+/// A repository trait, and one repository type over any connection.
 ///
 /// ```ignore
 /// #[repository]
@@ -122,12 +126,16 @@ pub fn query(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     fn active(&self, active: bool) -> Result<Vec<User>, DynError>;  // blocks in place
 /// }
 ///
-/// let users = UserRepositoryView::new(&pool);
+/// let users = UserRepositoryRepo::new(&pool);
+/// let tx = users.open_tx(None).await?;   // the same repository, in a transaction
+/// tx.by_email("ada@x").await?;
+/// tx.commit().await?;
 /// ```
 ///
 /// See the `rupa_macros::repository` module docs for the rules on receivers,
-/// sync/async methods, errors and optional `dynamic_dispatch`.
-/// Async methods use unboxed futures by default.
+/// sync/async methods, errors and the options `static_dispatch` and
+/// `database = ..` (an Upwell provider). Async methods
+/// return boxed futures by default, so the trait is dyn-compatible.
 ///
 /// Keep the trait so code using it still resolves; only the
 /// macro's own error is reported.
@@ -158,7 +166,7 @@ pub fn repository(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     .join::<Coupon>().left()
 ///     .into::<OrderLine>()
 ///     .all()
-///     .run(&mut db)?;
+///     .execute(&db)?;
 /// ```
 ///
 /// Every field says where it comes from; nothing is matched by name. Only
@@ -183,6 +191,48 @@ pub fn derive_joined(input: TokenStream) -> TokenStream {
 #[proc_macro]
 pub fn on(input: TokenStream) -> TokenStream {
     on::on(input.into(), quote::quote!(::rupa::__macro_support))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+/// A typed table snapshot with no row type: a unit marker implementing
+/// `Relation`, and one typed column handle constant per field, built exactly
+/// as `#[derive(Entity)]` builds them.
+///
+/// ```ignore
+/// rupa::table!(Accounts = "accounts" {
+///     #[id] id: i64,
+///     nick: Option<VarChar<64>>,
+///     prefs: Prefs,
+/// });
+///
+/// update::<Accounts>().set(Accounts::NICK, &None).filter(Accounts::ID.gt(10))
+/// ```
+///
+/// The grammar is `[#[doc]]* [vis] Marker = ["schema" .] "table" [as Row] { field, .. }`,
+/// where a field is `[attribute]* name: Type` and the attributes are the
+/// derive's `#[id]`, `#[id(generated)]` and `#[column(name, scalar, json,
+/// generated, references)]`, parsed by the same code. More than one `#[id]`
+/// declares a composite key. `relation = ..` is refused without `as Row`.
+/// Handle constants are the upper-cased field names (`Accounts::NICK`).
+///
+/// The marker implements `Updatable` and `Deletable` for itself, with nothing
+/// to apply and no row key: `update::<Accounts>()` and `delete::<Accounts>()`
+/// write through `set` calls and filters, and `#[derive(Insertable)]` input
+/// structs can target it. It has no row to read, so selects, `get`,
+/// `update(..).one(..)` and `delete(..).one(..)` need an `Entity`. A
+/// `references` target must have exactly one id of the field's SQL type.
+///
+/// With `as Row` the macro instead emits a struct `Row` with the fields (at
+/// the table's visibility), the `Entity`, `Gettable`, `Insertable`, `Updatable`
+/// and `Deletable` derives, and `type Marker = Row;`: one type, with selects,
+/// `get` and keyed writes. Use it to read rows in a data-shifting migration;
+/// plain snapshots stay a zero-sized marker. It needs exactly one `#[id]`
+/// (composite keys work in the plain form only). `references` accepts a target
+/// of any form, a derived entity, a plain marker or a row.
+#[proc_macro]
+pub fn table(input: TokenStream) -> TokenStream {
+    table::table(input.into())
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }

@@ -1,5 +1,7 @@
 # Joins
 
+> **Updated by #39:** `col!(Entity::field)` is now the derived constant `Entity::FIELD`, and `E::columns()` the constant `E::COLUMNS`. The design below keeps the original spelling.
+
 Status: **built** (2026-10-18), on branch `joins`. All seven steps of the
 build order are done:
 
@@ -107,7 +109,7 @@ let rows: Vec<(User, Option<Order>)> = select::<User>()
     .filter(|(u, _)| u.col(col!(User::active)).eq(true))
     .order_by(|(_, o)| o.col(col!(Order::placed_at)).desc())
     .all()
-    .run(&mut db)?;
+    .execute(&mut db)?;
 ```
 
 - **Join builder type.** `left_join_on`/`inner_join_on` turn `SelectBuilder<User>`
@@ -284,7 +286,7 @@ let lines: Vec<OrderLine> = select::<Order>()
     .filter(on!(Order::total > 100))
     .into::<OrderLine>()
     .all()
-    .run(&mut db)?;
+    .execute(&mut db)?;
 ```
 
 - **Read-only.** A `Joined` struct belongs to the repository side. It isn't an

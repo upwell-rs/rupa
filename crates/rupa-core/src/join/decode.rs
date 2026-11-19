@@ -51,7 +51,7 @@ pub trait JoinPart: Sized {
 
 impl<E: Entity> JoinPart for E {
     fn width() -> usize {
-        E::columns().len()
+        E::COLUMNS.len()
     }
 
     fn decode(row: &dyn Row, base: usize) -> Result<Self, ResultError> {
@@ -63,11 +63,11 @@ impl<E: Entity> JoinPart for E {
 /// row, so that is a left join that found no match.
 impl<E: Entity> JoinPart for Option<E> {
     fn width() -> usize {
-        E::columns().len()
+        E::COLUMNS.len()
     }
 
     fn decode(row: &dyn Row, base: usize) -> Result<Self, ResultError> {
-        let columns = E::columns();
+        let columns = E::COLUMNS;
         for id in E::ID_COLUMNS {
             let index = columns
                 .iter()

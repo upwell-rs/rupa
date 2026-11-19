@@ -3,6 +3,7 @@
 //! and renderers always emit them as bound parameters.
 
 use crate::error::DecodeError;
+use crate::schema::ColumnType;
 
 /// SQL-level type tag. Used for typed nulls, casts and as a decode hint for drivers.
 /// Deliberately exhaustive so every renderer and driver must map new variants.
@@ -94,6 +95,32 @@ pub enum Value {
 }
 
 impl Value {
+    /// The SQL type of this value (of the `NULL` for a typed null).
+    pub fn sql_type(&self) -> SqlType {
+        match self {
+            Value::Null(ty) => *ty,
+            Value::Bool(_) => SqlType::Bool,
+            Value::I16(_) => SqlType::I16,
+            Value::I32(_) => SqlType::I32,
+            Value::I64(_) => SqlType::I64,
+            Value::F32(_) => SqlType::F32,
+            Value::F64(_) => SqlType::F64,
+            Value::Text(_) => SqlType::Text,
+            Value::Bytes(_) => SqlType::Bytes,
+            #[cfg(feature = "uuid")]
+            Value::Uuid(_) => SqlType::Uuid,
+            #[cfg(feature = "chrono")]
+            Value::Date(_) => SqlType::Date,
+            #[cfg(feature = "chrono")]
+            Value::Time(_) => SqlType::Time,
+            #[cfg(feature = "chrono")]
+            Value::Timestamp(_) => SqlType::Timestamp,
+            #[cfg(feature = "chrono")]
+            Value::TimestampTz(_) => SqlType::TimestampTz,
+            Value::Json(_) => SqlType::Json,
+        }
+    }
+
     /// Whether this is a (typed) `NULL`.
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null(_))
@@ -116,6 +143,9 @@ pub trait ScalarColumn: Sized + 'static {
     const SQL_TYPE: SqlType;
     /// Whether the type admits `NULL` (`Option<T>`).
     const NULLABLE: bool = false;
+    /// The column type a schema declares: [`SQL_TYPE`](Self::SQL_TYPE),
+    /// unless the type carries a length (`VarChar<N>`).
+    const COLUMN_TYPE: ColumnType = ColumnType::from_sql(Self::SQL_TYPE);
     /// The value to bind.
     fn to_value(&self) -> Value;
     /// Decodes a column value.
@@ -161,6 +191,7 @@ impl<T: ScalarColumn> ScalarColumn for Option<T> {
     type Base = T::Base;
     const SQL_TYPE: SqlType = T::SQL_TYPE;
     const NULLABLE: bool = true;
+    const COLUMN_TYPE: ColumnType = T::COLUMN_TYPE;
     fn to_value(&self) -> Value {
         match self {
             Some(v) => v.to_value(),

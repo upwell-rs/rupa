@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: `Memberships` must declare exactly one `#[id]` column for `membership_id` to reference it; a composite key needs a hand-written `ForeignKey`
+  --> tests/ui/table_references_composite.rs:11:27
+   |
+11 |     #[column(references = Memberships)]
+   |                           ^^^^^^^^^^^ evaluation of `_` failed here

@@ -1,7 +1,7 @@
 //! The conformance suite against a real MySQL 8 in Docker: on one executor,
 //! then through the registry's pooled `Database`.
 
-use rupa::core::tx::{AsyncTransactional, AsyncTxConnection};
+use rupa::{AsyncTransactional, AsyncTxConnection};
 use rupa::{DbConfig, MySqlOptions, Registry};
 use rupa_conformance::{Harness, MYSQL_DDL};
 use rupa_driver_sqlx::mysql::{MySqlDriver, MySqlExecutor};

@@ -1,4 +1,4 @@
-use rupa::core::tx::TxOptions;
+use rupa::TxOptions;
 use rupa::{AsyncSecureTransactional, SecureTransactional, SecurityContext};
 
 fn main() {

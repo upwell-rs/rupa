@@ -9,6 +9,7 @@ pub mod capability;
 pub mod chrono_text;
 pub mod column;
 pub mod config;
+pub mod connection;
 pub mod dialect;
 /// Entities: tables, their ids and row decoding.
 pub mod entity;
@@ -26,10 +27,12 @@ pub mod query;
 pub mod registry;
 pub mod repo;
 pub mod row;
+pub mod schema;
 pub mod security;
 pub mod sem;
 pub mod tx;
 pub mod value;
+pub mod varchar;
 
 #[doc(hidden)]
 pub use column::__private;
@@ -41,9 +44,12 @@ pub mod __macro_support {
     pub use crate::builder::{delete, get, insert, raw, select, update};
     pub use crate::capability::{Deletable, Gettable, Insertable, Keyed, NoKey, Updatable, key_of};
     pub use crate::column::ReadAs;
-    pub use crate::column::{Column, ColumnMeta, Json, Scalar};
+    pub use crate::column::{
+        Column, ColumnMeta, Encoding, Generated, Json, JsonCodec, Kinded, NullableJsonCodec,
+        Reference, Scalar, ScalarCodec, StorageKind, Stored,
+    };
     pub use crate::dialect::{Capability, CapabilityMarker, Dialect, DslAvailable, Supports, caps};
-    pub use crate::entity::{Entity, FromRow, IdValues};
+    pub use crate::entity::{Entity, FromRow, IdValues, Relation};
     pub use crate::error::ResultError;
     pub use crate::error::{DslError, DynError};
     pub use crate::exec::ExecError;
@@ -52,8 +58,8 @@ pub mod __macro_support {
     pub use crate::ir::{BinOp, DslFnDef, ExprNode, TableRef};
     pub use crate::ir::{ColumnRef, SourceId};
     pub use crate::join::{
-        Admits, At, Fwd, JoinPart, JoinTo, Joined, Opt, PartOf, Plain, RefersTo, Rel, Rev,
-        relation_on, source_col,
+        Admits, At, Fwd, JoinPart, JoinTo, Joined, Opt, PartOf, Plain, Referenced, RefersTo, Rel,
+        Rev, relation_on, source_col,
     };
     pub use crate::query::Query;
     pub use crate::row::Row;
@@ -61,42 +67,42 @@ pub mod __macro_support {
     pub use ::std::clone::Clone;
     pub use ::std::option::Option;
     pub use ::std::result::Result;
-    pub use ::std::sync::OnceLock;
     pub use ::std::vec::Vec;
 }
 
 pub use builder::{delete, get, insert, raw, select, update};
 pub use capability::{Deletable, Gettable, Insertable, Keyed, NoKey, RowKey, Updatable};
-pub use column::{Column, ColumnKind, ColumnMeta, Json, ReadAs, Scalar};
+pub use column::{
+    Column, ColumnMeta, Dynamic, Generated, Json, ReadAs, Reference, Scalar, StorageKind,
+};
 pub use config::{DbConfig, PoolConfig};
+pub use connection::{Connection, DynConnection, OpenTransaction, RepoOn, TxEnd};
 pub use dialect::{
     Capability, Dialect, DialectId, DslAvailable, DynDialect, Memory, MySql, Postgres, Sqlite,
     Supports,
 };
-pub use entity::{Entity, FromRow, IdValues};
+pub use entity::{Entity, FromRow, IdValues, Relation};
 #[cfg(all(feature = "dynamic", feature = "async"))]
 pub use erased::{BoxAsyncExecutor, BoxAsyncTx};
 #[cfg(feature = "dynamic")]
 pub use erased::{BoxExecutor, BoxTx};
 pub use error::{ConnectError, DecodeError, DslError, DynError, ResultError, RowError, TxError};
 #[cfg(feature = "async")]
-pub use exec::{AsyncExecutor, Blocking};
-pub use exec::{ExecError, Executor, Outcome};
+pub use exec::{AsyncExecutor, Awaited, Blocking};
+pub use exec::{Completion, Engine, ExecError, Executed, Executor, Immediate, Outcome, now};
 pub use expr::{Expr, ExprOps, IntoCondition, IntoExpr, JsonPath, bind, json};
 pub use join::{
     Admits, At, Fwd, Has, Inner, IntoJoined, JoinBuilder, JoinOnto, JoinPart, JoinTo, Joined, Left,
-    OffsetRow, Opt, PartOf, PendingJoin, Plain, RefersTo, Rel, Rev, Source, Sources, Src,
-    source_col,
+    OffsetRow, Opt, PartOf, PendingJoin, Plain, Referenced, RefersTo, Rel, Rev, Source, Sources,
+    Src, source_col,
 };
 #[cfg(feature = "async")]
-pub use pool::{AsyncPool, OwnedAsyncTx, SingleConnection};
-pub use pool::{OwnedTx, Pool, PoolStatus, Pooled};
+pub use pool::{AsyncConnect, AsyncPool, OwnedAsyncTx, SingleConnection};
+pub use pool::{Connect, OwnedTx, Pool, PoolStatus, Pooled, SyncConnect};
 pub use query::{AffectedResult, Expect, Output, Query, QueryResult, RowsResult};
 #[cfg(all(feature = "dynamic", feature = "async"))]
 pub use registry::{Database, Driver, Registry};
-pub use repo::{Acquire, Repo, RepoMut, RepoView, Shared, TxSession};
-#[cfg(feature = "async")]
-pub use repo::{AcquireAsync, AsyncTxSession, SharedAsync};
+pub use repo::DynRepository;
 pub use row::{Row, RowCursor};
 #[cfg(feature = "async")]
 pub use security::AsyncSecureTransactional;
@@ -105,12 +111,12 @@ pub use security::{SecureTransactional, SecureTx, SecurityContext};
 pub use tx::{AsyncTransaction, AsyncTransactional, AsyncTx, AsyncTxConnection};
 pub use tx::{IsolationLevel, Transaction, Transactional, Tx, TxConnection, TxOptions};
 pub use value::{ScalarColumn, SqlType, Value};
+pub use varchar::{TooLong, VarChar};
 
 /// The names most code needs: `use rupa_core::prelude::*`.
 pub mod prelude {
-    pub use crate::col;
     pub use crate::{
         Column, Deletable, Entity, Expr, ExprOps, FromRow, Gettable, Insertable, IntoExpr, Json,
-        Query, Scalar, Updatable, bind, delete, get, insert, raw, select, update,
+        Query, Relation, Scalar, Updatable, bind, delete, get, insert, raw, select, update,
     };
 }

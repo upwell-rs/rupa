@@ -7,8 +7,8 @@ use rupa_core::capability::key_of;
 use rupa_core::column::{JsonCodec, NullableJsonCodec, ScalarCodec, column_meta};
 use rupa_core::ir::TableRef;
 use rupa_core::{
-    Column, ColumnMeta, Deletable, Entity, FromRow, Gettable, Insertable, Json, Keyed, ResultError,
-    Row, Scalar, Updatable, Value,
+    Column, ColumnMeta, Deletable, Entity, FromRow, Gettable, Insertable, Json, Keyed, Relation,
+    ResultError, Row, Scalar, Updatable, Value,
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,13 +30,19 @@ pub struct User {
 }
 
 impl User {
-    pub const ID: Column<User, i64, Scalar> = Column::scalar("id");
-    pub const EMAIL: Column<User, String, Scalar> = Column::scalar("email");
-    pub const NICKNAME: Column<User, Option<String>, Scalar> = Column::scalar("nickname");
-    pub const ACTIVE: Column<User, bool, Scalar> = Column::scalar("active");
-    pub const CREATED_AT: Column<User, DateTime<Utc>, Scalar> = Column::scalar("created");
-    pub const PREFS: Column<User, Prefs, Json> = Column::json("prefs");
-    pub const OLD_PREFS: Column<User, Option<Prefs>, Json> = Column::nullable_json("old_prefs");
+    pub const ID: Column<User, i64, Scalar> = Column::scalar_in(<User as Relation>::TABLE, "id");
+    pub const EMAIL: Column<User, String, Scalar> =
+        Column::scalar_in(<User as Relation>::TABLE, "email");
+    pub const NICKNAME: Column<User, Option<String>, Scalar> =
+        Column::scalar_in(<User as Relation>::TABLE, "nickname");
+    pub const ACTIVE: Column<User, bool, Scalar> =
+        Column::scalar_in(<User as Relation>::TABLE, "active");
+    pub const CREATED_AT: Column<User, DateTime<Utc>, Scalar> =
+        Column::scalar_in(<User as Relation>::TABLE, "created");
+    pub const PREFS: Column<User, Prefs, Json> =
+        Column::json_in(<User as Relation>::TABLE, "prefs");
+    pub const OLD_PREFS: Column<User, Option<Prefs>, Json> =
+        Column::nullable_json_in(<User as Relation>::TABLE, "old_prefs");
 
     pub fn sample() -> Self {
         User {
@@ -54,8 +60,8 @@ impl User {
     }
 }
 
-static USER_COLUMNS: [ColumnMeta; 7] = [
-    column_meta::<i64, ScalarCodec<i64>>("id", "id"),
+const USER_COLUMNS: [ColumnMeta; 7] = [
+    column_meta::<i64, ScalarCodec<i64>>("id", "id").primary_key(),
     column_meta::<String, ScalarCodec<String>>("email", "email"),
     column_meta::<Option<String>, ScalarCodec<Option<String>>>("nickname", "nickname"),
     column_meta::<bool, ScalarCodec<bool>>("active", "active"),
@@ -78,14 +84,14 @@ impl FromRow for User {
     }
 }
 
-impl Entity for User {
-    type Id = i64;
+impl Relation for User {
     const TABLE: TableRef = TableRef::with_schema("app", "users");
     const ID_COLUMNS: &'static [&'static str] = &["id"];
+    const COLUMNS: &'static [ColumnMeta] = &USER_COLUMNS;
+}
 
-    fn columns() -> &'static [ColumnMeta] {
-        &USER_COLUMNS
-    }
+impl Entity for User {
+    type Id = i64;
 
     fn id(&self) -> &i64 {
         &self.id
@@ -104,33 +110,13 @@ impl Entity for User {
     }
 }
 
-/// What `#[derive(Entity)]` will emit for `col!` (kinds left to inference).
-pub struct UserFields {
-    pub email: rupa_core::__private::Probe<User, String>,
-    pub nickname: rupa_core::__private::Probe<User, Option<String>>,
-    pub prefs: rupa_core::__private::Probe<User, Prefs>,
-    pub old_prefs: rupa_core::__private::Probe<User, Option<Prefs>>,
-}
-
-impl User {
-    pub const fn __rupa_fields() -> UserFields {
-        use rupa_core::__private::Probe;
-        UserFields {
-            email: Probe::new("email"),
-            nickname: Probe::new("nickname"),
-            prefs: Probe::new("prefs"),
-            old_prefs: Probe::new("old_prefs"),
-        }
-    }
-}
-
 // Capabilities, written by hand.
 
 impl Gettable<User> for User {}
 
 impl Insertable<User> for User {
     fn insert_values(&self) -> Vec<(&'static str, Value)> {
-        User::columns()
+        User::COLUMNS
             .iter()
             .map(|c| c.name)
             .zip(self.to_values())

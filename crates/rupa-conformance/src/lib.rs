@@ -8,16 +8,18 @@
 pub mod database;
 pub mod fixture;
 mod joins;
+#[cfg(feature = "migrations")]
+pub mod migrations;
 
 use std::fmt::Debug;
 use std::future::Future;
 
-use rupa::core::dialect::Dialect;
-use rupa::core::exec::{AsyncExecutor, ExecError};
+use rupa::Dialect;
 use rupa::core::ir::ExprNode;
-use rupa::core::tx::{AsyncTransaction, AsyncTransactional, IsolationLevel, TxOptions};
 use rupa::core::{Capability, DialectId, DslError, ResultError, Value};
 use rupa::prelude::*;
+use rupa::{AsyncExecutor, ExecError};
+use rupa::{AsyncTransaction, AsyncTransactional, IsolationLevel, TxOptions};
 
 pub use database::{DatabaseHarness, run_database, run_pool_cases, run_script};
 pub use fixture::{
@@ -35,7 +37,7 @@ pub trait Harness {
     fn exec(&mut self) -> &mut Self::Exec;
 }
 
-pub use rupa::core::exec::Blocking;
+pub use rupa::Blocking;
 
 /// Runs every case, each on a freshly reset schema. The case name is printed
 /// before it runs, so a failure's captured output says which case it was.
@@ -60,6 +62,8 @@ pub async fn run<H: Harness>(h: &mut H) {
         case_exists,
         case_update,
         case_delete,
+        case_update_and_delete_through_a_table_marker,
+        case_backfill_reads_rows_and_writes_them_back,
         case_json_paths,
         case_nullable_json,
         case_timestamps,
@@ -114,6 +118,7 @@ where
         tx_options_on_nested_are_rejected,
         tx_isolation_levels,
         tx_sequential_after_drop,
+        tx_one_top_level_per_connection,
     );
 }
 
@@ -140,7 +145,7 @@ pub fn ci_eq(
 fn eval_ci_eq(args: &[Value]) -> Result<Value, DslError> {
     match args {
         [Value::Text(a), Value::Text(b)] => Ok(Value::Bool(a.to_uppercase() == b.to_uppercase())),
-        [Value::Null(_), _] | [_, Value::Null(_)] => Ok(Value::Null(rupa::core::SqlType::Bool)),
+        [Value::Null(_), _] | [_, Value::Null(_)] => Ok(Value::Null(rupa::SqlType::Bool)),
         other => Err(DslError::Other(format!(
             "ci_eq: unexpected arguments {other:?}"
         ))),

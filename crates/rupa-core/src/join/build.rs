@@ -187,7 +187,7 @@ pub(super) fn add_join<J: Entity>(mut select: Select, kind: JoinKind, on: ExprNo
     };
     select
         .projection
-        .extend(J::columns().iter().map(|c| ColumnRef::of(source, c.name)));
+        .extend(J::COLUMNS.iter().map(|c| ColumnRef::of(source, c.name)));
     select
 }
 

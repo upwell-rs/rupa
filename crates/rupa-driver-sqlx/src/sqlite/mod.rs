@@ -39,6 +39,8 @@ impl crate::sealed::Sealed for sqlx::Sqlite {}
 
 impl Backend for sqlx::Sqlite {
     type Dialect = rupa_core::Sqlite;
+    #[cfg(feature = "migrations")]
+    type Migration = rupa_migrate::protocol::sqlite::State;
     const DRIVER: &'static str = "sqlx-sqlite";
     const SCHEMES: &'static [&'static str] = &["sqlite"];
 

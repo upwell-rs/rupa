@@ -1,8 +1,8 @@
 error[E0277]: dialect `DynDialect` does not support `rupa::dsl::caps::JsonContainment`
   --> tests/ui/dsl_static_gate_on_dyn_dialect.rs:16:5
    |
-16 |     std::sync::Arc::new(UsersRepo::shared(exec))
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ requires `rupa::dsl::caps::JsonContainment`
+16 |     std::sync::Arc::new(UsersRepo::new(exec))
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ requires `rupa::dsl::caps::JsonContainment`
    |
    = help: the trait `Supports<rupa::dsl::caps::JsonContainment>` is not implemented for `DynDialect`
    = note: this needs a dialect with that capability; for DSL functions, a runtime-checked variant (returning `Result`) works on any dialect
@@ -12,9 +12,9 @@ help: the following other types implement trait `Supports<C>`
    |           $(impl Supports<caps::$cap> for $ty {})*
    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |             |
-   |             `rupa::rupa_core::Memory`
-   |             `rupa::rupa_core::MySql`
-   |             `rupa::rupa_core::Postgres`
+   |             `rupa::Memory`
+   |             `rupa::MySql`
+   |             `rupa::Postgres`
 ...
    | / dialect!(Postgres => Postgres [
    | |     Ilike, JsonPath, JsonContainment, Returning, Savepoints, NativeRls, ReadOnlyTransactions,
@@ -27,12 +27,12 @@ help: the following other types implement trait `Supports<C>`
    |   dialect!(Memory => Memory [JsonPath, JsonContainment, Returning, Savepoints, ReadOnlyTransactions]);
    |   --------------------------------------------------------------------------------------------------- in this macro invocation
    = note: required for `json_contains` to implement `DslAvailable<DynDialect>`
-note: required for `Repository<rupa::rupa_core::repo::Owned<SharedAsync<BoxAsyncExecutor>>, UsersKey, rupa::rupa_core::repo::AsyncMode>` to implement `Users`
+note: required for `UsersRepo<BoxAsyncExecutor>` to implement `Users`
   --> tests/ui/dsl_static_gate_on_dyn_dialect.rs:10:1
    |
-10 | #[repository(dynamic_dispatch)]
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+10 | #[repository]
+   | ^^^^^^^^^^^^^
 11 | pub trait Users: Send + Sync {
    |           ^^^^^
-   = note: required for the cast from `Arc<Repository<rupa::rupa_core::repo::Owned<SharedAsync<BoxAsyncExecutor>>, UsersKey, rupa::rupa_core::repo::AsyncMode>>` to `Arc<(dyn Users + 'static)>`
+   = note: required for the cast from `Arc<UsersRepo<BoxAsyncExecutor>>` to `Arc<(dyn Users + 'static)>`
    = note: this error originates in the macro `dialect` which comes from the expansion of the attribute macro `repository` (in Nightly builds, run with -Z macro-backtrace for more info)

@@ -1,6 +1,6 @@
 //! Capability traits: what may be done with an entity's table.
 //!
-//! Each trait is generic over the target entity `E` and implemented by the
+//! Each trait is generic over the target relation `E` and implemented by the
 //! *value* that takes part in the operation:
 //!
 //! - `User: Insertable<User>`: the entity inserts itself (one model), and
@@ -9,9 +9,11 @@
 //!   is a partial one.
 //!
 //! An entity with no capability impls has no write surface at all: the
-//! builders that write require these traits.
+//! builders that write require these traits. A `rupa::table!` marker
+//! implements [`Updatable`] and [`Deletable`] for itself, with no value to
+//! apply or key to delete: it writes through explicit `set` calls and filters.
 
-use crate::entity::{Entity, IdValues};
+use crate::entity::{Entity, IdValues, Relation};
 use crate::value::Value;
 
 /// Marks rows of `E` as readable by id (`get`). Implemented by `E` itself.
@@ -26,7 +28,7 @@ pub trait Gettable<E: Entity> {}
     message = "`{Self}` cannot be inserted into `{E}`",
     note = "derive `Insertable` on `{E}`, or on an input struct with `#[insertable(entity = {E})]`"
 )]
-pub trait Insertable<E: Entity> {
+pub trait Insertable<E: Relation> {
     /// Column names and values to write. The same type always yields the
     /// same columns, in the same order.
     fn insert_values(&self) -> Vec<(&'static str, Value)>;
@@ -47,7 +49,7 @@ pub struct Keyed<I>(pub I);
     note = "give the patch struct an `#[id]` field, or use `.apply(&value).filter(..)` to update the rows a filter matches"
 )]
 pub trait RowKey {
-    /// The values of the key columns, in `Entity::ID_COLUMNS` order.
+    /// The values of the key columns, in `Relation::ID_COLUMNS` order.
     fn key_values(&self) -> Vec<Value>;
 }
 
@@ -62,9 +64,10 @@ impl<I: IdValues> RowKey for Keyed<I> {
     message = "`{Self}` cannot be used to update `{E}`",
     note = "derive `Updatable` on `{E}`, or on a patch struct with `#[updatable(entity = {E})]`"
 )]
-pub trait Updatable<E: Entity> {
-    /// [`Keyed<E::Id>`] when the value identifies its row (update by id),
-    /// [`NoKey`] when it must be combined with a filter.
+pub trait Updatable<E: Relation> {
+    /// [`Keyed`] over the entity's id type (`Keyed<<E as Entity>::Id>`) when
+    /// the value identifies its row (update by id), [`NoKey`] when it must
+    /// be combined with a filter.
     type Key;
 
     /// The row this value targets, or [`NoKey`].
@@ -79,7 +82,7 @@ pub trait Updatable<E: Entity> {
     message = "`{Self}` cannot be used to delete from `{E}`",
     note = "derive `Deletable` on `{E}` to allow it"
 )]
-pub trait Deletable<E: Entity> {
+pub trait Deletable<E: Relation> {
     /// The id values of the row to delete.
     fn delete_key(&self) -> Vec<Value>;
 }

@@ -18,7 +18,7 @@ help: the trait `rupa::Insertable<Note>` is implemented for `Note`
  4 | #[derive(Debug, Entity, Gettable, Insertable)]
    |                                   ^^^^^^^^^^
 note: required by a bound in `InsertBuilder::<E>::value`
-  --> $WORKSPACE/crates/rupa-core/src/builder.rs
+  --> $WORKSPACE/crates/rupa-core/src/builder/insert.rs
    |
    |     pub fn value<V: Insertable<E>>(self, value: &V) -> InsertRows<E, V> {
    |                     ^^^^^^^^^^^^^ required by this bound in `InsertBuilder::<E>::value`
@@ -38,5 +38,5 @@ error[E0599]: the method `build` exists for struct `InsertRows<_, NotInsertable>
 note: the trait `rupa::Insertable` must be implemented
   --> $WORKSPACE/crates/rupa-core/src/capability.rs
    |
-   | pub trait Insertable<E: Entity> {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   | pub trait Insertable<E: Relation> {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

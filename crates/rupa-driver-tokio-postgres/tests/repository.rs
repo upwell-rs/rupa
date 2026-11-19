@@ -9,7 +9,7 @@ use rupa_driver_tokio_postgres::PgExecutor;
 use testcontainers_modules::postgres::Postgres;
 use testcontainers_modules::testcontainers::runners::AsyncRunner;
 
-#[repository(dynamic_dispatch)]
+#[repository]
 pub trait Notes: Send + Sync {
     #[query(filter = pinned == $pinned, order_by = id)]
     async fn pinned(&self, pinned: bool) -> Result<Vec<Note>, DynError>;
@@ -47,19 +47,21 @@ async fn dyn_repository_on_postgres() {
     tokio::spawn(connection);
     client.batch_execute(POSTGRES_DDL).await.unwrap();
 
-    let mut exec = PgExecutor::new(client);
+    let exec = PgExecutor::new(client);
     {
-        use rupa::core::exec::AsyncExecutor;
         let notes = [("alpha", true), ("beta", false), ("alphabet", true)].map(|(t, p)| NewNote {
             title: t.into(),
             pinned: p,
         });
-        exec.run(insert::<Note>().values(&notes).affected())
+        insert::<Note>()
+            .values(&notes)
+            .affected()
+            .execute(&exec)
             .await
             .unwrap();
     }
 
-    let repo: Arc<dyn Notes> = Arc::new(NotesRepo::shared(exec));
+    let repo: Arc<dyn Notes> = Arc::new(NotesRepo::new(exec));
     let pinned = repo.pinned(true).await.unwrap();
     assert_eq!(
         pinned.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(),
